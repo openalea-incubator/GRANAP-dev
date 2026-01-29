@@ -4,7 +4,7 @@ import numpy as np
 from scipy.spatial import Voronoi
 from shapely.geometry import Polygon, Point
 
-def cell_voro(all_cells: pd.DataFrame, vor: Voronoi, center: float) -> dict:
+def cell_voro(all_cells: pd.DataFrame, vor: Voronoi, center: Point) -> dict:
     """
     Translates cell_voro.R with GeoPandas integration.
     Extracts Voronoi polygons for the given cells and returns GeoDataFrame.
@@ -12,7 +12,7 @@ def cell_voro(all_cells: pd.DataFrame, vor: Voronoi, center: float) -> dict:
     Args:
         all_cells: DataFrame with cell info (must include 'x', 'y', 'id_cell')
         vor: scipy.spatial.Voronoi object computed on all_cells[['x', 'y']]
-        center: float, center of cross section (used for dist calculation)
+        center: shapely.geometry.Point, center of cross section (used for dist calculation)
         
     Returns:
         dict with 'all_cells' (GeoDataFrame with polygons) and 'rs2' (GeoDataFrame with vertices)
@@ -20,7 +20,7 @@ def cell_voro(all_cells: pd.DataFrame, vor: Voronoi, center: float) -> dict:
     
     # 1. Build polygons for each cell and calculate attributes
     all_cells = all_cells.copy()
-    all_cells['dist'] = np.sqrt((all_cells['x'] - center)**2 + (all_cells['y'] - center)**2)
+    all_cells['dist'] = np.sqrt((all_cells['x'] - center.x)**2 + (all_cells['y'] - center.y)**2)
     
     # Create polygon geometries from Voronoi regions
     geometries = []
