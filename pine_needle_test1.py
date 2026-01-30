@@ -368,6 +368,154 @@ def process_voronoi_groups(all_cells, vor):
     
     return grouped_gdf
 
+def smooth_cells(grouped_gdf):
+    """
+    Smooths the boundaries between adjacent cells by simplifying shared edges to straight lines.
+    Removes vertices that are intermediate points on a boundary shared with a single neighbor.
+    This effectively straightens the interface between any two cell groups.
+    """
+    from shapely.geometry import Polygon
+
+    geoms = grouped_gdf.geometry.tolist()
+    # We use indices to identify polygons
+    
+    # 1. Quantize and build Edge Map
+    point_map = {}
+    next_pt_id = 0
+    coords_list = [] # Map pt_id -> (x,y)
+    
+    def get_pt_id_mem(x, y):
+        nonlocal next_pt_id
+        # Round 6 decimal places for robustness
+        k = (round(x, 6), round(y, 6))
+        if k not in point_map:
+            point_map[k] = next_pt_id
+            coords_list.append(k)
+            next_pt_id += 1
+        return point_map[k]
+    
+    # Store edges to identify neighbors
+    # edge_to_polys: (min_id, max_id) -> list of poly_indices
+    edge_to_polys = {}
+    poly_rings_ids = [] # Store the vertex IDs for each polygon to avoid re-parsing
+    
+    for idx, poly in enumerate(geoms):
+        if poly is None or poly.is_empty:
+            poly_rings_ids.append([])
+            continue
+            
+        # Handle exterior ring only (assuming cells are simple polygons)
+        # If needed, can extend to interiors
+        rings = [poly.exterior]
+        # rings.extend(poly.interiors) # Uncomment to handle holes
+        
+        rings_pt_ids = []
+        for ring in rings:
+            pts = list(ring.coords)
+            if pts[0] == pts[-1]:
+                pts = pts[:-1]
+                
+            if len(pts) < 3:
+                rings_pt_ids.append([])
+                continue
+            
+            p_ids = [get_pt_id_mem(x, y) for x, y in pts]
+            rings_pt_ids.append(p_ids)
+            
+            n_pts = len(p_ids)
+            for i in range(n_pts):
+                u = p_ids[i]
+                v = p_ids[(i+1)%n_pts]
+                if u == v: continue
+                
+                edge_key = tuple(sorted((u, v)))
+                if edge_key not in edge_to_polys:
+                    edge_to_polys[edge_key] = []
+                edge_to_polys[edge_key].append(idx)
+        
+        poly_rings_ids.append(rings_pt_ids)
+        
+    # 2. Reconstruct Polygons with Straightened Boundaries
+    new_geoms = []
+    
+    for idx in range(len(geoms)):
+        rings_ids = poly_rings_ids[idx]
+        if not rings_ids:
+            new_geoms.append(geoms[idx])
+            continue
+            
+        new_rings_coords = []
+        
+        for ring_pt_ids in rings_ids:
+            if not ring_pt_ids: continue
+            
+            # Identify neighbor for each edge leaving a vertex
+            # ring_pt_ids[i] -> ring_pt_ids[i+1]
+            n_pts = len(ring_pt_ids)
+            edge_neighbors = []
+            
+            for i in range(n_pts):
+                u = ring_pt_ids[i]
+                v = ring_pt_ids[(i+1)%n_pts]
+                edge_key = tuple(sorted((u, v)))
+                
+                neighbors = edge_to_polys.get(edge_key, [])
+                
+                # Find the neighbor that is NOT idx
+                # If shared by multiple others, effectively just "shared"
+                # If only shared by idx (boundary), neighbor is None
+                other = None
+                for n_idx in neighbors:
+                    if n_idx != idx:
+                        other = n_idx
+                        break
+                edge_neighbors.append(other)
+            
+            # Filter vertices
+            optimized_ring = []
+            for k in range(n_pts):
+                u = ring_pt_ids[k]
+                
+                # Look at incoming edge and outgoing edge neighbors
+                prev_edge_idx = (k - 1) % n_pts
+                curr_edge_idx = k
+                
+                n_prev = edge_neighbors[prev_edge_idx]
+                n_curr = edge_neighbors[curr_edge_idx]
+                
+                # Keep vertex if it is a transition point or on mesh boundary
+                # Logic:
+                # - If neighbors differ, it's a triple junction -> Keep
+                # - If neighbors are same but None (exterior), it's mesh boundary -> Keep
+                # - If neighbors are same and not None, it's intermediate on shared edge -> Drop
+                
+                if n_prev != n_curr:
+                    optimized_ring.append(u)
+                elif n_prev is None:
+                    optimized_ring.append(u)
+                # else: drop
+            
+            # Safety check: if we removed too many vertices, fallback
+            if len(optimized_ring) < 3:
+                optimized_ring = ring_pt_ids
+
+            # Reconstruct coords
+            ring_coords = [coords_list[pid] for pid in optimized_ring]
+            new_rings_coords.append(ring_coords)
+        
+        if not new_rings_coords:
+             new_geoms.append(geoms[idx])
+        else:
+             # Create Polygon
+             ext = new_rings_coords[0]
+             if ext[0] != ext[-1]: ext.append(ext[0])
+             
+             new_poly = Polygon(ext)
+             new_geoms.append(new_poly)
+
+    grouped_gdf.geometry = new_geoms
+    return grouped_gdf
+
 def test_voro(params):
     polygons = make_layers_polygons(layer_array(order_layers(params)), make_generic_needle(params), params)
     # create voronoi diagram
@@ -376,6 +524,8 @@ def test_voro(params):
     # Process attributes and merge
     grouped_cells = process_voronoi_groups(all_cells, vor)
     
+    grouped_cells = smooth_cells(grouped_cells)
+
     plot_section(grouped_cells)
     
 
