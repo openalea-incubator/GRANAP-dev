@@ -18,8 +18,8 @@ params_data = [
     {"name": "central_cylinder", "cell_diameter": 0.0063, "layer_thickness": 0.15, "layer_length": 0.35, "transfusion_layers": 3, "transfusion_tracheids_ratio": 0.5}, # Cell diameter in millimeters
     {"name": "transfusion_tracheids", "cell_diameter": 0.02},
     {"name": "transfusion_parenchyma", "cell_diameter": 0.03},
-    {"name": "endodermis", "cell_diameter": 0.017, "n_layers": 1, "order": 3},
-    {"name": "mesophyll", "cell_diameter": 0.05, "n_layers": 3, "order": 4},
+    {"name": "endodermis", "cell_diameter": 0.017, "cell_width": 0.05, "n_layers": 1, "order": 3},
+    {"name": "mesophyll", "cell_diameter": 0.05, "cell_width": 0.03, "n_layers": 3, "order": 4},
     {"name": "hypodermis", "cell_diameter": 0.025, "n_layers": 3, "order": 5},
     {"name": "epidermis", "cell_diameter": 0.018, "n_layers": 1, "order": 6},
     {"name": "xylem", "n_files": 4, "cell_diameter": 0.005, "n_clusters": 3, "n_per_clusters": 3}, # Number of files
@@ -213,14 +213,26 @@ def make_layers_polygons(layer_array, polygon, params):
             polygon = buffer_polygon(polygon, -space_increment/2 - parenchyma_cell_diameter / 4, smooth_factor=0.7)
             space_increment = parenchyma_cell_diameter / 2
             layers_polygons.append({"name": "parenchyma", "polygon": polygon, "cell_diameter": parenchyma_cell_diameter, "id_layer": i_layer+1})
-        
+    
+    # add cell_width for all layers
+    for layer in layers_polygons:
+        # if in param there is a cell_width for the layer, use it
+        param_match = next((p for p in params if p["name"] == layer["name"]), None)
+        if param_match and "cell_width" in param_match:
+            layer["cell_width"] = param_match["cell_width"]/4
+        else:
+            layer["cell_width"] = 0
     return layers_polygons
 
-def cells_on_layer(layer_polygon, cell_diameter):
+def cells_on_layer(layer_polygon, cell_diameter, cell_width = 0):
     # get the exterior coordinates of the polygon
     x,y = np.array(layer_polygon.exterior.coords.xy)
     perimeter = layer_polygon.length
-    n_cells = int(np.round(perimeter / cell_diameter))*2
+    if cell_width == 0:
+        cell_width = cell_diameter
+    else:
+        cell_width = cell_width*4
+    n_cells = int(np.round(perimeter / cell_width))*2
     # resample the coordinates to have n_cells points
     cells_coords = resample_coords(np.column_stack((x, y)), n_cells)
     return cells_coords
@@ -234,6 +246,12 @@ def cell_border(cell_coords, cell_height, cell_width = 0):
         minor_axis = cell_height
     else:
         minor_axis = cell_width
+
+    if cell_height == cell_width:
+        n_points = 10
+    else:
+        n_points = 15
+
     cells_border = []
     prev_cell_coord = cell_coords[-1] # IndexError: index 0 is out of bounds for axis 0 with size 0
     for i, cell_coord in enumerate(cell_coords):
@@ -243,7 +261,8 @@ def cell_border(cell_coords, cell_height, cell_width = 0):
             prev_cell_coord = cell_coords[i-1]
             next_cell_coord = cell_coords[i+1]
         axis = np.arctan2(next_cell_coord[1]-prev_cell_coord[1], next_cell_coord[0]-prev_cell_coord[0])
-        cells_border.append(draw_ellipse(cell_coord, axis, major_axis/4, minor_axis/4, n_points=10))
+        
+        cells_border.append(draw_ellipse(cell_coord, axis, major_axis/4, minor_axis/4, n_points=n_points))
     return cells_border   
     
 def draw_ellipse(center, axis, major_axis, minor_axis, n_points=5):
@@ -259,8 +278,15 @@ def cells_info(layers_polygons):
     id_group = 1
     center = layers_polygons[0]["polygon"].centroid
     for i_layer, layer in enumerate(layers_polygons):
-        cells_coords = cells_on_layer(layer["polygon"], layer["cell_diameter"])
-        layer_cell_borders = cell_border(cells_coords, layer["cell_diameter"]*0.7)
+        cells_coords = cells_on_layer(layer["polygon"], layer["cell_diameter"], layer["cell_width"])
+        layer["cell_width"] = layer["cell_width"]*4
+        if layer["cell_width"] != 0 and layer["cell_width"] < layer["cell_diameter"]:
+            layer_cell_borders = cell_border(cells_coords, layer["cell_width"]*0.7, layer["cell_diameter"]*0.7)
+        elif layer["cell_width"] != 0 and layer["cell_width"] > layer["cell_diameter"]:
+            print(layer["name"])
+            layer_cell_borders = cell_border(cells_coords, layer["cell_width"]*0.7, layer["cell_diameter"]*0.7)
+        else:
+            layer_cell_borders = cell_border(cells_coords, layer["cell_diameter"]*0.7, layer["cell_width"]*0.7)
 
         for i, cell_coord in enumerate(cells_coords[1:]): # ingore the first cell
             if layer["name"] == "parenchyma":
