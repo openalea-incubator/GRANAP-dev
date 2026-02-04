@@ -151,6 +151,5 @@ class RootAnatomy(PlantAnatomy):
         Note:
             This is a placeholder for future implementation
         """
-        # This would require more complex geometry manipulation
-        # Left as a placeholder for future enhancement
+        # for future enhancement
         pass
