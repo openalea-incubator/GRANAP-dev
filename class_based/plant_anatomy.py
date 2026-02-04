@@ -113,7 +113,7 @@ class PlantAnatomy(ABC):
                 layers_polygons.append({
                     "name": "outside",
                     "polygon": polygon,
-                    "cell_diameter": layer["cell_diameter"] / 3,
+                    "cell_diameter": layer["cell_diameter"] / 3, # why 3 and not 2 as 2 is the length of the layer
                     "id_layer": i_layer,
                     "cell_width": 0
                 })
@@ -125,6 +125,13 @@ class PlantAnatomy(ABC):
                 smooth_factor=0.5
             )
             space_increment = layer["cell_diameter"] / 2
+
+            # Add the layer polygon
+            # polygon = GeometryProcessor.buffer_polygon(
+            #     polygon, 
+            #     -layer["cell_diameter"],
+            #     smooth_factor=0.5
+            # )
             
             cell_width = layer["cell_width"]
             param_match = self.layer_manager.get_layer(layer["name"])

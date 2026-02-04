@@ -19,20 +19,19 @@ class RootAnatomy(PlantAnatomy):
     circular cross-section and vascular cylinder.
     """
     
-    def __init__(self, randomness: float = 1.0, root_diameter: float = 0.5):
+    def __init__(self, randomness: float = 1.0):
         """
         Initialize root anatomy.
         
         Args:
             randomness: Degree of randomness in cell placement (0-3)
-            root_diameter: Outer diameter of root (mm)
         """
         super().__init__(randomness)
-        self.root_diameter = root_diameter
         self._initialize_default_layers()
-        
+
         # Root specific parameters
         self.vascular_params = {
+            "thickness": 0.1,
             "cell_diameter": 0.01,
             "xylem_diameter": 0.015,
             "phloem_diameter": 0.012,
@@ -44,15 +43,15 @@ class RootAnatomy(PlantAnatomy):
         # Outer to inner (order: higher = outer)
         self.layer_manager.add_layer(Layer(
             name="epidermis",
-            cell_diameter=0.015,
+            cell_diameter=0.02,
             n_layers=1,
             order=5
         ))
         
         self.layer_manager.add_layer(Layer(
             name="cortex",
-            cell_diameter=0.04,
-            n_layers=4,
+            cell_diameter=0.03,
+            n_layers=5,
             order=4
         ))
         
@@ -65,7 +64,7 @@ class RootAnatomy(PlantAnatomy):
         
         self.layer_manager.add_layer(Layer(
             name="pericycle",
-            cell_diameter=0.015,
+            cell_diameter=0.02,
             n_layers=1,
             order=2
         ))
@@ -77,17 +76,17 @@ class RootAnatomy(PlantAnatomy):
         Returns:
             Circular polygon
         """
-        radius = self._calculate_root_radius()
+        radius =  self._calculate_root_radius()
         return GeometryProcessor.circle_polygon(radius)
     
     def _calculate_root_radius(self) -> float:
         """Calculate total root radius from layers."""
-        radius = 0.05  # Base vascular cylinder radius
+        radius = self.vascular_params["thickness"] / 2
         
         for layer in self.layer_manager.get_layers():
-            if layer.name in ["pericycle", "endodermis", "cortex"]:
+            if hasattr(layer, 'n_layers'):
                 radius += layer.get_total_thickness()
-            elif layer.name == "epidermis":
+            elif hasattr(layer, 'cell_diameter'):
                 radius += layer.cell_diameter
         
         return radius
@@ -130,16 +129,6 @@ class RootAnatomy(PlantAnatomy):
             i_layer += 1
         
         return central_layers
-    
-    def set_root_diameter(self, diameter: float) -> None:
-        """
-        Set the outer root diameter.
-        
-        Args:
-            diameter: Root diameter in mm
-        """
-        self.root_diameter = diameter
-        self._invalidate_geometry()
     
     def set_vascular_params(self, **kwargs) -> None:
         """
