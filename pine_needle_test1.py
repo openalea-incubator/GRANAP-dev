@@ -7,12 +7,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 import shapely as sp
+from shapely.ops import split
+from shapely.geometry import Polygon, LineString
+from cv2 import fitEllipse
 
 from scipy.spatial import Voronoi, voronoi_plot_2d
 import geopandas as gpd
 
 params_data = [
-    {"name": "planttype", "value": 3}, # 1 = Monocot, 2 = Dicot, 3 = Gymnosperm
+    {"name": "planttype", "value": 3, "organ": "needle"}, # 1 = Monocot, 2 = Dicot, 3 = Gymnosperm
     {"name": "randomness", "value": 1.0}, # 0 = No randomness, 3 = Maximum randomness
     {"name": "secondarygrowth", "value": 0},
     {"name": "central_cylinder", "cell_diameter": 0.0063, "layer_thickness": 0.15, "layer_length": 0.35, "transfusion_layers": 3, "transfusion_tracheids_ratio": 0.5}, # Cell diameter in millimeters
@@ -22,7 +25,7 @@ params_data = [
     {"name": "mesophyll", "cell_diameter": 0.05, "cell_width": 0.03, "n_layers": 3, "order": 4},
     {"name": "hypodermis", "cell_diameter": 0.025, "n_layers": 3, "order": 5},
     {"name": "epidermis", "cell_diameter": 0.018, "n_layers": 1, "order": 6},
-    {"name": "xylem", "n_files": 4, "cell_diameter": 0.005, "n_clusters": 3, "n_per_clusters": 3}, # Number of files
+    {"name": "xylem", "n_files": 4, "cell_diameter": 0.005, "n_clusters": 3, "n_per_cluster": 3}, # Number of files
     {"name": "phloem", "n_files": 3, "cell_diameter": 0.01}, # Number of files
     {"name": "resin_ducts", "diameter": 0.5, "n_files": 2},
     {"name": "inter_cellular_space", "ratio": 0, "size": 0},
@@ -30,199 +33,572 @@ params_data = [
     {"name": "Strasburger cells", "layer_diameter": 0.002, "cell_diameter": 0.05}
 ]
 
-def get_needle_width(params):
-    # get needle width from parameters
-    needle_width = 0
-    for param in params:
-        if param["name"] == "central_cylinder":
-            needle_width += param.get("layer_length")
-        elif param["name"] == "endodermis":
-            needle_width += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "mesophyll":
-            needle_width += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "hypodermis":
-            needle_width += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "epidermis":
-            needle_width += param.get("cell_diameter")
-    return needle_width
+class Cell:
+    def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0, 
+                type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
+                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None):
+        self.x = x # cell center x-coordinate
+        self.y = y # cell center y-coordinate
+        self.diameter = diameter # cell diameter
+        self.width = width if width != 0 else diameter # cell width
+        self.height = height if height != 0 else diameter # cell height
+        self.type = type # cell type
+        self.id_cell = id_cell # cell id
+        self.id_layer = id_layer # layer id
+        self.id_group = id_group # group id
+        self.angle = angle if angle != None else np.arctan2(y, x) # angle of the cell center from the center of the organ
+        self.radius = radius if radius != None else np.sqrt(x**2 + y**2) # distance of the cell center from the center of the organ
+        self.area = area if area != None else np.pi * (diameter/2)**2 # approximate area of the cell
+        self.polygon = polygon if polygon != None else None # polygon of the cell
 
-def get_needle_thickness(params):
-    # get needle height from parameters
-    needle_thickness = 0
-    for param in params:
-        if param["name"] == "central_cylinder":
-            needle_thickness += param.get("layer_thickness")
-        elif param["name"] == "endodermis":
-            needle_thickness += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "mesophyll":
-            needle_thickness += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "hypodermis":
-            needle_thickness += param.get("cell_diameter") * param.get("n_layers")
-        elif param["name"] == "epidermis":
-            needle_thickness += param.get("cell_diameter")
-    return needle_thickness
+    def cell_to_dict(self):
+        return {"type": self.type, "x": self.x, "y": self.y, "cell_diameter": self.diameter,
+                          "id_cell": self.id_cell,
+                          "id_layer": self.id_layer,
+                          "id_group": self.id_group,
+                          "angle": self.angle,
+                          "radius": self.radius,
+                          "area": self.area,
+                }
 
-def half_ellipse_polygon(width, height, n_points=1000):
-    """
-    Generate a polygon representing the upper half of an ellipse.
-    """
-    # Generate points along the x-axis
-    x = np.linspace(-width/2, width/2, n_points)
+class AllCells:
+    def __init__(self):
+        self.cells = []
+
+    def add_cell(self, cell: Cell):
+        self.cells.append(cell)
+
+    def get_cells(self):
+        return self.cells
+
+    def get_cell_by_id(self, id_cell: int):
+        for cell in self.cells:
+            if cell.id_cell == id_cell:
+                return cell
+        return None
+
+    def get_cells_by_type(self, type: str):
+        return [cell for cell in self.cells if cell.type == type]
+
+    def get_cells_by_layer(self, id_layer: int):
+        return [cell for cell in self.cells if cell.id_layer == id_layer]
+
+    def get_cells_by_group(self, id_group: int):
+        return [cell for cell in self.cells if cell.id_group == id_group]
+
+    def get_cells_by_polygon(self, polygon: Polygon):
+        return [cell for cell in self.cells if cell.polygon.intersects(polygon)]
     
-    # Calculate corresponding y values for the ellipse equation: (x/a)^2 + (y/b)^2 = 1
-    # where a = width/2 and b = height
-    y = height * np.sqrt(1 - (x / (width/2))**2)
-    
-    # Combine x and y coordinates
-    polygon = np.column_stack((x, y))
-    polygon = sp.Polygon(polygon)
-
-    return polygon
-
-def make_generic_needle(params):
-    needle_width = get_needle_width(params)
-    needle_thickness = get_needle_thickness(params)
-    polygon = half_ellipse_polygon(needle_width, needle_thickness)
-    return polygon
-
-def order_layers(params):
-    # remove layers without order
-    params_ordered = [param for param in params if "order" in param]
-    # order layers by order
-    params_ordered.sort(key=lambda x: x["order"], reverse=True)
-    return params_ordered
-
-def layer_array(params_ordered):
-    # create array of layers
-    layer_array = []
-    for param in params_ordered:
-        for i in range(param["n_layers"]):
-            layer_array.append({"name": param["name"], "cell_diameter": param["cell_diameter"], })
-    return layer_array
-
-
-def resample_coords(coords, target_n_points=200):
-    # Ensure coords is a numpy array
-    coords = np.array(coords)
-    if len(coords) < 2:
-        return coords
-    # Calculate cumulative distance along the path
-    dists = np.sqrt(np.sum(np.diff(coords, axis=0)**2, axis=1))
-    cum_dist = np.concatenate(([0], np.cumsum(dists)))
-    total_len = cum_dist[-1]
-    
-    # Generate value space for interpolation
-    # evenly spaced points
-    # add a small random noise to the points to avoid having the same points
-    new_dists = np.linspace(0, total_len, target_n_points)
-
-    # Interpolate x and y
-    new_x = np.interp(new_dists, cum_dist, coords[:,0])
-    new_y = np.interp(new_dists, cum_dist, coords[:,1])
-    
-    return np.column_stack((new_x, new_y))
-
-def smoothing_polygon(coords, smooth_factor, iterations=10):
-    """
-    Smooths coordinates using a periodic Laplacian smoothing (moving average).
-    Resamples the polygon to ensure uniform vertex distribution.
-    iterations: Number of smoothing passes.
-    """
-    # Resample first to ensure uniform point distribution
-    coords = resample_coords(coords, target_n_points=200)
-
-    for _ in range(iterations):
-        # Identify if the polygon is closed
-        is_closed = np.allclose(coords[0], coords[-1])
-        
-        if is_closed:
-            pts = coords[:-1]
+    def remove_cells_by_polygon(self, polygon: Polygon):
+        # if self.cells have polygon
+        if self.cells[0].polygon is not None:
+            self.cells = [cell for cell in self.cells if not cell.polygon.intersects(polygon)]
         else:
-            pts = coords
+            for cell in self.cells:
+                point = Point(cell.x, cell.y)
+                if point.intersects(polygon):
+                    self.cells.remove(cell)
     
-        pts = pts.astype(float)
-        
-        if len(pts) < 3:
+    def recalculate_cell_properties(self):
+        """Recalculate the properties of all cells in the list."""
+        for i, cell in enumerate(self.cells):
+            cell.angle = np.arctan2(cell.y, cell.x)
+            cell.radius = cell.polygon.centroid.distance(Point(0, 0))
+            cell.area = cell.polygon.area
+            cell.id_cell = i
+
+class Layer:
+    def __init__(self, name: str, cell_diameter: float, id_layer: int, polygon: Polygon):
+        self.name = name
+        self.cell_diameter = cell_diameter
+        self.id_layer = id_layer
+        self.polygon = polygon
+        self.coords = None
+
+    def layer_to_dict(self):
+        return {"name": self.name, "cell_diameter": self.cell_diameter, "id_layer": self.id_layer, "polygon": self.polygon}
+
+    def resample_coords(self, target_n_points=200):
+        # Ensure coords is a numpy array
+        coords = np.array(self.coords)
+        if len(coords) < 2:
             return coords
+        # Calculate cumulative distance along the path
+        dists = np.sqrt(np.sum(np.diff(coords, axis=0)**2, axis=1))
+        cum_dist = np.concatenate(([0], np.cumsum(dists)))
+        total_len = cum_dist[-1]
     
-        prev_pts = np.roll(pts, 1, axis=0)
-        next_pts = np.roll(pts, -1, axis=0)
-    
-        smoothed_pts = (1 - smooth_factor) * pts + \
-                       smooth_factor * (prev_pts + next_pts) / 2.0
-    
-        if is_closed:
-            coords = np.vstack([smoothed_pts, smoothed_pts[0]])
-        else:
-            coords = smoothed_pts
-            
-    return coords
+        # Generate value space for interpolation
+        # evenly spaced points
+        # add a small random noise to the points to avoid having the same points
+        new_dists = np.linspace(0, total_len, target_n_points)
 
-def buffer_polygon(polygon, distance, smooth_factor):
-    polygon_buffered = polygon.buffer(distance, resolution=16)
+        # Interpolate x and y
+        new_x = np.interp(new_dists, cum_dist, coords[:,0])
+        new_y = np.interp(new_dists, cum_dist, coords[:,1])
     
-    if smooth_factor > 0:
-        # Extract coordinates
-        x,y = np.array(polygon_buffered.exterior.coords.xy)
-        coords = np.column_stack((x, y))
-        if coords.size == 0:
-            return polygon_buffered
-        else:
-            coords_smooth = smoothing_polygon(coords, smooth_factor)
-            # Create new polygon
-            polygon_smoothed = sp.Polygon(coords_smooth)
-            return polygon_smoothed
-    else:
-        return polygon_buffered
+        return np.column_stack((new_x, new_y))
     
+    def smoothing_polygon(self, smooth_factor, iterations=10):
+        """
+        Smooths coordinates using a periodic Laplacian smoothing (moving average).
+        Resamples the polygon to ensure uniform vertex distribution.
+        iterations: Number of smoothing passes.
+        """
+        # Resample first to ensure uniform point distribution
+        coords = self.resample_coords(target_n_points=200)
 
-def make_layers_polygons(layer_array, polygon, params):
-    layers_polygons = []
-    for i_layer, layer in enumerate(layer_array):
+        for _ in range(iterations):
+            # Identify if the polygon is closed
+            is_closed = np.allclose(coords[0], coords[-1])
         
-        if i_layer == 0: # add a oustide layer very close to the first polygon
-            space_increment = layer["cell_diameter"] /2
-            polygon = buffer_polygon(polygon, space_increment, smooth_factor=0.01)
-            layers_polygons.append({"name": "outside", "polygon": polygon, "cell_diameter": layer["cell_diameter"]/3, "id_layer": i_layer})
-        # then add the layer polygon
-        polygon = buffer_polygon(polygon, -space_increment/2 - layer["cell_diameter"] / 4, smooth_factor=0.5)
-        space_increment = layer["cell_diameter"] / 2
-        layers_polygons.append({"name": layer["name"], "polygon": polygon, "cell_diameter": layer["cell_diameter"], "id_layer": i_layer+1})
+            if is_closed:
+                pts = coords[:-1]
+            else:
+                pts = coords
+    
+            pts = pts.astype(float)
+        
+            if len(pts) < 3:
+                return coords
+    
+            prev_pts = np.roll(pts, 1, axis=0)
+            next_pts = np.roll(pts, -1, axis=0)
+    
+            smoothed_pts = (1 - smooth_factor) * pts + \
+                           smooth_factor * (prev_pts + next_pts) / 2.0
+    
+            if is_closed:
+                coords = np.vstack([smoothed_pts, smoothed_pts[0]])
+            else:
+                coords = smoothed_pts
+            
+        self.coords = coords
+        return coords
 
-    # add parenchyma cells until the polygon is filled
-    params_cc = [p for p in params if p["name"] == "central_cylinder"]
-    params_tp = [p for p in params if p["name"] == "transfusion_parenchyma"]
-    params_tt = [p for p in params if p["name"] == "transfusion_tracheids"]
-    transfusion_layers = params_cc[0]["transfusion_layers"]
-    transfusion_tracheids_ratio = params_cc[0]["transfusion_tracheids_ratio"]
-    tt_cell_diameter = params_tt[0]["cell_diameter"]
-    tp_cell_diameter = params_tp[0]["cell_diameter"]
-    parenchyma_cell_diameter = params_cc[0]["cell_diameter"]
 
-    while polygon.area > (params_cc[0]["cell_diameter"]/2)**2 * np.pi:
-        # Transfusion parenchyma and tracheids
-        if transfusion_layers > 0:
-            parenchyma_cell_diameter = (tp_cell_diameter + tt_cell_diameter)/2
-            transfusion_layers -= 1
-            polygon = buffer_polygon(polygon, -space_increment/2 - parenchyma_cell_diameter / 4, smooth_factor=0.6)
-            space_increment = parenchyma_cell_diameter / 2
-            layers_polygons.append({"name": "transfusion", "polygon": polygon, "cell_diameter": parenchyma_cell_diameter, "id_layer": i_layer+1})
-        # Parenchyma
+class Layers:
+    def __init__(self):
+        self.layers = []
+        self.layer_array = []
+
+    def add_layer(self, layer: Layer):
+        self.layers.append(layer)
+
+    def layer_array(self, params):
+        # create array of layers
+        for param in params:
+            for i in range(param["n_layers"]):
+                self.layer_array.append({"name": param["name"], "cell_diameter": param["cell_diameter"], "id_layer": i})
+        return self.layer_array
+
+class Organ:
+    def __init__(self):
+        self.cells = AllCells()
+        self.layers = Layers()
+        self.params = []
+        self.bounding_polygon = None
+    
+    def set_params(self, params):
+        for param in params:
+            self.params.append(param)
+
+    def order_layers(self):
+        # remove layers without order
+        params_ordered = [param for param in self.params if "order" in param]
+        # order layers by order
+        params_ordered.sort(key=lambda x: x["order"], reverse=True)
+        return params_ordered
+
+    def make_layers_polygons(self):
+        self.layer_array = self.order_layers()
+        for i_layer, layer in enumerate(self.layer_array):
+            if i_layer == 0: # add an outside layer
+                space_increment = layer["cell_diameter"] /2
+                polygon = self.buffer_polygon(self.bounding_polygon, space_increment, smooth_factor=0.01)
+                self.layers.add_layer(Layer("outside", polygon, layer["cell_diameter"]/3, i_layer))
+            # then add the layer polygon
+            polygon = self.buffer_polygon(polygon, -space_increment/2 - layer["cell_diameter"] / 4, smooth_factor=0.5)
+            space_increment = layer["cell_diameter"] / 2
+            self.layers.add_layer(Layer(layer["name"], polygon, layer["cell_diameter"], i_layer+1))
+        return self.layers
+
+    @staticmethod
+    def buffer_polygon(polygon, distance, smooth_factor):
+        polygon_buffered = polygon.buffer(distance, resolution=16)
+    
+        if smooth_factor > 0:
+            # Extract coordinates
+            x,y = np.array(polygon_buffered.exterior.coords.xy)
+            coords = np.column_stack((x, y))
+            if coords.size == 0:
+                return polygon_buffered
+            else:
+                coords_smooth = smoothing_polygon(coords, smooth_factor)
+                # Create new polygon
+                polygon_smoothed = sp.Polygon(coords_smooth)
+                return polygon_smoothed
         else:
-            parenchyma_cell_diameter = params_cc[0]["cell_diameter"]
-            polygon = buffer_polygon(polygon, -space_increment/2 - parenchyma_cell_diameter / 4, smooth_factor=0.7)
-            space_increment = parenchyma_cell_diameter / 2
-            layers_polygons.append({"name": "parenchyma", "polygon": polygon, "cell_diameter": parenchyma_cell_diameter, "id_layer": i_layer+1})
+            return polygon_buffered
+
+class Needle:
+    def __init__(self):
+        self.organ = Organ()
+        self.needle_width = 0
+        self.needle_thickness = 0    
+
+    def set_cells(self, cells):
+        self.organ.cells = cells
+
+    def set_layers(self, layers):
+        self.organ.layers = layers
+
+    def get_needle_width(self):
+        # get needle width from organ parameters
+        for param in self.organ.params:
+            if param["name"] == "central_cylinder":
+                self.needle_width += param.get("layer_length")
+            elif param["name"] == "endodermis":
+                self.needle_width += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "mesophyll":
+                self.needle_width += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "hypodermis":
+                self.needle_width += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "epidermis":
+                self.needle_width += param.get("cell_diameter")
+        return self.needle_width
+
+    def get_needle_thickness(self):
+        # get needle height from organ parameters
+        for param in self.organ.params:
+            if param["name"] == "central_cylinder":
+                self.needle_thickness += param.get("layer_thickness")
+            elif param["name"] == "endodermis":
+                self.needle_thickness += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "mesophyll":
+                self.needle_thickness += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "hypodermis":
+                self.needle_thickness += param.get("cell_diameter") * param.get("n_layers")
+            elif param["name"] == "epidermis":
+                self.needle_thickness += param.get("cell_diameter")
+        return self.needle_thickness
+
+    def half_ellipse_polygon(self, width, height, n_points=1000):
+        """
+        Generate a polygon representing the upper half of an ellipse.
+        """
+        # Generate points along the x-axis
+        x = np.linspace(-width/2, width/2, n_points)
+    
+        # Calculate corresponding y values for the ellipse equation: (x/a)^2 + (y/b)^2 = 1
+        # where a = width/2 and b = height
+        y = height * np.sqrt(1 - (x / (width/2))**2)
+    
+        # Combine x and y coordinates
+        polygon = np.column_stack((x, y))
+        polygon = sp.Polygon(polygon)
+
+        return polygon
+
+    def make_generic_needle(self):
+        needle_width = self.get_needle_width(self.organ.params)
+        needle_thickness = self.get_needle_thickness(self.organ.params)
+        self.organ.bounding_polygon = self.half_ellipse_polygon(needle_width, needle_thickness)
+        return self.organ.bounding_polygon
+
+    def make_needle(self):
+        self.make_generic_needle()
+        self.organ.make_layers_polygons(self.organ.layer_array, self.organ.bounding_polygon, self.organ.params)
+        
+        # add parenchyma cells until the polygon is filled
+        params_cc = [p for p in self.organ.params if p["name"] == "central_cylinder"]
+        params_tp = [p for p in self.organ.params if p["name"] == "transfusion_parenchyma"]
+        params_tt = [p for p in self.organ.params if p["name"] == "transfusion_tracheids"]
+        transfusion_layers = params_cc[0]["transfusion_layers"]
+        transfusion_tracheids_ratio = params_cc[0]["transfusion_tracheids_ratio"]
+        tt_cell_diameter = params_tt[0]["cell_diameter"]
+        tp_cell_diameter = params_tp[0]["cell_diameter"]
+        parenchyma_cell_diameter = params_cc[0]["cell_diameter"]
+
+        while self.organ.bounding_polygon.area > (params_cc[0]["cell_diameter"]/2)**2 * np.pi:
+            # Transfusion parenchyma and tracheids
+            if transfusion_layers > 0:
+                parenchyma_cell_diameter = (tp_cell_diameter + tt_cell_diameter)/2
+                transfusion_layers -= 1
+                self.organ.bounding_polygon = self.buffer_polygon(self.organ.bounding_polygon, -space_increment/2 - parenchyma_cell_diameter / 4, smooth_factor=0.6)
+                space_increment = parenchyma_cell_diameter / 2
+                self.organ.layers.add_layer(Layer("transfusion", self.organ.bounding_polygon, parenchyma_cell_diameter, i_layer+1))
+            # Parenchyma
+            else:
+                self.organ.bounding_polygon = self.buffer_polygon(self.organ.bounding_polygon, -space_increment/2 - parenchyma_cell_diameter / 4, smooth_factor=0.7)
+                space_increment = parenchyma_cell_diameter / 2
+                self.organ.layers.add_layer(Layer("parenchyma", self.organ.bounding_polygon, parenchyma_cell_diameter, i_layer+1))
     
     # add cell_width for all layers
-    for layer in layers_polygons:
+    for layer in self.organ.layers.layers:
         # if in param there is a cell_width for the layer, use it
-        param_match = next((p for p in params if p["name"] == layer["name"]), None)
+        param_match = next((p for p in params if p["name"] == layer.name), None)
         if param_match and "cell_width" in param_match:
-            layer["cell_width"] = param_match["cell_width"]/4
+            layer.cell_width = param_match["cell_width"]/4
         else:
-            layer["cell_width"] = 0
-    return layers_polygons
+            layer.cell_width = 0
+    return self.organ.layers
+
+
+    def last_transfusion_polygon(layer_polygon):
+        last_transfusion_polygon = None
+        last_transfusion_area = np.inf
+        for layer in layer_polygon:
+            if layer["name"] == "transfusion":
+                # last one, smaller than the previous one
+                if last_transfusion_polygon is not None:
+                    if layer["polygon"].area < last_transfusion_area:
+                        last_transfusion_polygon = layer["polygon"]
+                        last_transfusion_area = layer["polygon"].area
+        return last_transfusion_polygon
+    
+    def fit_needle_vascular_tissue(polygon, params):
+        # from polygon, fit two ellipses
+        vascular_elements = []
+        
+        ellipses = two_ellipses(polygon)
+        vascular_elements = vascular_elements_in_ellipses(ellipses, params)
+    
+        return vascular_elements
+
+def fit_root_monocot_vascular_tissue(polygon, params):
+    # from polygon, fit one circle
+    vascular_elements = []
+    
+    return vascular_elements
+
+def fit_root_dicot_vascular_tissue(polygon, params):
+    # from polygon, pack vascular elements
+    vascular_elements = []
+    
+    return vascular_elements
+
+def two_ellipses(polygon):
+    # vertical splitting line (make it long enough to fully cross the polygon)
+    center = polygon.centroid
+    split_line = LineString([
+        (center.x, polygon.bounds[1] - 10),
+        (center.x, polygon.bounds[3] + 10),
+    ])
+
+    # split polygon
+    parts = split(polygon, split_line)
+
+    if len(parts) != 2:
+        raise ValueError("Polygon was not split into two parts")
+
+    # assign left / right based on centroid x
+    left_poly, right_poly = sorted(
+        parts,
+        key=lambda p: p.centroid.x
+    )
+
+    ellipses = []
+
+    # now you can fit one ellipse per side
+    ellipses.append(fit_inner_ellipse(left_poly))
+    ellipses.append(fit_inner_ellipse(right_poly))
+
+    return ellipses
+
+def vascular_elements_in_ellipses(ellipses, params):
+    vascular_elements = []
+
+    cells_in_ellipses = []
+    id_cell = 0
+    id_layer = 0
+    for ellipse in ellipses:
+        # get ellipse parameters
+        center = ellipse["center"]
+        rx, ry = ellipse["axes"]
+
+        angle = ellipse["angle"]
+        # add rows of xylem cells in upper part of ellipse
+        params_xylem = [p for p in params if p["name"] == "xylem"]
+        xylem_rows = params_xylem[0]["n_files"] # cell files
+        xylem_cell_width = params_xylem[0]["cell_diameter"] # cell width
+
+        # add rows of phloem cells in lower part of ellipse
+        params_phloem = [p for p in params if p["name"] == "phloem"]
+        phloem_rows = params_phloem[0]["n_files"]
+        phloem_cell_diameter = params_phloem[0]["cell_diameter"]
+        # add cambium cells between xylem and phloem
+        params_cambium = [p for p in params if p["name"] == "cambium"]
+
+        xylem_cell_height = (ry-params_cambium[0]["cell_diameter"])/xylem_rows
+        phloem_cell_height = (ry-params_cambium[0]["cell_diameter"])/phloem_rows
+
+
+        n_xylem_width = rx*2/xylem_cell_width
+        xylem_cells = []
+        
+        xylem_cluster_n = params_xylem[0]["n_clusters"] # number of clusters
+        xylem_cluster_size = params_xylem[0]["n_per_cluster"] # number of cells per cluster in width
+
+        # verify if there are enough cells for the clusters
+        cluster_width = xylem_cluster_size*xylem_cell_width
+        if rx*2 < xylem_cluster_n * cluster_width + xylem_cell_width*(xylem_cluster_n-1):
+            xylem_cluster_size = int(np.ceil((rx*2 - xylem_cell_width*(xylem_cluster_n-1))/(xylem_cell_width*xylem_cluster_n)))
+            print("Not enough cells for the clusters, new cluster size: ", xylem_cluster_size)
+        else:
+            xylem_cluster_size = int(np.floor((rx*2 - xylem_cell_width*(xylem_cluster_n-1))/(xylem_cell_width*xylem_cluster_n)))
+            print("Too many cells for the clusters, new cluster size: ", xylem_cluster_size)
+        
+        temp_cluster_id = xylem_cluster_size
+        for i in range(n_xylem_width):
+            id_layer += 1
+            for j_xlm in range(xylem_rows):
+                id_cell += 1
+                xyl_coord = [center.x + i*xylem_cell_width - rx + xylem_cell_width/2,  # starting from left to right
+                             center.y + j_xlm*xylem_cell_height + xylem_cell_height/2] # starting from middle to top
+                # tilt the cells
+                xyl_coord = [xyl_coord[0]*np.cos(angle) - xyl_coord[1]*np.sin(angle), xyl_coord[0]*np.sin(angle) + xyl_coord[1]*np.cos(angle)]  
+                
+                if temp_cluster_id == 0:
+                    cell_type = "Strasburger cell"
+                else:
+                    cell_type = "xylem"
+                    
+                i_xylem = {"type": cell_type, "x": xyl_coord[0], "y": xyl_coord[1], "cell_diameter": xylem_cell_diameter,
+                          "id_cell": id_cell,
+                          "id_layer": id_layer,
+                          "id_group": 0,
+                          "angle": np.arctan2(xyl_coord[1]-center.y, xyl_coord[0]-center.x),
+                          "radius": np.sqrt((xyl_coord[0]-center.x)**2 + (xyl_coord[1]-center.y)**2),
+                          "area": np.pi * (xylem_cell_diameter/2)**2,
+                }
+                cells_in_ellipses.append(i_xylem)
+            
+            for j_phl in range(phloem_rows):
+                id_cell += 1
+                phlo_coord = [center.x + i*xylem_cell_width - rx + xylem_cell_width/2,  # starting from left to right
+                             center.y - j_phl*phloem_cell_height - phloem_cell_height/2] # starting from middle to top
+                # tilt the cells
+                phlo_coord = [phlo_coord[0]*np.cos(angle) - phlo_coord[1]*np.sin(angle), phlo_coord[0]*np.sin(angle) + phlo_coord[1]*np.cos(angle)]
+
+                i_phloem = {
+                    "type": "phloem",
+                    "x": phlo_coord[0],
+                    "y": phlo_coord[1],
+                    "cell_diameter": phloem_cell_diameter,
+                    "id_cell": id_cell,
+                    "id_layer": id_layer,
+                    "id_group": 0,
+                    "angle": np.arctan2(phlo_coord[1]-center.y, phlo_coord[0]-center.x),
+                    "radius": np.sqrt((phlo_coord[0]-center.x)**2 + (phlo_coord[1]-center.y)**2),
+                    "area": np.pi * (phloem_cell_diameter/2)**2,
+                }
+                cells_in_ellipses.append(i_phloem)
+
+            if temp_cluster_id == 0:
+                temp_cluster_id = xylem_cluster_size
+            temp_cluster_id -= 1
+
+            # cambium cell
+            id_cell += 1
+
+            xyl_coord = [center.x + i*xylem_cell_width - rx + xylem_cell_width/2,  # starting from left to right
+                         center.y ] # major axis
+            # tilt the cells
+            xyl_coord = [xyl_coord[0]*np.cos(angle) - xyl_coord[1]*np.sin(angle), xyl_coord[0]*np.sin(angle) + xyl_coord[1]*np.cos(angle)]  
+            i_cambium = {
+                "type": "cambium",
+                "x": xyl_coord[0],
+                "y": xyl_coord[1],
+                "cell_diameter": xylem_cell_diameter,
+                "id_cell": id_cell,
+                "id_layer": id_layer,
+                "id_group": 0,
+                "angle": np.arctan2(xyl_coord[1]-center.y, xyl_coord[0]-center.x),
+                "radius": np.sqrt((xyl_coord[0]-center.x)**2 + (xyl_coord[1]-center.y)**2),
+                "area": np.pi * (xylem_cell_diameter/2)**2,
+            }
+            cells_in_ellipses.append(i_cambium)
+    
+        # create a list of polygons for each ellipse
+        ellipses_polygons = []
+        for ellipse in ellipses:
+            ellipses_polygons.append(ellipse_to_polygon(ellipse["center"], ellipse["axes"], ellipse["angle"]))
+        
+        vascular_elements.append({"cells": cells_in_ellipse,
+                                  "polygon": MultiPolygon(ellipses_polygons)
+        })
+    return vascular_elements
+
+def ellipse_to_polygon(cx, cy, rx, ry, angle):
+    # create ellipse polygon
+    ellipse = Ellipse((cx, cy), rx, ry, angle)
+    return ellipse
+
+def fit_inner_ellipse(polygon, shrink_step=0.98, min_scale=0.2):
+    # convert to numpy array of points
+    points = np.array(polygon.exterior.coords.xy).T
+
+    # OpenCV fitEllipse expects (N, 1, 2)
+    points = points.reshape(-1, 1, 2).astype(np.float32)
+
+    # fit ellipse
+    (cx, cy), (major, minor), angle = cv2.fitEllipse(points)
+    rx = major / 2
+    ry = minor / 2
+
+    scale_factor = 0.98
+
+    while scale_factor > min_scale:
+        ell = ellipse_to_polygon(
+            cx, cy,
+            rx * scale_factor,
+            ry * scale_factor,
+            angle
+        )
+
+        if polygon.contains(ell):
+            return {
+                "center": (cx, cy),
+                "axes": (rx * scale_factor, ry * scale_factor),
+                "angle": angle,
+            }
+
+        scale_factor *= shrink_step
+
+def allocate_vascular_tissue(center_polygon, all_cells, params):
+
+    # what type of vascular tissue to allocate
+    params_type = [p for p in params if p["name"] == "planttype"]
+    if params_type[0]["value"] == 3 and params_type[0]["organ"] == "needle":
+        # from polygon, fit two ellipses
+        vascular_elements = fit_needle_vascular_tissue(center_polygon, params)
+    if params_type[0]["value"] == 1 and params_type[0]["organ"] == "root":
+        # monocot root
+        # from polygon, fit one circle
+        vascular_elements = fit_root_monocot_vascular_tissue(center_polygon, params)
+    if params_type[0]["value"] == 2 and params_type[0]["organ"] == "root":
+        # dicot root
+        # from polygon, pack vascular elements
+        vascular_elements = fit_root_dicot_vascular_tissue(center_polygon, params)
+
+    # remove the cells in the vascular elements
+    for cell in all_cells:
+        point = Point(cell["x"], cell["y"])
+        if point.intersects(MultiPolygon(vascular_elements["polygon"])):
+            all_cells.remove(cell)
+        
+    # add vascular cells
+    for cell in vascular_elements["cells"]:
+        max_id_layer = max([c["id_layer"] for c in all_cells])
+        cell["id_layer"] = max_id_layer + cell["id_layer"]
+        cell["id_cell"] = len(all_cells) + cell["id_cell"]
+        point = Point(cell["x"], cell["y"])
+        if point.intersects(MultiPolygon(vascular_elements["polygon"])):
+            all_cells.append(cell)
+    
+    return all_cells
+
 
 def cells_on_layer(layer_polygon, cell_diameter, cell_width = 0):
     # get the exterior coordinates of the polygon
@@ -272,7 +648,7 @@ def draw_ellipse(center, axis, major_axis, minor_axis, n_points=5):
     return np.column_stack((x, y)) 
     
 
-def cells_info(layers_polygons):
+def cells_info(layers_polygons, params):
     all_cells = []
     id_cell = 1
     id_group = 1
@@ -315,6 +691,12 @@ def cells_info(layers_polygons):
                     id_cell += 1
             
                 id_group += 1
+    
+    layer_for_vascular = [l["name"] for l in layers_polygons].index("parenchyma")[0]
+
+    # add vascular tissue
+    all_cells = allocate_vascular_tissue(layers_polygons[layer_for_vascular], all_cells, params) # remove parenchyma cells in the vascular tissue and add vascular cells instead
+
     all_cells = pd.DataFrame(all_cells)
     vor = Voronoi(all_cells[["x", "y"]])
     # fig = voronoi_plot_2d(vor)
@@ -545,7 +927,7 @@ def smooth_cells(grouped_gdf):
 def test_voro(params):
     polygons = make_layers_polygons(layer_array(order_layers(params)), make_generic_needle(params), params)
     # create voronoi diagram
-    all_cells, vor, center = cells_info(polygons)
+    all_cells, vor, center = cells_info(polygons, params)
     
     # Process attributes and merge
     grouped_cells = process_voronoi_groups(all_cells, vor)
