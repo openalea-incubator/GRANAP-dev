@@ -1,0 +1,3 @@
+"""
+Anatomy package initialization.
+"""
