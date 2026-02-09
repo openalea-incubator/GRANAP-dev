@@ -77,10 +77,7 @@ class GeometryProcessor:
         
         if shift_distance != 0:
             new_dists = (new_dists + shift_distance) % total_len
-            # Ensure they are sorted for interpolation if not a closed loop?
-            # Actually, if it's a closed loop it works fine. 
-            # If not closed, modulo might break ordering.
-            # But layers are usually closed polygons.
+            # Ensure they are sorted for interpolation if not a close
         
         new_x = np.interp(new_dists, cum_dist, coords[:, 0])
         new_y = np.interp(new_dists, cum_dist, coords[:, 1])
