@@ -2,13 +2,13 @@
 
 ## Installation
 
-In MECHA-dev root directory, install the environment with
+In GRANAP root directory, install the environment with
 ```bash
 mamba create -f ./conda/environment.yaml -y
 mamba activate granap 
 ```
 
-For source to be recognized in the environment, run the following at the root of the MECHA-env directory
+For source to be recognized in the environment, run the following at the root of the GRANAP directory
 ```bash
 pip install -e . 
 ```
