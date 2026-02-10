@@ -1,0 +1,18 @@
+name: granap
+channels:
+  - conda-forge
+channel_priority: strict
+dependencies:
+  - python
+  - pip
+  - geopandas
+  - ipykernel
+  - lxml
+  - matplotlib
+  - numpy
+  - pandas
+  - scikit-learn # not sure if it is still needed
+  - scipy
+  - shapely
+  - pip:
+    - "-e ..[doc]"
