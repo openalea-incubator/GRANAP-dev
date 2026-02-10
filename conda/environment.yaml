@@ -3,6 +3,8 @@ channels:
   - conda-forge
 channel_priority: strict
 dependencies:
+  - python
+  - pip
   - geopandas
   - ipykernel
   - lxml
