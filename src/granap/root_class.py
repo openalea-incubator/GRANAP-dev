@@ -6,9 +6,9 @@ import numpy as np
 from typing import List, Dict, Any
 from shapely.geometry import Polygon
 
-from organ_class import Organ
-from layer_class import Layer
-from geometry_collection import GeometryProcessor
+from granap.organ_class import Organ
+from granap.layer_class import Layer
+from granap.geometry_collection import GeometryProcessor
 
 
 class RootAnatomy(Organ):

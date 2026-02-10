@@ -10,8 +10,8 @@ from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
 from shapely.geometry import Polygon, Point
 
-from geometry_collection import GeometryProcessor
-from cell_class import Cell
+from granap.geometry_collection import GeometryProcessor
+from granap.cell_class import Cell
 
 
 class CellGenerator:

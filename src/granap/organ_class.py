@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon
 
-from layer_class import Layer
-from layer_manager import LayerManager
-from geometry_collection import GeometryProcessor
-from generate_cell import CellGenerator
-from cell_class import Cell
+from granap.layer_class import Layer
+from granap.layer_manager import LayerManager
+from granap.geometry_collection import GeometryProcessor
+from granap.generate_cell import CellGenerator
+from granap.cell_class import Cell
 
 
 class Organ(ABC):
