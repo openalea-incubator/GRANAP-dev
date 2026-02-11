@@ -35,12 +35,23 @@ class NeedleAnatomy(Organ):
             "layer_thickness": 0.2,
             "layer_length": 0.4,
             "transfusion_layers": 3,
-            "transfusion_tracheids_ratio": 0.5
+            "transfusion_tracheids_ratio": 0.5,
+            "transfusion_tracheids_diameter": 0.015,
+            "transfusion_parenchyma_diameter": 0.025,
+            "shape": "ellipse"
         }
-        
-        self.transfusion_params = {
-            "tracheids_diameter": 0.015,
-            "parenchyma_diameter": 0.025
+
+        self.resin_duct_params = {
+            "cell_diameter": 0.0063,
+            "inner_diameter": 0.01,
+            "n_files":3,
+        }
+
+        self.stomata_params = {
+            "cell_diameter": 0.0063,
+            "depth": 0.01,
+            "n_files_adaxial":3,
+            "n_files_abaxial":3,
         }
     
     def _initialize_default_layers(self) -> None:
