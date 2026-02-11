@@ -5,6 +5,7 @@ channel_priority: strict
 dependencies:
   - python
   - pip
+  - git
   - geopandas
   - ipykernel
   - lxml
