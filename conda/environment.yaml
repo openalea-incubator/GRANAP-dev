@@ -14,5 +14,6 @@ dependencies:
   - scikit-learn # not sure if it is still needed
   - scipy
   - shapely
+  - opencv
   - pip:
     - "-e ..[doc]"
