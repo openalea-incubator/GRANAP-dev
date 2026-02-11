@@ -63,7 +63,8 @@ dependencies = [
     "pandas",
     "scikit-learn", # not sure if it is still needed
     "scipy",
-    "shapely"
+    "shapely",
+    "opencv"
 ]
 
 [project.optional-dependencies]
