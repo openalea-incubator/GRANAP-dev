@@ -19,12 +19,22 @@ class Cell:
         self.area = area if area != None else np.pi * (diameter/2)**2 # approximate area of the cell
         self.polygon = polygon if polygon != None else None # polygon of the cell
 
+    def jitter(self, shift: float = 0.001):
+        """Jitter the cell position."""
+        self.x += np.random.uniform(-shift, shift)
+        self.y += np.random.uniform(-shift, shift)
+        self.angle = np.arctan2(self.y, self.x)
+        self.radius = np.sqrt(self.x**2 + self.y**2)
+
     def cell_to_dict(self):
-        return {"type": self.type, "x": self.x, "y": self.y, "cell_diameter": self.diameter,
-                          "id_cell": self.id_cell,
-                          "id_layer": self.id_layer,
-                          "id_group": self.id_group,
-                          "angle": self.angle,
-                          "radius": self.radius,
-                          "area": self.area,
+        return {"type": self.type, "x": self.x, "y": self.y, 
+                "cell_diameter": self.diameter,
+                "cell_width": self.width,
+                "cell_height": self.height,
+                "id_cell": self.id_cell,
+                "id_layer": self.id_layer,
+                "id_group": self.id_group,
+                "angle": self.angle,
+                "radius": self.radius,
+                "area": self.area,
                 }

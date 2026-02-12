@@ -36,6 +36,7 @@ class Organ(ABC):
         self._base_polygon: Optional[Polygon] = None
         self._layers_polygons: List[Dict[str, Any]] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
+        self.all_cells: List[Cell] = []
     
     def add_layer(self, layer: Layer, position: Optional[int] = None) -> None:
         """
@@ -160,11 +161,16 @@ class Organ(ABC):
             for layer in self.layer_manager.get_layers():
                 layer.cells = []
             
-            all_cells, vor = CellGenerator.generate_cells_info(
+            self.all_cells = CellGenerator.generate_cells_info(
                 layers_polygons, center
             )
+
+            # add vascular tissue
+            # self.all_cells = self.allocate_vascular_tissue(layers_polygons, self.all_cells, params)        
             
-            grouped_cells = CellGenerator.process_voronoi_groups(all_cells, vor)
+            vor = CellGenerator.voronoi_diagram(self.all_cells)
+            
+            grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor)
             grouped_cells = CellGenerator.smooth_cells(grouped_cells)
             
             # Populate layers with cells
@@ -194,6 +200,24 @@ class Organ(ABC):
             self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
         
         return self._cells_gdf
+
+    def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
+        layer_for_vascular = [l["name"] for l in layers_polygons].index("parenchyma")
+        polygons_for_vascular = [layers_polygons[layer_for_vascular]["polygon"]]
+        # add vascular tissue
+        self._create_vascular_tissue(polygons_for_vascular)
+
+
+    @abstractmethod
+    def _create_vascular_tissue(self, polygons: List[Polygon]):
+        """
+        Create vascular tissue.
+        
+        Args:
+            polygons: List of polygon boundaries
+        """
+        pass
+        
     
     def plot_layers(self, show: bool = True) -> plt.Figure:
         """

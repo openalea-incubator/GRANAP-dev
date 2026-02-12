@@ -29,6 +29,7 @@ class Layer:
     shift: float = 0.0
     additional_params: Dict[str, Any] = field(default_factory=dict)
     cells: List[Cell] = field(default_factory=list)
+    polygon: Optional[Polygon] = None
     
     def __post_init__(self):
         """Validate layer parameters."""
@@ -36,8 +37,6 @@ class Layer:
             raise ValueError(f"cell_diameter must be positive, got {self.cell_diameter}")
         if self.n_layers < 1:
             raise ValueError(f"n_layers must be at least 1, got {self.n_layers}")
-        if not 0 <= self.shift <= 1:
-            raise ValueError(f"shift must be between 0 and 1, got {self.shift}")
     
     def get_total_thickness(self) -> float:
         """Calculate total thickness of this layer."""
@@ -65,7 +64,7 @@ class Layer:
         cell_diameter = data.get("cell_diameter", 0.01)
         n_layers = data.get("n_layers", 1)
         order = data.get("order", 0)
-        cell_width = data.get("cell_width")
+        cell_width = data.get("cell_width", cell_diameter)
         shift = data.get("shift", 0.0)
         
         # Everything else goes into additional_params

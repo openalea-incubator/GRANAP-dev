@@ -94,7 +94,7 @@ class CellGenerator:
             cells_border.append(
                 GeometryProcessor.draw_ellipse(
                     cell_coord, axis, 
-                    major_axis / 4, minor_axis / 4, 
+                    major_axis / 2, minor_axis / 2, 
                     n_points=n_points
                 )
             )
@@ -102,7 +102,7 @@ class CellGenerator:
     
     @staticmethod
     def generate_cells_info(layers_polygons: List[Dict[str, Any]], 
-                           center: Point) -> Tuple[pd.DataFrame, Voronoi]:
+                           center: Point):
         """
         Generate cell information from layer polygons.
         
@@ -111,7 +111,7 @@ class CellGenerator:
             center: Center point for angle/radius calculations
         
         Returns:
-            Tuple of (List of Cell objects, Voronoi diagram)
+            pd.DataFrame of cells
         """
         all_cells: List[Cell] = []
         cells_data_for_voronoi = []
@@ -187,11 +187,16 @@ class CellGenerator:
                         id_cell += 1
                     id_group += 1
         
-        
-        cells_df = pd.DataFrame(cells_data_for_voronoi)
+        return all_cells
+
+    @staticmethod
+    def voronoi_diagram(all_cells: List[Cell]) -> Voronoi:
+        # get all x and y coordinates
+        for cell in all_cells:
+            cell.jitter()
+        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells])
         vor = Voronoi(cells_df[["x", "y"]])
-        
-        return all_cells, vor
+        return vor
     
     @staticmethod
     def process_voronoi_groups(all_cells: List[Cell], 
