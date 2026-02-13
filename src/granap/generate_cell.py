@@ -12,6 +12,7 @@ from shapely.geometry import Polygon, Point
 
 from granap.geometry_collection import GeometryProcessor
 from granap.cell_class import Cell
+from granap.cell_manager import CellManager
 
 
 class CellGenerator:
@@ -113,8 +114,7 @@ class CellGenerator:
         Returns:
             pd.DataFrame of cells
         """
-        all_cells: List[Cell] = []
-        cells_data_for_voronoi = []
+        all_cells = CellManager()
         id_cell = 1
         id_group = 1
         
@@ -161,8 +161,7 @@ class CellGenerator:
                                         (cell_coord[1] - center.y)**2),
                         area=np.pi * (layer["cell_diameter"] / 2)**2,
                     )
-                    all_cells.append(new_cell)
-                    cells_data_for_voronoi.append({"x": new_cell.x, "y": new_cell.y})
+                    all_cells.add_cell(new_cell)
                     id_cell += 1
                     id_group += 1
                 else:
@@ -182,24 +181,23 @@ class CellGenerator:
                                             (cell_coord[1] - center.y)**2),
                             area=np.pi * (layer["cell_diameter"] / 2)**2,
                         )
-                        all_cells.append(new_cell)
-                        cells_data_for_voronoi.append({"x": new_cell.x, "y": new_cell.y})
+                        all_cells.add_cell(new_cell)
                         id_cell += 1
                     id_group += 1
         
         return all_cells
 
     @staticmethod
-    def voronoi_diagram(all_cells: List[Cell]) -> Voronoi:
+    def voronoi_diagram(all_cells: CellManager) -> Voronoi:
         # get all x and y coordinates
-        for cell in all_cells:
+        for cell in all_cells.cells:
             cell.jitter()
-        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells])
+        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells.cells])
         vor = Voronoi(cells_df[["x", "y"]])
         return vor
     
     @staticmethod
-    def process_voronoi_groups(all_cells: List[Cell], 
+    def process_voronoi_groups(all_cells: CellManager, 
                                vor: Voronoi) -> List[Cell]:
         """
         Process Voronoi diagram into grouped cell geometries.
@@ -211,9 +209,9 @@ class CellGenerator:
         Returns:
             List of updated Cell objects with geometries
         """
-        updated_cells = []
+        updated_cells = CellManager()
         
-        for i, cell in enumerate(all_cells):
+        for i, cell in enumerate(all_cells.cells):
             region_idx = vor.point_region[i]
             region_vertices_indices = vor.regions[region_idx]
             
@@ -227,7 +225,7 @@ class CellGenerator:
                 cell.polygon = poly
             
             if cell.type != "outside" and cell.polygon is not None:
-                updated_cells.append(cell)
+                updated_cells.add_cell(cell)
                 
         # Group handling is trickier with objects. 
         # The original code used GeoPandas dissolve to union polygons by group.
@@ -242,8 +240,8 @@ class CellGenerator:
         
         # So we should return a list of 'biological' cells (one per group).
         
-        cell_dicts = [c.cell_to_dict() for c in updated_cells]
-        for i, c in enumerate(updated_cells):
+        cell_dicts = [c.cell_to_dict() for c in updated_cells.cells]
+        for i, c in enumerate(updated_cells.cells):
             cell_dicts[i]['geometry'] = c.polygon
             
         gdf = gpd.GeoDataFrame(cell_dicts)
@@ -253,7 +251,7 @@ class CellGenerator:
         grouped_gdf["area"] = grouped_gdf.geometry.area
         
         # Now create new Cell objects from the grouped results
-        final_cells = []
+        final_cells = CellManager()
         for _, row in grouped_gdf.iterrows():
             # Find a representative original cell to get non-geometric attributes
             # (or use the aggregated ones, but dissolve aggregates strategy might be needed for some?)
@@ -272,7 +270,7 @@ class CellGenerator:
                 area=row['area'],
                 polygon=row['geometry']
             )
-            final_cells.append(new_cell)
+            final_cells.add_cell(new_cell)
             
         return final_cells
     

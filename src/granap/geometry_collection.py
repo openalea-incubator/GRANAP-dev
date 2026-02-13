@@ -5,7 +5,7 @@ Geometry processor module for handling polygon operations.
 import numpy as np
 import shapely as sp
 from typing import Tuple
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from cv2 import fitEllipse
 
 
@@ -221,7 +221,7 @@ class GeometryProcessor:
             return polygon.centroid.x, polygon.centroid.y
 
     @staticmethod
-    def fit_inner_ellipse(polygon, shrink_step=0.98, min_scale=0.2, debug=False):
+    def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
         """
         Fit an inner ellipse to a polygon
         """
@@ -236,8 +236,8 @@ class GeometryProcessor:
         cx, cy = GeometryProcessor.get_chebyshev_center(polygon)
     
         
-        rx = major / 2
-        ry = minor / 2
+        rx = major / 2 if rx is None else rx
+        ry = minor / 2 if ry is None else ry
         
         scale_factor_x = 1.0 
         scale_factor_y = 1.0 
@@ -246,7 +246,7 @@ class GeometryProcessor:
     
         # Try to shrink until it fits
         while scale_factor_x > min_scale:
-            ell = ellipse_to_polygon(
+            ell = GeometryProcessor.ellipse_to_polygon(
                 cx, cy,
                 rx * scale_factor_x,
                 ry * scale_factor_y,
@@ -284,3 +284,45 @@ class GeometryProcessor:
             plt.show()
     
         return result_ellipse
+    
+    @staticmethod
+    def two_ellipses(polygon, rx, ry):
+        # vertical splitting line (make it long enough to fully cross the polygon)
+        center = polygon.centroid
+    
+        # Define the splitting rectangle
+        split_rect = sp.box(
+            center.x + 0.1*polygon.bounds[0],          # minx
+            polygon.bounds[1] - 10, # miny
+            center.x + 0.1*polygon.bounds[2],          # maxx
+            polygon.bounds[3] + 10  # maxy
+        )
+    
+        # Get the parts of the polygon outside the rectangle
+        outside_polygon = polygon.difference(split_rect)
+    
+        # Split the outside polygon into left and right parts
+        if outside_polygon.geom_type == "MultiPolygon":
+            parts = list(outside_polygon.geoms)
+        else:
+            parts = [outside_polygon]
+    
+        if isinstance(parts, GeometryCollection):
+            parts = list(parts.geoms)
+    
+        if len(parts) != 2:
+            raise ValueError("Polygon was not split into two parts")
+    
+        # assign left / right based on centroid x
+        left_poly, right_poly = sorted(
+            parts,
+            key=lambda p: p.centroid.x
+        )
+    
+        ellipses = []
+    
+
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(left_poly.buffer(-0.002), rx, ry))
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
+    
+        return ellipses

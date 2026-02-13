@@ -14,6 +14,7 @@ from granap.layer_manager import LayerManager
 from granap.geometry_collection import GeometryProcessor
 from granap.generate_cell import CellGenerator
 from granap.cell_class import Cell
+from granap.cell_manager import CellManager
 
 
 class Organ(ABC):
@@ -36,7 +37,7 @@ class Organ(ABC):
         self._base_polygon: Optional[Polygon] = None
         self._layers_polygons: List[Dict[str, Any]] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
-        self.all_cells: List[Cell] = []
+        self.all_cells = CellManager()
     
     def add_layer(self, layer: Layer, position: Optional[int] = None) -> None:
         """
@@ -166,11 +167,11 @@ class Organ(ABC):
             )
 
             # add vascular tissue
-            # self.all_cells = self.allocate_vascular_tissue(layers_polygons, self.all_cells, params)        
+            self.allocate_vascular_tissue(layers_polygons)        
             
             vor = CellGenerator.voronoi_diagram(self.all_cells)
             
-            grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor)
+            grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
             grouped_cells = CellGenerator.smooth_cells(grouped_cells)
             
             # Populate layers with cells
@@ -202,19 +203,27 @@ class Organ(ABC):
         return self._cells_gdf
 
     def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
+        """
+        Allocate vascular tissue.
+        Define the region where vascular tissue will be allocated.
+        
+        Args:
+            layers_polygons: List of layer polygon dictionaries
+        """
         layer_for_vascular = [l["name"] for l in layers_polygons].index("parenchyma")
-        polygons_for_vascular = [layers_polygons[layer_for_vascular]["polygon"]]
+        polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         # add vascular tissue
-        self._create_vascular_tissue(polygons_for_vascular)
+        # call organ specific function to create vascular tissue
+        self._create_vascular_tissue(polygon_for_vascular)
 
 
     @abstractmethod
-    def _create_vascular_tissue(self, polygons: List[Polygon]):
+    def _create_vascular_tissue(self, polygon: Polygon):
         """
         Create vascular tissue.
         
         Args:
-            polygons: List of polygon boundaries
+            polygon: Polygon boundary
         """
         pass
         

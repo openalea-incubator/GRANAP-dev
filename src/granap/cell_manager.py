@@ -1,6 +1,12 @@
+
+from typing import List, Optional
+from granap.cell_class import Cell
+from shapely.geometry import Polygon, Point
+import numpy as np
+
 class CellManager:
     def __init__(self):
-        self.cells = []
+        self.cells: List[Cell] = []
 
     def add_cell(self, cell: Cell):
         self.cells.append(cell)
@@ -14,6 +20,16 @@ class CellManager:
                 return cell
         return None
 
+    def extend_cells(self, cells: List[Cell]):
+
+        # add vascular cells
+        for cell in cells:
+            max_id_layer = max([c.id_layer for c in self.cells])
+            cell.id_layer = max_id_layer + cell.id_layer
+            cell.id_cell = len(self.cells) + cell.id_cell
+            cell.id_group = len(self.cells) + cell.id_cell
+            self.cells.append(cell)
+
     def get_cells_by_type(self, type: str):
         return [cell for cell in self.cells if cell.type == type]
 
@@ -24,22 +40,41 @@ class CellManager:
         return [cell for cell in self.cells if cell.id_group == id_group]
 
     def get_cells_by_polygon(self, polygon: Polygon):
-        return [cell for cell in self.cells if cell.polygon.intersects(polygon)]
+        # Check if cell has polygon attribute and it is not None
+        return [cell for cell in self.cells if cell.polygon is not None and cell.polygon.intersects(polygon)]
     
     def remove_cells_by_polygon(self, polygon: Polygon):
-        # if self.cells have polygon
-        if self.cells[0].polygon is not None:
-            self.cells = [cell for cell in self.cells if not cell.polygon.intersects(polygon)]
-        else:
-            for cell in self.cells:
+        if not self.cells:
+            return
+
+        # Check the first cell to decide strategy, assuming homogeneity
+        # Or better, handle both cases robustly
+        
+        cells_to_keep = []
+        for cell in self.cells:
+            if cell.polygon is not None:
+                if not cell.polygon.intersects(polygon):
+                    cells_to_keep.append(cell)
+            else:
                 point = Point(cell.x, cell.y)
-                if point.intersects(polygon):
-                    self.cells.remove(cell)
+                if not point.intersects(polygon):
+                    cells_to_keep.append(cell)
+        
+        self.cells = cells_to_keep
     
     def recalculate_cell_properties(self):
         """Recalculate the properties of all cells in the list."""
         for i, cell in enumerate(self.cells):
             cell.angle = np.arctan2(cell.y, cell.x)
-            cell.radius = cell.polygon.centroid.distance(Point(0, 0))
-            cell.area = cell.polygon.area
+            if cell.polygon is not None:
+                cell.radius = cell.polygon.centroid.distance(Point(0, 0))
+                cell.area = cell.polygon.area
+            else:
+                cell.radius = np.sqrt(cell.x**2 + cell.y**2)
+                cell.area = cell.diameter**2 * np.pi / 4
             cell.id_cell = i
+
+    def remove_cells_in_polygon(self, polygon: Polygon):
+        # Filter cells that do not intersect the polygon
+        # This creates a new list, avoiding modification during iteration
+        self.cells = [cell for cell in self.cells if not cell.point.intersects(polygon)]
