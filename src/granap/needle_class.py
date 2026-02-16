@@ -232,6 +232,17 @@ class NeedleAnatomy(Organ):
         self.transfusion_params.update(kwargs)
         self._invalidate_geometry()
 
+    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+        """
+        Find the layer where vascular tissue will be allocated.
+        
+        Args:
+            layers_polygons: List of layer polygon dictionaries
+        """
+        layer_for_vascular = [l["name"] for l in layers_polygons].index("parenchyma")
+        polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
+        return polygon_for_vascular
+    
     def _create_vascular_tissue(self, polygon: Polygon):
         """
         Create vascular tissue.
@@ -404,5 +415,5 @@ class NeedleAnatomy(Organ):
             
         return cells_in_ellipses, list_ellipses_polygons
 
-needle = NeedleAnatomy()
-needle.plot_cells()
+# needle = NeedleAnatomy()
+# needle.plot_cells()

@@ -23,12 +23,14 @@ class Cell:
         self.polygon = polygon if polygon != None else None
         
 
-    def jitter(self, shift: float = 0.01):
+    def jitter(self, shift: float = 0):
         """Jitter the cell position."""
-        self.x += np.random.uniform(-shift, shift)*self.diameter
-        self.y += np.random.uniform(-shift, shift)*self.diameter
-        self.angle = np.arctan2(self.y, self.x)
-        self.radius = np.sqrt(self.x**2 + self.y**2)
+        if shift != 0:
+            self.x += np.random.uniform(-shift, shift)*self.diameter
+            self.y += np.random.uniform(-shift, shift)*self.diameter
+            self.angle = np.arctan2(self.y, self.x)
+            self.radius = np.sqrt(self.x**2 + self.y**2)
+            self.point = Point(self.x, self.y)
 
     def cell_to_dict(self):
         return {"type": self.type, "x": self.x, "y": self.y, 

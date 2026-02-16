@@ -22,16 +22,24 @@ class CellManager:
 
     def extend_cells(self, cells: List[Cell]):
 
-        # add vascular cells
+        max_id_layer = max([c.id_layer for c in self.cells])
+        max_id_cell = max([c.id_cell for c in self.cells])
+        max_id_group = max([c.id_group for c in self.cells])
+
+        # add a list of cells to the current list
         for cell in cells:
-            max_id_layer = max([c.id_layer for c in self.cells])
-            cell.id_layer = max_id_layer + cell.id_layer
-            cell.id_cell = len(self.cells) + cell.id_cell
-            cell.id_group = len(self.cells) + cell.id_cell
+            cell.id_layer = max_id_layer + cell.id_layer +1
+            cell.id_cell = max_id_cell + cell.id_cell+1 
+            cell.id_group = max_id_group + cell.id_group+1
+            print(cell.id_group)
             self.cells.append(cell)
 
     def get_cells_by_type(self, type: str):
         return [cell for cell in self.cells if cell.type == type]
+    
+    def get_all_types(self):
+        # return a list of unique cell type for all cells
+        return list(set([cell.type for cell in self.cells]))
 
     def get_cells_by_layer(self, id_layer: int):
         return [cell for cell in self.cells if cell.id_layer == id_layer]
@@ -78,3 +86,32 @@ class CellManager:
         # Filter cells that do not intersect the polygon
         # This creates a new list, avoiding modification during iteration
         self.cells = [cell for cell in self.cells if not cell.point.intersects(polygon)]
+
+    def plot_cells(self, ax = None):
+        # plot cells coordinates
+        # color code by type
+        # legend
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        if ax is None:
+            fig, ax = plt.subplots()
+        
+        types = self.get_all_types()
+        # Create a color map
+        colors = cm.viridis(np.linspace(0, 1, len(types)))
+        type_to_color = dict(zip(types, colors))
+
+        # Plot cells
+        for cell in self.cells:
+            if cell.type in type_to_color:
+                c = type_to_color[cell.type]
+                ax.plot(cell.x, cell.y, marker='o', linestyle='', c=c, label=cell.type)
+        
+        # Deduplicate legend
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        if by_label:
+            ax.legend(by_label.values(), by_label.keys())
+        
+        ax.set_aspect('equal', adjustable='box')
+        plt.show()

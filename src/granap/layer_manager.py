@@ -71,6 +71,12 @@ class LayerManager:
             if layer.name == name:
                 return layer
         return None
+
+    def get_layer_by_order(self, order:int) -> Optional[Layer]:
+        for layer in self._layers:
+            if layer.order == order:
+                return layer
+        return None
     
     def has_layer(self, name: str) -> bool:
         """Check if a layer exists."""

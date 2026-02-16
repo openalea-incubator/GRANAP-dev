@@ -210,12 +210,20 @@ class Organ(ABC):
         Args:
             layers_polygons: List of layer polygon dictionaries
         """
-        layer_for_vascular = [l["name"] for l in layers_polygons].index("parenchyma")
-        polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
-        # add vascular tissue
-        # call organ specific function to create vascular tissue
+        # Find the layer where vascular tissue will be allocated
+        polygon_for_vascular = self._which_layer_for_vascular(layers_polygons)
+        # Create vascular tissue
         self._create_vascular_tissue(polygon_for_vascular)
 
+    @abstractmethod
+    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+        """
+        Find the layer where vascular tissue will be allocated.
+        
+        Args:
+            layers_polygons: List of layer polygon dictionaries
+        """
+        pass
 
     @abstractmethod
     def _create_vascular_tissue(self, polygon: Polygon):

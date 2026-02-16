@@ -4,10 +4,16 @@ Root anatomy implementation.
 
 import numpy as np
 from typing import List, Dict, Any
-from shapely.geometry import Polygon
+
+from shapely.geometry import Polygon, Point
+from shapely.ops import unary_union
+from shapely.affinity import translate
 
 from granap.organ_class import Organ
 from granap.layer_class import Layer
+from granap.cell_class import Cell
+from granap.cell_manager import CellManager
+from granap.generate_cell import CellGenerator
 from granap.geometry_collection import GeometryProcessor
 
 
@@ -32,8 +38,8 @@ class RootAnatomy(Organ):
         # Root specific parameters
         self.vascular_params = {
             "thickness": 0.2,
-            "cell_diameter": 0.02,
-            "xylem_diameter": 0.015,
+            "cell_diameter": 0.006,
+            "xylem_diameter": 0.05,
             "phloem_diameter": 0.012,
             "n_vascular_bundles": 4
         }
@@ -58,16 +64,16 @@ class RootAnatomy(Organ):
         
         self.layer_manager.add_layer(Layer(
             name="endodermis",
-            cell_diameter=0.02,
-            cell_width=0.03,
+            cell_diameter=0.015,
+            cell_width=0.035,
             n_layers=1,
             order=3
         ))
         
         self.layer_manager.add_layer(Layer(
             name="pericycle",
-            cell_diameter=0.02,
-            cell_width=0.015,
+            cell_diameter=0.01,
+            cell_width=0.005,
             n_layers=1,
             order=2
         ))
@@ -108,7 +114,9 @@ class RootAnatomy(Organ):
         """
         central_layers = []
         cell_diameter = self.vascular_params["cell_diameter"]
-        space_increment = self.vascular_params["cell_diameter"] / 2
+        # first space increment is the cell diameter of the layer with the smallest order
+        min_order = min([l.order for l in self.layer_manager.get_layers() if l.order > 0])
+        space_increment = self.layer_manager.get_layer_by_order(min_order).cell_diameter/2
         i_layer = len(params)
         
         # Create vascular parenchyma layers
@@ -157,3 +165,81 @@ class RootAnatomy(Organ):
         # This would require more complex geometry manipulation
         # Left as a placeholder for future enhancement
         pass
+
+    def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug = False):
+        """
+        Create vascular tissue (xylem and phloem).
+        """
+        if self.vascular_params["n_vascular_bundles"] == 0:
+            return
+        
+        self.fit_vascular_elements(polygon_for_vascular)
+        # remove the cells in the vascular elements
+        vascular_polygons = unary_union(self.vascular_polygons)
+        self.all_cells.remove_cells_in_polygon(vascular_polygons)
+
+        # add vascular cells to all_cells
+        self.all_cells.extend_cells(self.vascular_cells.cells)
+        self.all_cells.recalculate_cell_properties()
+        if debug:
+            self.all_cells.plot_cells()
+
+    def fit_vascular_elements(self, polygon):
+        # from polygon, fit two ellipses
+        n_xylem_cells = self.vascular_params["n_vascular_bundles"]
+
+        slices = GeometryProcessor.pizza_slice(polygon, n_xylem_cells)
+        cells_in_slices, list_xylem_polygons = self.vascular_elements_in_slice(slices)
+        self.vascular_cells = cells_in_slices
+        self.vascular_polygons = list_xylem_polygons
+    
+    def vascular_elements_in_slice(self, slices: List[Polygon]):
+        list_xylem_polygons = []
+        cells_in_slices = CellManager()
+        i_cell = 0
+        for i_slice, slice in enumerate(slices):
+            
+            xylem_polygon = GeometryProcessor.fit_inner_ellipse(slice, self.vascular_params["xylem_diameter"]/2)
+            xylem_polygon = xylem_polygon["polygon"]
+            xylem_polygon_buff = GeometryProcessor.buffer_polygon(xylem_polygon, -(self.vascular_params["xylem_diameter"]/2)*0.15)
+            x, y = xylem_polygon_buff.exterior.coords.xy
+            center = xylem_polygon.centroid
+            coords = np.column_stack((x, y))
+            coords = GeometryProcessor.resample_coords(coords, target_n_points=25)
+
+            # Iterate over centers and borders together
+            # coords[1:] slices the centers, cell_borders[1:] slices the corresponding borders
+            for cell_border_pts in coords[1:]:
+                i_cell += 1
+                new_cell = Cell(
+                        type="xylem",
+                        x=cell_border_pts[0],
+                        y=cell_border_pts[1],
+                        diameter=self.vascular_params["xylem_diameter"],
+                        id_cell=i_slice,
+                        id_layer=i_slice,
+                        id_group=i_slice,
+                        angle=np.arctan2(cell_border_pts[1] - center.y, 
+                                          cell_border_pts[0] - center.x),
+                        radius=np.sqrt((cell_border_pts[0] - center.x)**2 + 
+                                        (cell_border_pts[1] - center.y)**2),
+                        area=np.pi * (self.vascular_params["xylem_diameter"]/2)**2
+                    )
+                cells_in_slices.add_cell(new_cell)
+
+            list_xylem_polygons.append(xylem_polygon)
+        return cells_in_slices, list_xylem_polygons
+        
+    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+        """
+        Find the layer where vascular tissue will be allocated.
+        
+        Args:
+            layers_polygons: List of layer polygon dictionaries
+        """
+        layer_for_vascular = [l["name"] for l in layers_polygons].index("vascular_parenchyma")
+        polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
+        return polygon_for_vascular
+
+root = RootAnatomy()
+root.plot_cells()

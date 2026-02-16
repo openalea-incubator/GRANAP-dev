@@ -235,7 +235,8 @@ class GeometryProcessor:
         # Use Chebyshev Center (deepest point inside) instead of fitEllipse center or Centroid
         cx, cy = GeometryProcessor.get_chebyshev_center(polygon)
     
-        
+        if rx is not None and ry is None:
+            ry = rx
         rx = major / 2 if rx is None else rx
         ry = minor / 2 if ry is None else ry
         
@@ -284,6 +285,35 @@ class GeometryProcessor:
             plt.show()
     
         return result_ellipse
+
+    @staticmethod
+    def pizza_slice(polygon, n_slices):
+        """
+        Split a polygon into n slices using radial lines from the center.
+        """
+        cx, cy = polygon.centroid.x, polygon.centroid.y
+        slices = []
+        
+        # Determine a large enough radius to cover the polygon
+        minx, miny, maxx, maxy = polygon.bounds
+        radius = max(maxx - minx, maxy - miny) * 2
+        
+        for i in range(n_slices):
+            angle_start = 2 * np.pi * i / n_slices
+            angle_end = 2 * np.pi * (i + 1) / n_slices
+            
+            # Create a wedge polygon
+            # Points: center, point at angle_start, point at angle_end
+            p1 = (cx + radius * np.cos(angle_start), cy + radius * np.sin(angle_start))
+            p2 = (cx + radius * np.cos(angle_end), cy + radius * np.sin(angle_end))
+            
+            wedge = sp.Polygon([(cx, cy), p1, p2])
+            
+            slice_polygon = polygon.intersection(wedge)
+            if not slice_polygon.is_empty:
+                slices.append(slice_polygon)
+                
+        return slices
     
     @staticmethod
     def two_ellipses(polygon, rx, ry):
