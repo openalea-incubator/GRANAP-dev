@@ -31,7 +31,6 @@ class CellManager:
             cell.id_layer = max_id_layer + cell.id_layer +1
             cell.id_cell = max_id_cell + cell.id_cell+1 
             cell.id_group = max_id_group + cell.id_group+1
-            print(cell.id_group)
             self.cells.append(cell)
 
     def get_cells_by_type(self, type: str):
