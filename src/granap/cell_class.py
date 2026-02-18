@@ -23,7 +23,7 @@ class Cell:
         self.polygon = polygon if polygon != None else None
         
 
-    def jitter(self, shift: float = 0):
+    def jitter(self, shift: float = 0.0001):
         """Jitter the cell position."""
         if shift != 0:
             self.x += np.random.uniform(-shift, shift)*self.diameter

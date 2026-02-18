@@ -25,14 +25,11 @@ class RootAnatomy(Organ):
     circular cross-section and vascular cylinder.
     """
     
-    def __init__(self, randomness: float = 1.0):
+    def __init__(self):
         """
         Initialize root anatomy.
-        
-        Args:
-            randomness: Degree of randomness in cell placement (0-3)
         """
-        super().__init__(randomness)
+        super().__init__()
         self._initialize_default_layers()
 
         # Root specific parameters

@@ -361,12 +361,16 @@ class Organ(AbstractNetwork, ABC):
         4. Assign MECHA-compatible node indices and build the graph.
         """
         cells_gdf = self.generate_cells()
-        n_dec = 6  # rounding precision for vertex deduplication
+        n_dec = 6  # rounding precision for snapped vertex keys
 
-        # Phase 1 — collect vertex sequences and edge→cell mapping
+        # Phase 0 — snap nearby vertices together using a KD-tree
+        # This fixes floating-point mismatches between adjacent polygons
+        # that would otherwise prevent shared-vertex detection.
+        from scipy.spatial import cKDTree
 
-        vertex_to_cells: Dict[tuple, set] = {}   # vk → set of row_idx
-        cell_vkeys: Dict[int, List[tuple]] = {}  # row_idx → ordered vkeys
+        raw_cell_data: Dict[int, list] = {}   # row_idx → raw coords
+        all_raw_verts: list = []              # flat list of (x, y)
+        vert_global_idx: Dict[int, List[int]] = {}  # row_idx → [indices]
 
         for row_idx, row in cells_gdf.iterrows():
             poly = row["geometry"]
@@ -379,7 +383,65 @@ class Organ(AbstractNetwork, ABC):
                 coords = coords[:-1]
             if len(coords) < 3:
                 continue
-            vkeys = [(round(x, n_dec), round(y, n_dec)) for x, y in coords]
+            indices = []
+            for x, y in coords:
+                indices.append(len(all_raw_verts))
+                all_raw_verts.append((x, y))
+            raw_cell_data[row_idx] = coords
+            vert_global_idx[row_idx] = indices
+
+        if not all_raw_verts:
+            return
+
+        coords_arr = np.array(all_raw_verts)
+        kd_tree = cKDTree(coords_arr)
+
+        # Compute snap tolerance: 1 % of 5th-percentile edge length
+        edge_lengths = []
+        for coords in raw_cell_data.values():
+            n = len(coords)
+            for k in range(n):
+                el = np.hypot(
+                    coords[(k + 1) % n][0] - coords[k][0],
+                    coords[(k + 1) % n][1] - coords[k][1],
+                )
+                if el > 0:
+                    edge_lengths.append(el)
+        snap_tol = (
+            np.percentile(edge_lengths, 5) * 0.01
+            if edge_lengths
+            else 1e-4
+        )
+
+        # Cluster nearby vertices → canonical snapped coordinate
+        canonical = [None] * len(all_raw_verts)
+        visited_snap = [False] * len(all_raw_verts)
+        for i in range(len(all_raw_verts)):
+            if visited_snap[i]:
+                continue
+            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
+            cx = float(np.mean(coords_arr[cluster, 0]))
+            cy = float(np.mean(coords_arr[cluster, 1]))
+            snapped = (round(cx, n_dec), round(cy, n_dec))
+            for ci in cluster:
+                visited_snap[ci] = True
+                canonical[ci] = snapped
+
+        # Phase 1 — build cell_vkeys, vertex_to_cells, edge_to_cells
+        vertex_to_cells: Dict[tuple, set] = {}
+        cell_vkeys: Dict[int, List[tuple]] = {}
+
+        for row_idx, gidxs in vert_global_idx.items():
+            vkeys_raw = [canonical[gi] for gi in gidxs]
+            # Remove consecutive duplicates introduced by snapping
+            vkeys: List[tuple] = [vkeys_raw[0]]
+            for vk in vkeys_raw[1:]:
+                if vk != vkeys[-1]:
+                    vkeys.append(vk)
+            if len(vkeys) > 1 and vkeys[-1] == vkeys[0]:
+                vkeys = vkeys[:-1]
+            if len(vkeys) < 3:
+                continue
             cell_vkeys[row_idx] = vkeys
             for vk in vkeys:
                 vertex_to_cells.setdefault(vk, set()).add(row_idx)
