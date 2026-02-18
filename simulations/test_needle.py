@@ -30,5 +30,4 @@ needle.fill_matrix(K=1e-5, label="transmembrane", cell_type="mesophyl")
 # Fill symplastic (plasmodesmata) conductivities:
 needle.fill_matrix(K=1e-3, label="symplastic", cell_type="mesophyl")
 
-print(needle.graph)
-print(needle._matrix)
+needle.plot_network()

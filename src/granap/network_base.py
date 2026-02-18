@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 import networkx as nx
 from scipy.sparse import lil_matrix
+import matplotlib.pyplot as plt
 
 
 class AbstractNetwork(ABC):
@@ -153,20 +154,20 @@ class AbstractNetwork(ABC):
         for u, v, data in self.graph.edges(data=True):
             path = data.get("path", "")
 
-            if label == "apoplastic" and path == "apoplastic":
+            if label == "apoplastic" and path == "wall":
                 # u or v is a wall node; check if it is in matching_walls
                 wall_node = u if u < self.n_walls else (v if v < self.n_walls else None)
                 if wall_node is not None and wall_node in matching_walls:
                     self._matrix[u, v] = K
                     self._matrix[v, u] = K
 
-            elif label == "transmembrane" and path == "transmembrane":
+            elif label == "transmembrane" and path == "membrane":
                 wall_node = u if u < self.n_walls else (v if v < self.n_walls else None)
                 if wall_node is not None and wall_node in matching_walls:
                     self._matrix[u, v] = K
                     self._matrix[v, u] = K
 
-            elif label == "symplastic" and path == "symplastic":
+            elif label == "symplastic" and path == "plasmodesmata":
                 # Both u and v are cell nodes
                 cell_a = u
                 cell_b = v
@@ -210,3 +211,46 @@ class AbstractNetwork(ABC):
             (actual_a == want_a and actual_b == want_b)
             or (actual_a == want_b and actual_b == want_a)
         )
+
+    def plot_network(self, **kwargs):
+        position = kwargs.get('position', nx.get_node_attributes(self.graph, 'position'))
+        node_types = kwargs.get('node_types', nx.get_node_attributes(self.graph, 'cell_type'))
+    
+        # Default color map
+        default_color_map = {'apo': 'red', 'sym': 'yellow'}
+        node_color_map = kwargs.get('node_color_map', default_color_map)
+    
+        default_edge_color_map = {'wall': 'purple', 'membrane': 'green', 'plasmodesmata': 'gray'}
+        edge_color_map = kwargs.get('edge_color_map', default_edge_color_map)
+    
+        # Determine node colors
+        node_colors = []
+        for node in self.graph.nodes():
+            node_type = node_types.get(node, 'sym')  # Default to 'sym' if type is not found
+            node_colors.append(node_color_map.get(node_type, 'blue'))  # Default to 'blue' if color not found
+    
+            # Determine edge colors
+        edge_colors = []
+        for u, v, edge_attrs in self.graph.edges(data=True):
+            edge_type = edge_attrs.get('path', 'wall')  # Default to 'wall' if path is not found
+            edge_colors.append(edge_color_map.get(edge_type, 'purple'))
+    
+        # Draw the network
+        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
+    
+        nx.draw(
+            self.graph,
+            position,
+            ax=ax,
+            node_color=node_colors,
+            with_labels=kwargs.get('with_labels', False),
+            node_size=kwargs.get('node_size', 10),
+            edge_color=edge_colors,
+            width=kwargs.get('width', 1),
+            alpha=kwargs.get('alpha', 0.7)
+        )
+    
+        ax.set_title(kwargs.get('title', 'Network Visualization'))
+        ax.set_aspect('equal')
+        plt.tight_layout()
+        plt.show()
