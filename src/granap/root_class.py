@@ -240,6 +240,3 @@ class RootAnatomy(Organ):
         layer_for_vascular = [l["name"] for l in layers_polygons].index("vascular_parenchyma")
         polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         return polygon_for_vascular
-
-root = RootAnatomy()
-root.plot_cells()

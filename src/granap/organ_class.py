@@ -7,7 +7,8 @@ from typing import List, Dict, Any, Optional
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
+from scipy.sparse import lil_matrix
 
 from granap.layer_class import Layer
 from granap.layer_manager import LayerManager
@@ -15,14 +16,16 @@ from granap.geometry_collection import GeometryProcessor
 from granap.generate_cell import CellGenerator
 from granap.cell_class import Cell
 from granap.cell_manager import CellManager
+from granap.network_base import AbstractNetwork
 
 
-class Organ(ABC):
+class Organ(AbstractNetwork, ABC):
     """
     Abstract base class for plant anatomical structures.
     
     Defines the interface and common functionality for generating
     cross-sectional anatomy of different plant types.
+    Inherits from AbstractNetwork for hydraulic network construction.
     """
     
     def __init__(self, randomness: float = 1.0):
@@ -32,6 +35,7 @@ class Organ(ABC):
         Args:
             randomness: Degree of randomness in cell placement (0-3)
         """
+        AbstractNetwork.__init__(self)
         self.layer_manager = LayerManager()
         self.randomness = randomness
         self._base_polygon: Optional[Polygon] = None
@@ -324,6 +328,216 @@ class Organ(ABC):
         # Drop geometry column for CSV export
         cells_df = cells_gdf.drop(columns=['geometry'])
         cells_df.to_csv(filepath, index=False)
+
+    def export_to_adjencymatrix(self) -> lil_matrix:
+        """
+        Build the hydraulic network from cell geometry and return
+        the sparse adjacency matrix.
+
+        Returns
+        -------
+        lil_matrix
+            Sparse adjacency matrix (n_total x n_total).
+        """
+        # Ensure cells are generated before building the network
+        self.generate_cells()
+        return super().export_to_adjencymatrix()
+
+    # ------------------------------------------------------------------
+    # Network construction from Voronoi cell geometry
+    # ------------------------------------------------------------------
+    def _build_network(self) -> None:
+        """
+        Populate ``self.graph`` from the cell GeoDataFrame.
+
+        Algorithm
+        ---------
+        1. Extract polygon vertices (rounded) → Junction nodes.
+        2. Extract polygon edges (sorted vertex pairs) → Wall nodes
+           at edge midpoints.  Track which cells border each wall.
+        3. Assign MECHA-compatible indices:
+           ``[0..N_w)`` walls, ``[N_w..N_w+N_j)`` junctions,
+           ``[N_w+N_j..N_total)`` cells.
+        4. Add edges:
+           - **transmembrane** : cell ↔ wall
+           - **symplastic**    : cell ↔ cell  (shared wall)
+           - **apoplastic**    : wall ↔ junction
+        """
+        cells_gdf = self.generate_cells()
+        n_dec = 6  # rounding precision for vertex deduplication
+
+        # ----- Step 1 & 2: collect vertices and edges per cell -----
+        # vertex_key  → junction local id
+        vertex_map: Dict[tuple, int] = {}
+        next_vertex_id = 0
+
+        # edge_key (sorted pair of vertex keys) → wall local id
+        edge_map: Dict[tuple, int] = {}
+        next_edge_id = 0
+
+        # wall_id → list of cell_row_index that touch this wall
+        wall_to_cell_rows: Dict[int, List[int]] = {}
+
+        # wall_id → (vertex_key_a, vertex_key_b)
+        wall_vertex_keys: Dict[int, tuple] = {}
+
+        # wall_id → midpoint (x, y)
+        wall_midpoints: Dict[int, tuple] = {}
+
+        for row_idx, row in cells_gdf.iterrows():
+            poly = row["geometry"]
+            if poly is None or poly.is_empty:
+                continue
+
+            # Handle MultiPolygon – use only the largest piece
+            if isinstance(poly, MultiPolygon):
+                poly = max(poly.geoms, key=lambda g: g.area)
+
+            coords = list(poly.exterior.coords)
+            if coords[0] == coords[-1]:
+                coords = coords[:-1]
+            if len(coords) < 3:
+                continue
+
+            n_pts = len(coords)
+            # Build rounded vertex keys for this polygon
+            vkeys = []
+            for x, y in coords:
+                vk = (round(x, n_dec), round(y, n_dec))
+                if vk not in vertex_map:
+                    vertex_map[vk] = next_vertex_id
+                    next_vertex_id += 1
+                vkeys.append(vk)
+
+            # Build edges (consecutive vertex pairs)
+            for i in range(n_pts):
+                vk_a = vkeys[i]
+                vk_b = vkeys[(i + 1) % n_pts]
+                edge_key = tuple(sorted((vk_a, vk_b)))
+
+                if edge_key not in edge_map:
+                    edge_map[edge_key] = next_edge_id
+                    wall_vertex_keys[next_edge_id] = (vk_a, vk_b)
+                    mid_x = (vk_a[0] + vk_b[0]) / 2.0
+                    mid_y = (vk_a[1] + vk_b[1]) / 2.0
+                    wall_midpoints[next_edge_id] = (mid_x, mid_y)
+                    wall_to_cell_rows[next_edge_id] = []
+                    next_edge_id += 1
+
+                wall_id = edge_map[edge_key]
+                if row_idx not in wall_to_cell_rows[wall_id]:
+                    wall_to_cell_rows[wall_id].append(row_idx)
+
+        # ----- Step 3: assign MECHA-compatible node indices -----
+        self.n_walls = len(edge_map)
+        self.n_junctions = len(vertex_map)
+        self.n_cells = len(cells_gdf)
+
+        # Wall node index  = wall_local_id  (already 0-based)
+        # Junction node idx = n_walls + junction_local_id
+        # Cell node idx     = n_walls + n_junctions + cell_row_index
+
+        junction_key_to_node = {
+            vk: self.n_walls + vid for vk, vid in vertex_map.items()
+        }
+
+        cell_row_to_node = {
+            row_idx: self.n_walls + self.n_junctions + i
+            for i, row_idx in enumerate(cells_gdf.index)
+        }
+
+        # ----- Add wall nodes -----
+        for wall_id, midpoint in wall_midpoints.items():
+            # Compute wall length from its two vertices
+            vk_a, vk_b = wall_vertex_keys[wall_id]
+            length = np.hypot(vk_a[0] - vk_b[0], vk_a[1] - vk_b[1])
+            self.graph.add_node(
+                wall_id,
+                node_type="wall",
+                position=midpoint,
+                length=length,
+            )
+
+        # ----- Add junction nodes -----
+        for vk, vid in vertex_map.items():
+            node_id = self.n_walls + vid
+            self.graph.add_node(
+                node_id,
+                node_type="junction",
+                position=vk,
+            )
+
+        # ----- Add cell nodes -----
+        for row_idx, row in cells_gdf.iterrows():
+            node_id = cell_row_to_node[row_idx]
+            centroid = row["geometry"].centroid if row["geometry"] is not None else None
+            cx = centroid.x if centroid else row["x"]
+            cy = centroid.y if centroid else row["y"]
+            self.graph.add_node(
+                node_id,
+                node_type="cell",
+                cell_type=row.get("type", ""),
+                position=(cx, cy),
+            )
+
+        # ----- Step 4: add edges -----
+        # Store wall→cell mapping for fill_matrix filtering
+        self._wall_to_cells = {
+            wid: [cell_row_to_node[r] for r in rows]
+            for wid, rows in wall_to_cell_rows.items()
+        }
+
+        for wall_id in range(self.n_walls):
+            vk_a, vk_b = wall_vertex_keys[wall_id]
+            junc_a = junction_key_to_node[vk_a]
+            junc_b = junction_key_to_node[vk_b]
+            cell_nodes = self._wall_to_cells[wall_id]
+            wall_length = self.graph.nodes[wall_id]["length"]
+
+            # Apoplastic: wall ↔ junction
+            self.graph.add_edge(
+                wall_id, junc_a,
+                path="apoplastic",
+                length=wall_length / 2.0,
+            )
+            self.graph.add_edge(
+                wall_id, junc_b,
+                path="apoplastic",
+                length=wall_length / 2.0,
+            )
+
+            # Transmembrane: cell ↔ wall
+            for cn in cell_nodes:
+                pos_cell = self.graph.nodes[cn]["position"]
+                pos_wall = self.graph.nodes[wall_id]["position"]
+                dist = np.hypot(
+                    pos_wall[0] - pos_cell[0],
+                    pos_wall[1] - pos_cell[1],
+                )
+                self.graph.add_edge(
+                    cn, wall_id,
+                    path="transmembrane",
+                    length=wall_length,
+                    dist=dist,
+                )
+
+            # Symplastic: cell ↔ cell (only if wall is shared)
+            if len(cell_nodes) == 2:
+                pos_a = self.graph.nodes[cell_nodes[0]]["position"]
+                pos_b = self.graph.nodes[cell_nodes[1]]["position"]
+                dist = np.hypot(
+                    pos_b[0] - pos_a[0], pos_b[1] - pos_a[1]
+                )
+                # add_edge is idempotent for the same pair; if two
+                # walls are shared between the same two cells the
+                # edge is simply updated (latest wall data wins,
+                # which is acceptable for the connectivity matrix).
+                self.graph.add_edge(
+                    cell_nodes[0], cell_nodes[1],
+                    path="symplastic",
+                    length=wall_length,
+                    dist=dist,
+                )
     
     def get_statistics(self) -> Dict[str, Any]:
         """

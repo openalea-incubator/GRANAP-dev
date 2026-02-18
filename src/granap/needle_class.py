@@ -283,8 +283,7 @@ class NeedleAnatomy(Organ):
             center = ellipse["polygon"].centroid
             rx, ry = ellipse["axes"]
             angle = np.deg2rad(ellipse["angle"])-np.pi/2
-    
-            print(np.rad2deg(angle))
+
             # add rows of xylem cells in upper part of ellipse
             params_xylem = [p for p in self.params if p["name"] == "xylem"]
             xylem_rows = params_xylem[0]["n_files"] # cell files
@@ -415,5 +414,3 @@ class NeedleAnatomy(Organ):
             
         return cells_in_ellipses, list_ellipses_polygons
 
-# needle = NeedleAnatomy()
-# needle.plot_cells()
