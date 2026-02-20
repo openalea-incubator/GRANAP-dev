@@ -49,7 +49,7 @@ class AbstractNetwork(ABC):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def _build_network(self) -> None:
+    def _build_anatnetwork(self) -> None:
         """
         Populate ``self.graph`` with wall, junction and cell nodes,
         and connect them with the appropriate edges.
@@ -83,7 +83,7 @@ class AbstractNetwork(ABC):
 
         # Ensure the graph is built
         if self.graph.number_of_nodes() == 0:
-            self._build_network()
+            self._build_anatnetwork()
 
         n = self.n_total
         mat = lil_matrix((n, n))

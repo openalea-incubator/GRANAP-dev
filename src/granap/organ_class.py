@@ -346,7 +346,7 @@ class Organ(AbstractNetwork, ABC):
     # ------------------------------------------------------------------
     # Network construction from Voronoi cell geometry
     # ------------------------------------------------------------------
-    def _build_network(self) -> None:
+    def _build_anatnetwork(self) -> None:
         """
         Populate ``self.graph`` from the cell GeoDataFrame.
 
@@ -602,6 +602,7 @@ class Organ(AbstractNetwork, ABC):
         for row_idx, row in cells_gdf.iterrows():
             node_id = cell_row_to_node[row_idx]
             centroid = row["geometry"].centroid if row["geometry"] is not None else None
+            area = row["geometry"].area if row["geometry"] is not None else None
             cx = centroid.x if centroid else row["x"]
             cy = centroid.y if centroid else row["y"]
             self.graph.add_node(
@@ -611,6 +612,7 @@ class Organ(AbstractNetwork, ABC):
                 cgroup=row.get("cgroup", ""),
                 cell_type=row.get("type", ""),
                 position=(cx, cy),
+                area=area,
             )
 
         # Phase 6 — add edges
@@ -621,28 +623,14 @@ class Organ(AbstractNetwork, ABC):
 
         for wd in wall_registry.values():
             wall_id = wd["id"]
-            junc_a = self.n_walls + junction_vk_to_id[wd["junc_start"]]
-            junc_b = self.n_walls + junction_vk_to_id[wd["junc_end"]]
             cell_nodes = self._wall_to_cells[wall_id]
             wall_length = wd["length"]
-
-            # Apoplastic: wall ↔ junction
-            self.graph.add_edge(
-                wall_id, junc_a,
-                path="wall",
-                length=wall_length / 2.0,
-            )
-            self.graph.add_edge(
-                wall_id, junc_b,
-                path="wall",
-                length=wall_length / 2.0,
-            )
 
             # Transmembrane: cell ↔ wall
             for cn in cell_nodes:
                 pos_cell = self.graph.nodes[cn]["position"]
                 pos_wall = wd["midpoint"]
-                dist = np.hypot(
+                dist_wall_cell = np.hypot(
                     pos_wall[0] - pos_cell[0],
                     pos_wall[1] - pos_cell[1],
                 )
@@ -651,11 +639,30 @@ class Organ(AbstractNetwork, ABC):
                     cn, wall_id,
                     path="membrane",
                     length=wall_length,
-                    dist=dist,
+                    dist=dist_wall_cell,
                     d_vec=d_vec,
                 )
-
-            # Symplastic: cell ↔ cell (only if wall is shared by 2 cells)
+            
+            # each junction connected to the wall node
+            for junc in ["junc_start", "junc_end"]:
+                junc_id = self.n_walls + junction_vk_to_id[wd[junc]]
+                pos_junc = self.graph.nodes[junc_id]["position"]
+                dist_junc_wall_node = np.hypot(pos_junc[0] - pos_wall[0], pos_junc[1] - pos_wall[1])
+                lateral_distance = dist_wall_cell + dist_junc_wall_node
+                d_vec = np.array(pos_junc[0] - pos_wall[0], pos_junc[1] - pos_wall[1])
+                
+                # Apoplastic: wall ↔ junction
+                self.graph.add_edge(
+                        junc_id,
+                        wall_id,
+                        path = 'wall',
+                        length = wall_length / 2.0,
+                        lateral_distance = lateral_distance,
+                        d_vec = d_vec,
+                        distnode_wall_cell = dist_wall_cell,
+                )
+            
+            # Symplastic: cell ↔ cell
             if len(cell_nodes) == 2:
                 pos_a = self.graph.nodes[cell_nodes[0]]["position"]
                 pos_b = self.graph.nodes[cell_nodes[1]]["position"]
