@@ -1,5 +1,6 @@
 import numpy as np
 from shapely.geometry import Polygon, Point
+from granap.geometry_collection import GeometryProcessor
 
 class Cell:
 
@@ -44,3 +45,8 @@ class Cell:
                 "radius": self.radius,
                 "area": self.area,
                 }
+    
+    def smooth(self, smooth_factor: float = 0.01):
+        """Smooth the cell polygon."""
+        self.polygon = GeometryProcessor.buffer_polygon(self.polygon, 0, smooth_factor=smooth_factor)
+

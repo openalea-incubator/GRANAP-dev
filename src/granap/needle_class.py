@@ -4,13 +4,15 @@ Needle anatomy implementation.
 
 import numpy as np
 from typing import List, Dict, Any
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.ops import unary_union
 
 from granap.organ_class import Organ
 from granap.cell_class import Cell
+from granap.cell_manager import CellManager
 from granap.layer_class import Layer
 from granap.geometry_collection import GeometryProcessor
+import matplotlib.pyplot as plt
 
 
 class NeedleAnatomy(Organ):
@@ -53,7 +55,7 @@ class NeedleAnatomy(Organ):
             {"name": "phloem", "n_files": 8, "cell_diameter": 0.003}, 
             {"name": "cambium", "cell_diameter": 0.002}, 
             {"name": "resin_ducts", "diameter": 0.5, "n_files": 17},
-            {"name": "inter_cellular_space", "ratio": 0.5},
+            {"name": "inter_cellular_spaces", "mesophyll": 0.01},
             {"name": "stomata", "n_files": 22, "width": 0.07},
             {"name": "Strasburger cells", "layer_diameter": 0.002, "cell_diameter": 0.05}
         ]
@@ -413,4 +415,91 @@ class NeedleAnatomy(Organ):
                 plt.show()
             
         return cells_in_ellipses, list_ellipses_polygons
+
+
+    def add_intercellular_spaces(self):
+        """
+        Compute intercellular (air space) for the mesophyll layer.
+
+        Mesophyll cell polygons are smoothed, and the difference between the
+        original union and the smoothed union yields the gap regions that represent air spaces.  Each air
+        space polygon is then simplified to reduce its vertex count.
+
+        """
+        intercellular_spaces_params = [
+            p for p in self.params if p["name"] == "inter_cellular_spaces"
+        ]
+        if not intercellular_spaces_params:
+            return []
+
+        # Collect mesophyll polygons (cells are *not* touched)
+        mesophyll_cells = self.all_cells.get_cells_by_type("mesophyll")
+        mesophyll_polys = [
+            c.polygon for c in mesophyll_cells if c.polygon is not None
+        ]
+        if len(mesophyll_polys) < 2:
+            return []
+
+        full_union = GeometryProcessor.union_polygons(mesophyll_polys)
+        full_union_buffed = full_union.buffer(-mesophyll_cells[0].diameter*0.5)
+  
+        # smooth the polygons
+        smoothed = []
+        for poly in mesophyll_polys:
+            shrunk = GeometryProcessor.buffer_polygon(poly, 0, smooth_factor=intercellular_spaces_params[0]["mesophyll"])
+            if not shrunk.is_empty:
+                smoothed.append(shrunk)
+
+        if not smoothed:
+            return []
+
+        smoothed_union = GeometryProcessor.union_polygons(smoothed)
+        air_region = full_union.difference(smoothed_union)
+
+        # Decompose into individual polygons
+        if isinstance(air_region, MultiPolygon):
+            raw_air_polys = list(air_region.geoms)
+        elif air_region.is_empty:
+            return []
+        else:
+            raw_air_polys = [air_region]
+
+        # Simplify each air space polygon (reduce vertex count)
+        # Tolerance ~ 5 % of the median equivalent radius of mesophyll cells
+        r_values = [np.sqrt(p.area / np.pi) for p in mesophyll_polys]
+        tol = float(np.median(r_values)) * 0.05
+
+        air_space_polys = []
+        for poly in raw_air_polys:
+            if poly.intersects(full_union_buffed):
+                simplified = poly.simplify(tol, preserve_topology=True)
+                if not simplified.is_empty and simplified.area > 0.0000001:
+                    air_space_polys.append(simplified)
+
+        air_union = GeometryProcessor.union_polygons(air_space_polys)
+
+        for cell in mesophyll_cells:
+            carved = cell.polygon.difference(air_union)
+            if not carved.is_empty:
+                cell.polygon = carved
+
+        # create cells for the air spaces
+        air_spaces_cells = CellManager()
+        id_cell = len(self.all_cells.cells)
+        for air_space_polygon in air_space_polys:
+            id_cell += 1
+            air_space_cell = Cell(
+                x = air_space_polygon.centroid.x,
+                y = air_space_polygon.centroid.y,
+                diameter = np.sqrt(air_space_polygon.area/np.pi)*2,
+                id_cell=id_cell,
+                id_layer=0,
+                id_group=id_cell,
+                type="air space",
+                polygon=air_space_polygon,
+            )
+            air_spaces_cells.cells.append(air_space_cell)
+        # add the air spaces cells to the all_cells
+        return air_spaces_cells
+
 

@@ -5,7 +5,7 @@ Root anatomy implementation.
 import numpy as np
 from typing import List, Dict, Any
 
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.ops import unary_union
 from shapely.affinity import translate
 
@@ -40,6 +40,9 @@ class RootAnatomy(Organ):
             "phloem_diameter": 0.012,
             "n_vascular_bundles": 4
         }
+        self.intercellular_spaces_params = {
+            "cortex": 0.1
+        }
     
     def _initialize_default_layers(self) -> None:
         """Initialize default root layers."""
@@ -49,6 +52,13 @@ class RootAnatomy(Organ):
             cell_diameter=0.02,
             n_layers=1,
             shift=0.5,
+            order=6
+        ))
+
+        self.layer_manager.add_layer(Layer(
+            name="exodermis",
+            cell_diameter=0.03,
+            n_layers=1,
             order=5
         ))
         
@@ -237,3 +247,80 @@ class RootAnatomy(Organ):
         layer_for_vascular = [l["name"] for l in layers_polygons].index("vascular_parenchyma")
         polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         return polygon_for_vascular
+
+    def add_intercellular_spaces(self):
+        """
+        Add intercellular spaces.
+        """
+        if self.intercellular_spaces_params["cortex"] == 0:
+            return
+        else:
+                # Collect mesophyll polygons (cells are *not* touched)
+            cortex_cells = self.all_cells.get_cells_by_type("cortex")
+            cortex_polys = [
+                c.polygon for c in cortex_cells if c.polygon is not None
+            ]
+            if len(cortex_polys) < 2:
+                return []
+
+            full_union = GeometryProcessor.union_polygons(cortex_polys)
+            full_union_buffed = full_union.buffer(-cortex_cells[0].diameter*0.5)
+
+            smoothed = []
+            for poly in cortex_polys:
+                shrunk = GeometryProcessor.buffer_polygon(poly, 0, smooth_factor=self.intercellular_spaces_params["cortex"])
+                if not shrunk.is_empty:
+                    smoothed.append(shrunk)
+    
+            if not smoothed:
+                return []
+    
+            smoothed_union = GeometryProcessor.union_polygons(smoothed)
+            air_region = full_union.difference(smoothed_union)
+    
+            # Decompose into individual polygons
+            if isinstance(air_region, MultiPolygon):
+                raw_air_polys = list(air_region.geoms)
+            elif air_region.is_empty:
+                return []
+            else:
+                raw_air_polys = [air_region]
+    
+            # Simplify each air space polygon (reduce vertex count)
+            # Tolerance ~ 5 % of the median equivalent radius of mesophyll cells
+            r_values = [np.sqrt(p.area / np.pi) for p in cortex_polys]
+            tol = float(np.median(r_values)) * 0.05
+    
+            air_space_polys = []
+            for poly in raw_air_polys:
+                if poly.intersects(full_union_buffed):
+                    simplified = poly.simplify(tol, preserve_topology=True)
+                    if not simplified.is_empty and simplified.area > 0.0000001:
+                        air_space_polys.append(simplified)
+    
+            air_union = GeometryProcessor.union_polygons(air_space_polys)
+    
+            for cell in cortex_cells:
+                carved = cell.polygon.difference(air_union)
+                if not carved.is_empty:
+                    cell.polygon = carved
+    
+            # create cells for the air spaces
+            air_spaces_cells = CellManager()
+            id_cell = len(self.all_cells.cells)
+            for air_space_polygon in air_space_polys:
+                id_cell += 1
+                air_space_cell = Cell(
+                    x = air_space_polygon.centroid.x,
+                    y = air_space_polygon.centroid.y,
+                    diameter = np.sqrt(air_space_polygon.area/np.pi)*2,
+                    id_cell=id_cell,
+                    id_layer=0,
+                    id_group=id_cell,
+                    type="air space",
+                    polygon=air_space_polygon,
+                )
+                air_spaces_cells.cells.append(air_space_cell)
+            # add the air spaces cells to the all_cells
+            return air_spaces_cells
+        

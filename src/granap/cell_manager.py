@@ -1,7 +1,8 @@
 
 from typing import List, Optional
 from granap.cell_class import Cell
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPoint
+from scipy.spatial import Delaunay
 import numpy as np
 
 class CellManager:
@@ -19,6 +20,9 @@ class CellManager:
             if cell.id_cell == id_cell:
                 return cell
         return None
+
+    def get_cells_by_ids(self, ids: List[int]):
+        return [cell for cell in self.cells if cell.id_cell in ids]
 
     def extend_cells(self, cells: List[Cell]):
 
@@ -46,9 +50,15 @@ class CellManager:
     def get_cells_by_group(self, id_group: int):
         return [cell for cell in self.cells if cell.id_group == id_group]
 
+    def get_cells_by_groups(self, id_groups: List[int]):
+        return [cell for cell in self.cells if cell.id_group in id_groups]
+
     def get_cells_by_polygon(self, polygon: Polygon):
         # Check if cell has polygon attribute and it is not None
         return [cell for cell in self.cells if cell.polygon is not None and cell.polygon.intersects(polygon)]
+
+    def get_polygons(self):
+        return [cell.polygon for cell in self.cells if cell.polygon is not None]
     
     def remove_cells_by_polygon(self, polygon: Polygon):
         if not self.cells:
