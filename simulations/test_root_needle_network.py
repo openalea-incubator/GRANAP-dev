@@ -13,14 +13,20 @@ from granap.visualization import plot_layers_simple, plot_section
 needle = NeedleAnatomy()
 root = RootAnatomy()
 
-# Plot the needle anatomy
-root.plot_cells()
-needle.plot_cells()
+# Plot the needle and root anatomy in a 2x2 grid
+fig, axs = plt.subplots(2, 2, figsize=(20, 20), sharex=False, sharey=False)
 
-# After generating the organ anatomy:
+# Generate adjacency matrices to build the graph before plotting network
 mat_root = root.export_to_adjencymatrix()  # builds graph + matrix (1s for connectivity)
 mat_needle = needle.export_to_adjencymatrix()  # builds graph + matrix (1s for connectivity)
-root.plot_network()
-needle.plot_network()
 
+# Plot Root and Needle cells on top row
+root.plot_cells(show=False, ax=axs[0, 0], title="Root Cells")
+needle.plot_cells(show=False, ax=axs[0, 1], title="Needle Cells")
 
+# Plot Root and Needle networks on bottom row
+root.plot_network(ax=axs[1, 0], title="Root Network")
+needle.plot_network(ax=axs[1, 1], title="Needle Network")
+
+plt.tight_layout()
+plt.show()

@@ -10,6 +10,7 @@ from shapely.ops import unary_union
 from granap.organ_class import Organ
 from granap.cell_class import Cell
 from granap.cell_manager import CellManager
+from granap.generate_cell import CellGenerator
 from granap.layer_class import Layer
 from granap.geometry_collection import GeometryProcessor
 import matplotlib.pyplot as plt
@@ -56,7 +57,7 @@ class NeedleAnatomy(Organ):
             {"name": "cambium", "cell_diameter": 0.002}, 
             {"name": "resin_ducts", "diameter": 0.5, "n_files": 17},
             {"name": "inter_cellular_spaces", "mesophyll": 0.01},
-            {"name": "stomata", "n_files": 22, "width": 0.07},
+            {"name": "stomata", "n_files": 5, "width": 0.025, "depth": 0.06, "sub_chamber": 0.04},
             {"name": "Strasburger cells", "layer_diameter": 0.002, "cell_diameter": 0.05}
         ]
 
@@ -473,7 +474,7 @@ class NeedleAnatomy(Organ):
         for poly in raw_air_polys:
             if poly.intersects(full_union_buffed):
                 simplified = poly.simplify(tol, preserve_topology=True)
-                if not simplified.is_empty and simplified.area > 0.0000001:
+                if not simplified.is_empty and simplified.area > 1E-6:
                     air_space_polys.append(simplified)
 
         air_union = GeometryProcessor.union_polygons(air_space_polys)
@@ -501,5 +502,163 @@ class NeedleAnatomy(Organ):
             air_spaces_cells.cells.append(air_space_cell)
         # add the air spaces cells to the all_cells
         return air_spaces_cells
+
+
+    def _organ_specific_cells(self) -> CellManager:
+        """
+        Add organ specific cells.
+        
+        Returns:
+            CellManager object with organ specific cells
+        """
+        organ_specific_cells = CellManager()
+
+        # add stomata
+        organ_specific_cells = self.add_stomata(organ_specific_cells)
+
+        # add resin ducts
+        organ_specific_cells = self.add_resin_ducts(organ_specific_cells)
+
+        # add pith
+        organ_specific_cells = self.add_pith(organ_specific_cells)         
+    
+        return organ_specific_cells
+
+    def add_stomata(self, organ_specific_cells: CellManager) -> CellManager:
+        """
+        Add stomata to the needle.
+
+        {"name": "stomata", "n_files": 5, "width": 0.07, "depth": 0.01, "sub_chamber": 0.01}
+
+        """
+        stomata_params = [
+            p for p in self.params if p["name"] == "stomata"
+        ]
+        if stomata_params:
+            stomata_params = stomata_params[0]
+            n_stomata = stomata_params["n_files"]
+            # select "n_files" points on the epidermis
+
+            # Get epidermis cells
+            epidermis_cells = self.all_cells.get_cells_by_type("epidermis")
+            
+            if not epidermis_cells:
+                return organ_specific_cells
+                
+            # Sample `n_stomata` evenly spaced cells, avoiding the very ends
+            indices = np.linspace(10, len(epidermis_cells)-np.round(len(epidermis_cells)/n_stomata), n_stomata, dtype=int)
+            located_cells = []
+
+            # makes the stomata
+            stomata_carve_polys = []
+            id_stomata = len(self.all_cells.cells) + 1
+            
+            for i in indices:
+                # get cell triplet
+                epidermis_cell_triplet = [epidermis_cells[i-1], epidermis_cells[i], epidermis_cells[i+1]]
+                located_cell = epidermis_cells[i]
+                located_cells.append(located_cell)
+                
+                carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly = CellGenerator.create_stomata(epidermis_cell_triplet, stomata_setting = stomata_params)
+                stomata_carve_polys.append(carve_poly)
+                
+                # guard cell 1
+                poly = guard_cell_1_poly
+                id_stomata += 1
+                gc1_cell = Cell(
+                    x=poly.centroid.x, y=poly.centroid.y,
+                    diameter=np.sqrt(poly.area/np.pi)*2,
+                    id_cell=id_stomata, id_layer=0, id_group=id_stomata,
+                    type="guard cell", polygon=poly
+                )
+                organ_specific_cells.cells.append(gc1_cell)
+                
+                # guard cell 2
+                poly = guard_cell_2_poly
+                id_stomata += 1
+                gc2_cell = Cell(
+                    x=poly.centroid.x, y=poly.centroid.y,
+                    diameter=np.sqrt(poly.area/np.pi)*2,
+                    id_cell=id_stomata, id_layer=0, id_group=id_stomata,
+                    type="guard cell", polygon=poly
+                )
+                organ_specific_cells.cells.append(gc2_cell)
+
+                # chamber
+                poly = sub_stomatal_chamber
+                id_stomata += 1
+                chamber_cell = Cell(
+                    x=poly.centroid.x, y=poly.centroid.y,
+                    diameter=np.sqrt(poly.area/np.pi)*2,
+                    id_cell=id_stomata, id_layer=0, id_group=id_stomata,
+                    type="air space", polygon=poly
+                )
+                organ_specific_cells.cells.append(chamber_cell)
+                
+                # spacing (pore)
+                # poly = spacing_poly
+                # id_stomata += 1
+                # pore_cell = Cell(
+                #     x=poly.centroid.x, y=poly.centroid.y,
+                #     diameter=np.sqrt(poly.area/np.pi)*2,
+                #     id_cell=id_stomata, id_layer=0, id_group=id_stomata,
+                #     type="air space", polygon=poly
+                # )
+                # organ_specific_cells.cells.append(pore_cell)
+    
+            stomata_union = GeometryProcessor.union_polygons(stomata_carve_polys)
+
+            # for poly_geom in stomata_union.geoms:
+            #     plt.fill(poly_geom.exterior.xy[0], poly_geom.exterior.xy[1], 'b-', alpha=0.8)
+            # plt.axis('equal')
+            # plt.show()
+    
+            to_remove = []
+            for i_cell in located_cells:
+                to_remove.append(i_cell.id_cell)
+
+
+            for cell in self.all_cells.cells:
+                carved = cell.polygon.difference(stomata_union)
+                if not carved.is_empty and carved.area > 1e-6:
+                    if carved.geom_type == 'MultiPolygon':
+                        carved = max(list(carved.geoms), key=lambda p: p.area)
+                    cell.polygon = carved
+                    cell.x = carved.centroid.x
+                    cell.y = carved.centroid.y
+                else:
+                    if carved.is_empty or carved.area <= 1e-6:
+                        to_remove.append(cell.id_cell)
+    
+            self.all_cells.remove_cells_by_ids(to_remove)
+
+        return organ_specific_cells
+
+    def add_resin_ducts(self, organ_specific_cells: CellManager) -> CellManager:
+        """
+        Add resin ducts to the needle.
+        """
+        resin_ducts_params = [
+            p for p in self.params if p["name"] == "resin_ducts"
+        ]
+        if resin_ducts_params:
+            resin_ducts_params = resin_ducts_params[0]
+
+        return organ_specific_cells
+
+    def add_pith(self, organ_specific_cells: CellManager) -> CellManager:
+        """
+        Add pith to the needle.
+        """
+        pith_params = [
+            p for p in self.params if p["name"] == "pith"
+        ]
+        if pith_params:
+            pith_params = pith_params[0]
+
+        return organ_specific_cells
+        
+
+
 
 

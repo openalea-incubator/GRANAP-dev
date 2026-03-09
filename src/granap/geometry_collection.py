@@ -4,7 +4,7 @@ Geometry processor module for handling polygon operations.
 
 import numpy as np
 import shapely as sp
-from typing import Tuple
+from typing import Tuple, List, Optional
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from cv2 import fitEllipse
 
@@ -383,3 +383,7 @@ class GeometryProcessor:
         ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
     
         return ellipses
+
+
+
+

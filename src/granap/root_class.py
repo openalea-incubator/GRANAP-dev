@@ -35,10 +35,11 @@ class RootAnatomy(Organ):
         # Root specific parameters
         self.vascular_params = {
             "thickness": 0.2,
-            "cell_diameter": 0.006,
-            "xylem_diameter": 0.05,
+            "cell_diameter": 0.009,
+            "xylem_diameter": 0.06,
             "phloem_diameter": 0.012,
-            "n_vascular_bundles": 4
+            "n_vascular_bundles": 3,
+            "ratio_proto_meta": 2.5
         }
         self.intercellular_spaces_params = {
             "cortex": 0.1
@@ -65,14 +66,14 @@ class RootAnatomy(Organ):
         self.layer_manager.add_layer(Layer(
             name="cortex",
             cell_diameter=0.03,
-            n_layers=3,
+            n_layers=5,
             order=4
         ))
         
         self.layer_manager.add_layer(Layer(
             name="endodermis",
             cell_diameter=0.015,
-            cell_width=0.035,
+            cell_width=0.030,
             n_layers=1,
             order=3
         ))
@@ -80,7 +81,7 @@ class RootAnatomy(Organ):
         self.layer_manager.add_layer(Layer(
             name="pericycle",
             cell_diameter=0.01,
-            cell_width=0.005,
+            cell_width=0.009,
             n_layers=1,
             order=2
         ))
@@ -295,7 +296,7 @@ class RootAnatomy(Organ):
             for poly in raw_air_polys:
                 if poly.intersects(full_union_buffed):
                     simplified = poly.simplify(tol, preserve_topology=True)
-                    if not simplified.is_empty and simplified.area > 0.0000001:
+                    if not simplified.is_empty and simplified.area > 1E-6:
                         air_space_polys.append(simplified)
     
             air_union = GeometryProcessor.union_polygons(air_space_polys)
@@ -323,4 +324,32 @@ class RootAnatomy(Organ):
                 air_spaces_cells.cells.append(air_space_cell)
             # add the air spaces cells to the all_cells
             return air_spaces_cells
+
+    def _organ_specific_cells(self) -> CellManager:
+        """
+        Add organ specific cells.
+        
+        Returns:
+            CellManager object with organ specific cells
+        """
+
+        organ_specific_cells = CellManager()
+
+        # add root hairs
+        organ_specific_cells = self.add_root_hairs(organ_specific_cells)
+
+        return organ_specific_cells
+
+    def add_root_hairs(self, organ_specific_cells: CellManager) -> CellManager:
+        """
+        Add root hairs to the root.
+        
+        Args:
+            organ_specific_cells: CellManager object with organ specific cells
+        
+        Returns:
+            CellManager object with root hairs
+        """
+        return organ_specific_cells
+
         

@@ -173,9 +173,6 @@ class Organ(AbstractNetwork, ABC):
             # add vascular tissue
             self.allocate_vascular_tissue(layers_polygons)
 
-            # add intercellular spaces
-                   
-            
             vor = CellGenerator.voronoi_diagram(self.all_cells)
             
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
@@ -186,7 +183,6 @@ class Organ(AbstractNetwork, ABC):
             air_spaces_cells = self.add_intercellular_spaces()
             self.all_cells.cells.extend(air_spaces_cells.cells)
             self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
-
             
             for cell in self.all_cells.cells:
                 # Find the layer name from layers_polygons using id_layer
@@ -197,6 +193,11 @@ class Organ(AbstractNetwork, ABC):
                         layer = self.get_layer(layer_name)
                         if layer:
                             layer.cells.append(cell)
+
+            self.all_cells.recenter_cells()
+            organ_specific_cells = self._organ_specific_cells() # add organ specific cells ex: root hairs, stomata, etc.
+            self.all_cells.cells.extend(organ_specific_cells.cells)
+            self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
             
             # Convert to GeoDataFrame
             cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
@@ -252,9 +253,19 @@ class Organ(AbstractNetwork, ABC):
             Return an empty CellManager when there are no air spaces.
         """
         pass
+
+    @abstractmethod
+    def _organ_specific_cells(self):
+        """
+        Add organ specific cells.
+        
+        Returns:
+            CellManager object with organ specific cells
+        """
+        pass
         
     
-    def plot_layers(self, show: bool = True) -> plt.Figure:
+    def plot_layers(self, show: bool = True, **kwargs) -> Optional[plt.Figure]:
         """
         Plot layer boundaries.
         
@@ -264,10 +275,14 @@ class Organ(AbstractNetwork, ABC):
         Returns:
             Matplotlib figure
         """
-        plt.close('all')
+        
         layers_polygons = self.generate_layer_polygons()
         
-        fig, ax = plt.subplots(figsize=(8, 8))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 10))
+
         colors = plt.cm.viridis(np.linspace(0, 1, len(layers_polygons)))
         
         for polygon_data, color in zip(layers_polygons, colors):
@@ -277,16 +292,18 @@ class Organ(AbstractNetwork, ABC):
         ax.set_aspect('equal')
         ax.set_xlabel("x (mm)")
         ax.set_ylabel("y (mm)")
-        ax.set_title(f"{self.__class__.__name__} - Layer Boundaries")
+        ax.set_title(kwargs.get('title', f"{self.__class__.__name__} - Layer Boundaries"))
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
         
-        if show:
-            plt.show()
-        
-        return fig
+        if fig is not None:
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return fig
+        return None
+
     
-    def plot_cells(self, show: bool = True) -> plt.Figure:
+    def plot_cells(self, show: bool = True, **kwargs) -> Optional[plt.Figure]:
         """
         Plot cell geometries.
         
@@ -298,7 +315,10 @@ class Organ(AbstractNetwork, ABC):
         """
         cells_gdf = self.generate_cells()
         
-        fig, ax = plt.subplots(figsize=(10, 10))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 10))
         
         cells_gdf.plot(
             ax=ax,
@@ -314,13 +334,14 @@ class Organ(AbstractNetwork, ABC):
         ax.set_aspect("equal", "box")
         ax.set_xlabel("x (mm)")
         ax.set_ylabel("y (mm)")
-        ax.set_title(f"{self.__class__.__name__} - Cross Section")
-        plt.tight_layout()
+        ax.set_title(kwargs.get('title', f"{self.__class__.__name__} - Cross Section"))
         
-        if show:
-            plt.show()
-        
-        return fig
+        if fig is not None:
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return fig
+        return None
     
     def export_to_geopandas(self) -> gpd.GeoDataFrame:
         """

@@ -236,7 +236,10 @@ class AbstractNetwork(ABC):
             edge_colors.append(edge_color_map.get(edge_type, 'purple'))
     
         # Draw the network
-        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
     
         nx.draw(
             self.graph,
@@ -250,7 +253,9 @@ class AbstractNetwork(ABC):
             alpha=kwargs.get('alpha', 0.7)
         )
     
-        ax.set_title(kwargs.get('title', 'Network Visualization'))
-        ax.set_aspect('equal')
-        plt.tight_layout()
-        plt.show()
+        # ax.set_title(kwargs.get('title', 'Network Visualization'))
+        ax.set_aspect('equal', adjustable='box')
+        
+        if fig is not None:
+            plt.tight_layout()
+            plt.show()

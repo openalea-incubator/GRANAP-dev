@@ -9,6 +9,7 @@ import geopandas as gpd
 from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
 from shapely.geometry import Polygon, Point, MultiPolygon
+from shapely.ops import unary_union
 from scipy.spatial import cKDTree
 
 from granap.geometry_collection import GeometryProcessor
@@ -460,3 +461,106 @@ class CellGenerator:
             cell.polygon = new_poly
 
         return grouped_cells
+
+    @staticmethod
+    def create_stomata(cells, stomata_setting, debug= False):
+        """
+        Create stomata on a cell.
+
+        Args:
+            cells: triplet of Cell object.
+            stomata_setting: Dictionary with stomata settings.
+            debug: Whether to plot the stomata.
+        """
+
+        width = stomata_setting["width"]
+        depth = stomata_setting["depth"]
+        sub_chamber = stomata_setting["sub_chamber"]
+
+        cell_prev, cell, cell_next = cells
+        # don't use cell angle as the orientation
+        # use the perpendicular axis of the cell triplet
+        dx = cell_next.x - cell_prev.x
+        dy = cell_next.y - cell_prev.y
+        tangent_angle = np.arctan2(dy, dx)
+        angle = tangent_angle + np.pi/2 # perpendicular (inward) orientation
+    
+        cx, cy = cell.x, cell.y
+    
+        def local_to_global_poly(local_pts):
+            global_pts = []
+            tangential_angle = angle + np.pi/2
+            inward_angle = angle + np.pi
+            for lx, ly in local_pts:
+                gx = cx + lx * np.cos(tangential_angle) + ly * np.cos(inward_angle)
+                gy = cy + lx * np.sin(tangential_angle) + ly * np.sin(inward_angle)
+                global_pts.append((gx, gy))
+            return Polygon(global_pts)
+    
+        def create_local_ellipse(cx_l, cy_l, rx, ry):
+            pts = []
+            for t in np.linspace(0, 2*np.pi, 30):
+                pts.append((cx_l + rx * np.cos(t), cy_l + ry * np.sin(t)))
+            return local_to_global_poly(pts)
+    
+        def create_local_rectangle(cx_l, cy_l, w, h):
+            pts = [
+                (cx_l - w/2, cy_l - h/2),
+                (cx_l + w/2, cy_l - h/2),
+                (cx_l + w/2, cy_l + h/2),
+                (cx_l - w/2, cy_l + h/2)
+            ]
+            return local_to_global_poly(pts)
+    
+        # Create guard cells
+        gc_rx = cell.width / 2
+        gc_ry = cell.width / 2
+        gc1_x = -width / 2
+        gc2_x = width / 2
+        gc_y = depth
+    
+        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry/2)
+        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry/2)
+    
+        rect_w = cell.width * 0.6
+        rect_h = depth
+        rect_y = depth / 2
+    
+        guard_cell_1_rect = create_local_rectangle(gc1_x - 0.2 * cell.width, rect_y, rect_w, rect_h)
+        guard_cell_2_rect = create_local_rectangle(gc2_x + 0.2 * cell.width, rect_y, rect_w, rect_h)
+    
+        guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
+        guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
+    
+        guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
+        guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
+    
+        # Create sub-stomatal chamber
+        chamber_rx = width
+        chamber_ry = sub_chamber
+        chamber_y = gc_y
+        sub_stomatal_chamber = create_local_ellipse(0, chamber_y, chamber_rx * 0.75, chamber_ry)
+    
+        # Create pore
+        pore_w = width
+        if pore_w < 0:
+            pore_w = 0.005  # fallback
+        pore_h = chamber_y
+        pore_poly = create_local_rectangle(0, pore_h / 2, pore_w, pore_h)
+    
+        # Combine geometries
+        spacing_poly = pore_poly.difference(unary_union([guard_cell_1_poly, guard_cell_2_poly]))
+        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, guard_cell_1_poly, guard_cell_2_poly]))
+    
+        if hasattr(sub_stomatal_chamber, 'geoms'):
+            sub_stomatal_chamber = sub_stomatal_chamber.geoms[0]
+    
+        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly])
+    
+        if debug:
+            print(carve_poly.area)
+
+        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly
+
+    
+    
