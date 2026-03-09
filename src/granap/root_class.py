@@ -34,11 +34,11 @@ class RootAnatomy(Organ):
 
         # Root specific parameters
         self.vascular_params = {
-            "thickness": 0.2,
-            "cell_diameter": 0.009,
+            "thickness": 0.23,
+            "cell_diameter": 0.012,
             "xylem_diameter": 0.06,
             "phloem_diameter": 0.012,
-            "n_vascular_bundles": 3,
+            "n_vascular_bundles": 5,
             "ratio_proto_meta": 2.5
         }
         self.intercellular_spaces_params = {
@@ -50,7 +50,7 @@ class RootAnatomy(Organ):
         # Outer to inner (order: higher = outer)
         self.layer_manager.add_layer(Layer(
             name="epidermis",
-            cell_diameter=0.02,
+            cell_diameter=0.015,
             n_layers=1,
             shift=0.5,
             order=6
@@ -58,14 +58,14 @@ class RootAnatomy(Organ):
 
         self.layer_manager.add_layer(Layer(
             name="exodermis",
-            cell_diameter=0.03,
+            cell_diameter=0.035,
             n_layers=1,
             order=5
         ))
         
         self.layer_manager.add_layer(Layer(
             name="cortex",
-            cell_diameter=0.03,
+            cell_diameter=0.042,
             n_layers=5,
             order=4
         ))
