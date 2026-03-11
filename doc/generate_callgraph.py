@@ -12,6 +12,8 @@ import granap
 import pyan
 
 
+# mamba install -c conda-forge pyan3 graphviz python-graphviz
+
 # ============================================================================
 # Configuration
 # ============================================================================
