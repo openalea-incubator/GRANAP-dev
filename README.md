@@ -16,3 +16,10 @@ pip install -e .
 Warning : 
 - Intercellular space are not well implemented
 - There is a problem for the polygon creation
+
+## Code structure
+
+For an interactive browsing, use the following link: 
+
+Bellow is a preview
+![Call graph](doc/callgraph/preview.svg)
