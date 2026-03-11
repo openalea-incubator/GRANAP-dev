@@ -54,6 +54,27 @@ class Organ(AbstractNetwork, ABC):
         self.layer_manager.add_layer(layer, position)
         self._invalidate_geometry()
     
+    def update_params(self, param_name: str, attribute: str, value: Any) -> None:
+        """
+        Update a parameter of the organ.
+    
+        self.params = [{"name": "param_name_1", "attribute_1": 0.0, "attribute_2": 0.0, ...},
+                       {"name": "param_name_2", "attribute_1": 0.0, "attribute_2": 0.0, ...},
+                       ...]
+    
+        Args:
+            param_name: Name of the parameter to update
+            attribute: Name of the attribute to update
+            value: New value of the parameter
+        """
+        for p in self.params:
+            if p["name"] == param_name:
+                p[attribute] = value
+                self._invalidate_geometry()
+                return
+        raise ValueError(f"Parameter '{param_name}' not found in params.")
+
+    
     def remove_layer(self, name: str) -> Layer:
         """
         Remove a tissue layer by name.
@@ -173,6 +194,9 @@ class Organ(AbstractNetwork, ABC):
             # add vascular tissue
             self.allocate_vascular_tissue(layers_polygons)
 
+            # add organ specific tissues
+            self._organ_specific_tissues()
+
             vor = CellGenerator.voronoi_diagram(self.all_cells)
             
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
@@ -238,6 +262,15 @@ class Organ(AbstractNetwork, ABC):
         
         Args:
             polygon: Polygon boundary
+        """
+        pass
+
+    @abstractmethod
+    def _organ_specific_tissues(self):
+        """
+        Add organ specific tissues.
+        
+        Returns:
         """
         pass
 

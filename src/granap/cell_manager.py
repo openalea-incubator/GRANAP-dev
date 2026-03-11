@@ -101,6 +101,9 @@ class CellManager:
     def remove_cells_by_ids(self, ids: []):
         # filter cells
         self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
+    
+    def get_last_id_group(self):
+        return max([cell.id_group for cell in self.cells])
 
     def recenter_cells(self):
         # re position cells to the center of the global cell population

@@ -24,7 +24,7 @@ class NeedleAnatomy(Organ):
     including transfusion tissue and resin ducts.
     """
     
-    def __init__(self, params: Dict[str, Any] = None):
+    def __init__(self, params: List[Dict[str, Any]] = None):
         """
         Initialize needle anatomy.
         """
@@ -49,15 +49,15 @@ class NeedleAnatomy(Organ):
             {"name": "central_cylinder", "cell_diameter": 0.02, "layer_thickness": 0.43, "layer_length": 1.05, "vascular_width": 0.15, "vascular_height": 0.2}, # Cell diameter in millimeters
             {"name": "transfusion_tissue", "tracheids_diameter": 0.05, "parenchyma_diameter": 0.03, "transfusion_tracheids_ratio": 0.5, "n_layers":2},
             {"name": "endodermis", "cell_diameter": 0.02, "cell_width": 0.05, "n_layers": 1, "order": 3, "shift": 5},
-            {"name": "mesophyll", "cell_diameter": 0.08, "cell_width": 0.045, "n_layers": 3, "order": 4, "shift":3},
+            {"name": "mesophyll", "cell_diameter": 0.08, "cell_width": 0.045, "n_layers": 3, "order": 4, "shift":10},
             {"name": "hypodermis", "cell_diameter": 0.0225, "n_layers": 2, "order": 5},
             {"name": "epidermis", "cell_diameter": 0.02, "n_layers": 1, "order": 6},
             {"name": "xylem", "n_files": 10, "cell_diameter": 0.007, "n_clusters": 4, "n_per_cluster": 3}, # Number of files
             {"name": "phloem", "n_files": 8, "cell_diameter": 0.003}, 
             {"name": "cambium", "cell_diameter": 0.002}, 
-            {"name": "resin_ducts", "diameter": 0.5, "n_files": 17},
+            {"name": "resin_duct", "diameter": 0.1, "n_files": 3, "cell_diameter": 0.02},
             {"name": "inter_cellular_spaces", "mesophyll": 0.01},
-            {"name": "stomata", "n_files": 5, "width": 0.025, "depth": 0.06, "sub_chamber": 0.04},
+            {"name": "stomata", "n_files": 4, "width": 0.025, "depth": 0.06, "sub_chamber": 0.04},
             {"name": "Strasburger cells", "layer_diameter": 0.002, "cell_diameter": 0.05}
         ]
 
@@ -417,6 +417,118 @@ class NeedleAnatomy(Organ):
             
         return cells_in_ellipses, list_ellipses_polygons
 
+    def _organ_specific_tissues(self):
+        """
+        Add organ specific tissues.
+        """
+
+        resin_duct_params = [
+            p for p in self.params if p["name"] == "resin_duct"
+        ]
+        if not resin_duct_params:
+            return []
+
+        layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
+        polygon_for_duct = self._layers_polygons[layer_for_duct]["polygon"]
+
+        polygon_for_duct = polygon_for_duct.difference(GeometryProcessor.buffer_polygon(polygon_for_duct, -resin_duct_params[0]["diameter"]*1.2, 0))
+
+        duct_cells = []
+        id_cell = len(self.all_cells.cells)+1
+        id_group = self.all_cells.get_last_id_group() + 1
+        
+        add_duct = []
+        n_canal = resin_duct_params[0]["n_files"]
+        if n_canal < 7:
+            n_regions = 7
+            if n_canal > 0:
+                add_duct.append(3)
+            if n_canal > 1:
+                add_duct.append(6)
+
+            remaining_places = [i for i in range(n_regions) if i not in add_duct]
+            add_duct += list(np.random.choice(remaining_places, n_canal-len(add_duct), replace=False))
+        else:
+            n_regions = n_canal
+            add_duct = range(n_regions)
+
+        polygons_for_duct = GeometryProcessor.pizza_slice(polygon_for_duct, n_regions)
+        ducts = []
+        for slice_id, slice_polygon in enumerate(polygons_for_duct):
+
+            if slice_id not in add_duct:
+                continue
+
+            # create the bounding polygon of the duct
+            duct_poly = GeometryProcessor.fit_inner_ellipse(slice_polygon, resin_duct_params[0]["diameter"]/2)
+            duct_poly_buffered = GeometryProcessor.buffer_polygon(duct_poly["polygon"], resin_duct_params[0]["cell_diameter"]/2, 0)
+            # create the duct polygon
+            ducts.append(duct_poly_buffered)
+            # create the parenchyma cells polygon
+            duct_polygon_buff = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(resin_duct_params[0]["cell_diameter"]/2)*0.15)
+            # create the inner canal polygon
+            canal_polygon = GeometryProcessor.buffer_polygon(duct_polygon_buff, -(resin_duct_params[0]["cell_diameter"]))
+            # get the centroid of the parenchyma cells 
+            x, y = duct_polygon_buff.exterior.coords.xy
+            center = duct_poly["polygon"].centroid
+            coords = np.column_stack((x, y))
+            duct_perim = duct_polygon_buff.length
+            coords = GeometryProcessor.resample_coords(coords, target_n_points=np.round(duct_perim/resin_duct_params[0]["cell_diameter"]).astype(int))
+            cell_borders = CellGenerator.cell_border(coords, 
+                    resin_duct_params[0]["cell_diameter"], 
+                    resin_duct_params[0]["cell_diameter"])        
+
+
+            for i_border, border in enumerate(cell_borders[1:]):
+                id_group += 1
+                for i_cell, cell_coord in enumerate(border):
+                    duct_cells.append(Cell(
+                        id_cell=id_cell,
+                        id_layer=layer_for_duct,
+                        id_group=id_group,
+                        type="resin_duct",
+                        x=cell_coord[0],
+                        y=cell_coord[1],
+                        diameter=resin_duct_params[0]["cell_diameter"],
+                        angle=np.arctan2(cell_coord[1]-center.y, cell_coord[0]-center.x),
+                        radius=np.sqrt((cell_coord[0]-center.x)**2 + (cell_coord[1]-center.y)**2),
+                        area=np.pi * (resin_duct_params[0]["cell_diameter"]/2)**2,
+                    ))
+                    id_cell += 1
+
+            x, y = canal_polygon.exterior.coords.xy
+            center = canal_polygon.centroid
+            coords = np.column_stack((x, y))
+            coords = GeometryProcessor.resample_coords(coords, target_n_points=15)
+            id_group += 1
+            for i_cell, coord in enumerate(coords[1:]):
+                duct_cells.append(Cell(
+                    id_cell=id_cell,
+                    id_layer=layer_for_duct,
+                    id_group=id_group,
+                    type="duct",
+                    x=coord[0],
+                    y=coord[1],
+                    diameter=resin_duct_params[0]["diameter"],
+                    angle=np.arctan2(coord[1]-center.y, coord[0]-center.x),
+                    radius=np.sqrt((coord[0]-center.x)**2 + (coord[1]-center.y)**2),
+                    area=np.pi * (resin_duct_params[0]["diameter"]/2)**2,
+                ))
+                id_cell += 1
+            
+
+       
+
+        # remove cells that are in the ducts
+        for duct in ducts:
+            self.all_cells.remove_cells_by_polygon(duct)
+
+        # add the resin duct cells to the list of cells
+        self.all_cells.extend_cells(duct_cells)
+        self.all_cells.recalculate_cell_properties()
+
+        pass
+
 
     def add_intercellular_spaces(self):
         """
@@ -594,24 +706,8 @@ class NeedleAnatomy(Organ):
                     type="air space", polygon=poly
                 )
                 organ_specific_cells.cells.append(chamber_cell)
-                
-                # spacing (pore)
-                # poly = spacing_poly
-                # id_stomata += 1
-                # pore_cell = Cell(
-                #     x=poly.centroid.x, y=poly.centroid.y,
-                #     diameter=np.sqrt(poly.area/np.pi)*2,
-                #     id_cell=id_stomata, id_layer=0, id_group=id_stomata,
-                #     type="air space", polygon=poly
-                # )
-                # organ_specific_cells.cells.append(pore_cell)
-    
+        
             stomata_union = GeometryProcessor.union_polygons(stomata_carve_polys)
-
-            # for poly_geom in stomata_union.geoms:
-            #     plt.fill(poly_geom.exterior.xy[0], poly_geom.exterior.xy[1], 'b-', alpha=0.8)
-            # plt.axis('equal')
-            # plt.show()
     
             to_remove = []
             for i_cell in located_cells:

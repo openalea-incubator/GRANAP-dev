@@ -13,7 +13,6 @@ from granap.organ_class import Organ
 from granap.layer_class import Layer
 from granap.cell_class import Cell
 from granap.cell_manager import CellManager
-from granap.generate_cell import CellGenerator
 from granap.geometry_collection import GeometryProcessor
 
 
@@ -248,6 +247,12 @@ class RootAnatomy(Organ):
         layer_for_vascular = [l["name"] for l in layers_polygons].index("vascular_parenchyma")
         polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         return polygon_for_vascular
+
+    def _organ_specific_tissues(self):
+        """
+        Add organ specific tissues.
+        """
+        pass
 
     def add_intercellular_spaces(self):
         """

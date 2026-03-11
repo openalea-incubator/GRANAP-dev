@@ -33,8 +33,11 @@ classDiagram
         +plot_cells()
         #_create_base_shape()*
         #_create_central_layers()*
+        #_organ_specific_tissues()*
         #_which_layer_for_vascular()*
         #_create_vascular_tissue()*
+        #_add_intercellular_spaces()*
+        #_organ_specific_cells()*
     }
 
     class RootAnatomy {
@@ -58,6 +61,10 @@ classDiagram
         +set_central_cylinder_params()
         +set_transfusion_params()
         +fit_vascular_elements()
+        +_organ_specific_tissues()
+        +_organ_specific_cells()
+        +_add_intercellular_spaces()
+
     }
 
     class Layer {
@@ -101,12 +108,47 @@ classDiagram
         +expand_layers()
     }
 
+    class GeometryProcessor {
+        +buffer_polygon(polygon, distance, smooth_factor)
+        +half_ellipse_polygon()
+        +circle_polygon()
+        +draw_ellipse()
+        +resample_coords()
+        +smoothing_polygon()
+        +union_polygons()
+        +difference_polygons()
+        +ellipse_to_polygon()
+        +get_chebyshev_center()
+        +fit_inner_ellipse()
+        +pizza_slice()
+        +two_ellipses()
+    }
+
+    class CellGenerator {
+        +generate_cells()
+        +cells_on_layer()
+        +cell_border()
+        +generate_cells_info()
+        +voronoi_diagram()
+        +process_voronoi_groups()
+        +_build_topology()
+        +simplify_cells()
+        +create_stomata()
+    }
+
     AbstractNetwork <|-- Organ
     Organ <|-- RootAnatomy
     Organ <|-- NeedleAnatomy
     
     Organ *-- CellManager : all_cells
     Organ *-- LayerManager : layer_manager
+    Organ *-- GeometryProcessor : geometry_processor
+    Organ *-- CellGenerator : cell_generator
+
+    NeedleAnatomy *-- GeometryProcessor : geometry_processor
+    NeedleAnatomy *-- CellGenerator : cell_generator
+
+    RootAnatomy *-- GeometryProcessor : geometry_processor
     
     CellManager "1" o-- "many" Cell : cells
     LayerManager "1" o-- "many" Layer : _layers
