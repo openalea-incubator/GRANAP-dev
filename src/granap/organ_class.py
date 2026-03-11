@@ -83,7 +83,7 @@ class Organ(AbstractNetwork, ABC):
             name: Name identifier of the layer
         
         Returns:
-            The removed Layer object
+            The removed Layer object    
         """
         removed = self.layer_manager.remove_layer(name)
         self._invalidate_geometry()
