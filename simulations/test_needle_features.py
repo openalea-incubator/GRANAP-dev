@@ -10,8 +10,10 @@ from granap.visualization import plot_layers_simple, plot_section
 
 # Create a needle anatomy
 needle = NeedleAnatomy()
-for i in range(1,10):
-    needle.update_params("resin_duct", "n_files", i)
-    needle.plot_cells(show=True, title="Needle Cells")
+
+needle.update_params("resin_duct", "n_files", 2)
+needle.plot_cells(show=True, title="Needle Cells")
 
 
+# _ = needle.export_to_adjencymatrix()
+#needle.plot_network(show=True, title="Needle Network")

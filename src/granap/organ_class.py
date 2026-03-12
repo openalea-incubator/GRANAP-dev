@@ -218,10 +218,6 @@ class Organ(AbstractNetwork, ABC):
                         if layer:
                             layer.cells.append(cell)
 
-            self.all_cells.recenter_cells()
-            organ_specific_cells = self._organ_specific_cells() # add organ specific cells ex: root hairs, stomata, etc.
-            self.all_cells.cells.extend(organ_specific_cells.cells)
-            self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
             
             # Convert to GeoDataFrame
             cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
@@ -284,16 +280,6 @@ class Organ(AbstractNetwork, ABC):
         CellManager
             CellManager object with air space cells.
             Return an empty CellManager when there are no air spaces.
-        """
-        pass
-
-    @abstractmethod
-    def _organ_specific_cells(self):
-        """
-        Add organ specific cells.
-        
-        Returns:
-            CellManager object with organ specific cells
         """
         pass
         

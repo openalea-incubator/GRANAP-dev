@@ -477,23 +477,34 @@ class CellGenerator:
         depth = stomata_setting["depth"]
         sub_chamber = stomata_setting["sub_chamber"]
 
-        cell_prev, cell, cell_next = cells
-        # don't use cell angle as the orientation
-        # use the perpendicular axis of the cell triplet
-        dx = cell_next.x - cell_prev.x
-        dy = cell_next.y - cell_prev.y
+        # get unique id_group of the cells
+        id_groups = [cell.id_group for cell in cells]
+        id_groups = np.unique(id_groups)
+        cell = cells[0] # template cell
+
+        triplet = CellManager()
+        triplet.cells = cells
+        cell_prev_cx, cell_prev_cy = triplet.get_centroid_of_group(id_groups[0])
+        cx, cy = triplet.get_centroid_of_group(id_groups[1])
+        cell_next_cx, cell_next_cy = triplet.get_centroid_of_group(id_groups[2])
+
+        # use axis of the cell triplet as the orientation
+        dx = cell_next_cx - cell_prev_cx
+        dy = cell_next_cy - cell_prev_cy
         tangent_angle = np.arctan2(dy, dx)
         angle = tangent_angle + np.pi/2 # perpendicular (inward) orientation
-    
-        cx, cy = cell.x, cell.y
+
     
         def local_to_global_poly(local_pts):
             global_pts = []
             tangential_angle = angle + np.pi/2
             inward_angle = angle + np.pi
+
             for lx, ly in local_pts:
-                gx = cx + lx * np.cos(tangential_angle) + ly * np.cos(inward_angle)
-                gy = cy + lx * np.sin(tangential_angle) + ly * np.sin(inward_angle)
+                # - 0.4*cell.height*np.cos(tangential_angle) 
+                # - 0.4*cell.height*np.cos(inward_angle)
+                gx = cx + lx * np.cos(tangential_angle) - 0.4*cell.height*np.cos(tangential_angle) + ly * np.cos(inward_angle) - 0.4*cell.height*np.cos(inward_angle)
+                gy = cy + lx * np.sin(tangential_angle) - 0.4*cell.height*np.sin(tangential_angle) + ly * np.sin(inward_angle) - 0.4*cell.height*np.sin(inward_angle)
                 global_pts.append((gx, gy))
             return Polygon(global_pts)
     

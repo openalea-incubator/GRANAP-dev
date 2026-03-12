@@ -58,6 +58,12 @@ class CellManager:
         # Check if cell has polygon attribute and it is not None
         return [cell for cell in self.cells if cell.polygon is not None and cell.polygon.intersects(polygon)]
 
+    def get_centroid_of_group(self, id_group: int):
+        group_cells = self.get_cells_by_group(id_group)
+        cx = np.mean([cell.x for cell in group_cells])
+        cy = np.mean([cell.y for cell in group_cells])
+        return cx, cy
+
     def get_polygons(self):
         return [cell.polygon for cell in self.cells if cell.polygon is not None]
     
@@ -113,7 +119,8 @@ class CellManager:
             cell.x = cell.x - x_center
             cell.y = cell.y - y_center
             cell.angle = np.arctan2(cell.y, cell.x)
-            cell.polygon = translate(cell.polygon, xoff = -x_center, yoff = -y_center)
+            if cell.polygon is not None:
+                cell.polygon = translate(cell.polygon, xoff = -x_center, yoff = -y_center)
 
     def plot_cells(self, ax = None):
         # plot cells coordinates

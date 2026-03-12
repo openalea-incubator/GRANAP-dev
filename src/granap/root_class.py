@@ -330,31 +330,4 @@ class RootAnatomy(Organ):
             # add the air spaces cells to the all_cells
             return air_spaces_cells
 
-    def _organ_specific_cells(self) -> CellManager:
-        """
-        Add organ specific cells.
-        
-        Returns:
-            CellManager object with organ specific cells
-        """
-
-        organ_specific_cells = CellManager()
-
-        # add root hairs
-        organ_specific_cells = self.add_root_hairs(organ_specific_cells)
-
-        return organ_specific_cells
-
-    def add_root_hairs(self, organ_specific_cells: CellManager) -> CellManager:
-        """
-        Add root hairs to the root.
-        
-        Args:
-            organ_specific_cells: CellManager object with organ specific cells
-        
-        Returns:
-            CellManager object with root hairs
-        """
-        return organ_specific_cells
-
         
