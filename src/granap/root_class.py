@@ -33,15 +33,16 @@ class RootAnatomy(Organ):
 
         # Root specific parameters
         self.vascular_params = {
-            "thickness": 0.23,
-            "cell_diameter": 0.012,
-            "xylem_diameter": 0.06,
+            "thickness": 0.27,
+            "cell_diameter": 0.01,
+            "xylem_diameter": 0.063,
+            "protoxylem_diameter": 0.02,
             "phloem_diameter": 0.012,
             "n_vascular_bundles": 5,
-            "ratio_proto_meta": 2.5
+            "ratio_proto_meta": 2.2
         }
         self.intercellular_spaces_params = {
-            "cortex": 0.1
+            "cortex": 0
         }
     
     def _initialize_default_layers(self) -> None:
@@ -57,22 +58,22 @@ class RootAnatomy(Organ):
 
         self.layer_manager.add_layer(Layer(
             name="exodermis",
-            cell_diameter=0.035,
+            cell_diameter=0.03,
             n_layers=1,
             order=5
         ))
         
         self.layer_manager.add_layer(Layer(
             name="cortex",
-            cell_diameter=0.042,
+            cell_diameter=0.04,
             n_layers=5,
             order=4
         ))
         
         self.layer_manager.add_layer(Layer(
             name="endodermis",
-            cell_diameter=0.015,
-            cell_width=0.030,
+            cell_diameter=0.02,
+            cell_width=0.03,
             n_layers=1,
             order=3
         ))
@@ -180,7 +181,9 @@ class RootAnatomy(Organ):
         if self.vascular_params["n_vascular_bundles"] == 0:
             return
         
-        self.fit_vascular_elements(polygon_for_vascular)
+        self.fit_metaxylem_elements(polygon_for_vascular)
+        
+        self.fit_phloem_protoxylem_elements(polygon_for_vascular)
         # remove the cells in the vascular elements
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
@@ -191,11 +194,104 @@ class RootAnatomy(Organ):
         if debug:
             self.all_cells.plot_cells()
 
-    def fit_vascular_elements(self, polygon):
+        
+
+    def fit_phloem_protoxylem_elements(self, polygon):
+        
+        n_protoxylem = int(np.ceil(self.vascular_params["ratio_proto_meta"]*self.vascular_params["n_vascular_bundles"]))
+        n_phloem = n_protoxylem-1
+
+        buffing_dist = max(self.vascular_params["protoxylem_diameter"], self.vascular_params["phloem_diameter"])
+
+        polygon = polygon.difference(polygon.buffer(-buffing_dist*1.1))
+        polygon = polygon.difference(unary_union(self.vascular_polygons))
+
+        slices = GeometryProcessor.pizza_slice(polygon, n_phloem+n_protoxylem)
+
+        for i, poly_slice in enumerate(slices[1:]):
+            if i % 2 == 0:
+                cells_in_slice, list_protoxylem_polygons = self.protoxylem_elements_in_slice(poly_slice, i)
+                self.vascular_cells.extend_cells(cells_in_slice.cells)
+                self.vascular_polygons.extend(list_protoxylem_polygons)
+            else:
+                cells_in_slice, list_phloem_polygons = self.phloem_elements_in_slice(poly_slice, i)
+                self.vascular_cells.extend_cells(cells_in_slice.cells)
+                self.vascular_polygons.extend(list_phloem_polygons)
+
+    def protoxylem_elements_in_slice(self, slice_poly: Polygon, idx: int = 0):
+        list_polygons = []
+        cells_in_slice = CellManager()
+        i_cell = 0
+        
+        polygon_res = GeometryProcessor.fit_inner_ellipse(slice_poly, self.vascular_params["protoxylem_diameter"]/2)
+        polygon = polygon_res["polygon"]
+        polygon_buff = polygon.buffer(-(self.vascular_params["protoxylem_diameter"]/2)*0.15)
+        x, y = polygon_buff.exterior.coords.xy
+        center = polygon.centroid
+        coords = np.column_stack((x, y))
+        coords = GeometryProcessor.resample_coords(coords, target_n_points=10)
+
+        for cell_border_pts in coords[1:]:
+            i_cell += 1
+            new_cell = Cell(
+                    type="protoxylem",
+                    x=cell_border_pts[0],
+                    y=cell_border_pts[1],
+                    diameter=self.vascular_params["protoxylem_diameter"],
+                    id_cell=i_cell,
+                    id_layer=0,
+                    id_group=idx,
+                    angle=np.arctan2(cell_border_pts[1] - center.y, 
+                                      cell_border_pts[0] - center.x),
+                    radius=np.sqrt((cell_border_pts[0] - center.x)**2 + 
+                                    (cell_border_pts[1] - center.y)**2),
+                    area=np.pi * (self.vascular_params["protoxylem_diameter"]/2)**2
+                )
+            cells_in_slice.add_cell(new_cell)
+
+        list_polygons.append(polygon)
+        return cells_in_slice, list_polygons
+
+    def phloem_elements_in_slice(self, slice_poly: Polygon, idx: int = 0):
+        list_polygons = []
+        cells_in_slice = CellManager()
+        i_cell = 0
+        
+        polygon_res = GeometryProcessor.fit_inner_ellipse(slice_poly, self.vascular_params["phloem_diameter"]/2)
+        polygon = polygon_res["polygon"]
+        polygon_buff = polygon.buffer(-(self.vascular_params["phloem_diameter"]/2)*0.15)
+        
+        x, y = polygon_buff.exterior.coords.xy
+        center = polygon.centroid
+        coords = np.column_stack((x, y))
+        coords = GeometryProcessor.resample_coords(coords, target_n_points=10)
+
+        for cell_border_pts in coords[1:]:
+            i_cell += 1
+            new_cell = Cell(
+                    type="phloem",
+                    x=cell_border_pts[0],
+                    y=cell_border_pts[1],
+                    diameter=self.vascular_params["phloem_diameter"],
+                    id_cell=i_cell,
+                    id_layer=0,
+                    id_group=idx,
+                    angle=np.arctan2(cell_border_pts[1] - center.y, 
+                                      cell_border_pts[0] - center.x),
+                    radius=np.sqrt((cell_border_pts[0] - center.x)**2 + 
+                                    (cell_border_pts[1] - center.y)**2),
+                    area=np.pi * (self.vascular_params["phloem_diameter"]/2)**2
+                )
+            cells_in_slice.add_cell(new_cell)
+
+        list_polygons.append(polygon)
+        return cells_in_slice, list_polygons
+
+    def fit_metaxylem_elements(self, polygon):
         # from polygon, fit two ellipses
         n_xylem_cells = self.vascular_params["n_vascular_bundles"]
 
-        slices = GeometryProcessor.pizza_slice(polygon, n_xylem_cells)
+        slices = GeometryProcessor.pizza_slice(polygon.buffer(-self.vascular_params["xylem_diameter"]/4), n_xylem_cells)
         cells_in_slices, list_xylem_polygons = self.vascular_elements_in_slice(slices)
         self.vascular_cells = cells_in_slices
         self.vascular_polygons = list_xylem_polygons
@@ -219,7 +315,7 @@ class RootAnatomy(Organ):
             for cell_border_pts in coords[1:]:
                 i_cell += 1
                 new_cell = Cell(
-                        type="xylem",
+                        type="metaxylem",
                         x=cell_border_pts[0],
                         y=cell_border_pts[1],
                         diameter=self.vascular_params["xylem_diameter"],
@@ -258,8 +354,9 @@ class RootAnatomy(Organ):
         """
         Add intercellular spaces.
         """
+        air_spaces_cells = CellManager()
         if self.intercellular_spaces_params["cortex"] == 0:
-            return
+            return air_spaces_cells
         else:
                 # Collect mesophyll polygons (cells are *not* touched)
             cortex_cells = self.all_cells.get_cells_by_type("cortex")
@@ -312,7 +409,7 @@ class RootAnatomy(Organ):
                     cell.polygon = carved
     
             # create cells for the air spaces
-            air_spaces_cells = CellManager()
+            
             id_cell = len(self.all_cells.cells)
             for air_space_polygon in air_space_polys:
                 id_cell += 1

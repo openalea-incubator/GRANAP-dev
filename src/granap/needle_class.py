@@ -421,7 +421,16 @@ class NeedleAnatomy(Organ):
         """
         Add organ specific tissues.
 
-        For needles, it adds resin ducts.
+        For needles, it adds resin ducts and stomata.
+        """
+        self.add_canal()
+
+        # add stomata
+        self.add_stomata()
+
+    def add_canal(self):
+        """
+        Add resin ducts.
         Selection of portion of mesophyll layer. The two first ducts are located at the edges of the needle.
 
         diameter of the inner part of the duct full diameter - two parenchyma cells.
@@ -528,9 +537,6 @@ class NeedleAnatomy(Organ):
         # add the resin duct cells to the list of cells
         self.all_cells.extend_cells(duct_cells)
         self.all_cells.recalculate_cell_properties()
-
-        # add stomata
-        self.add_stomata()
 
 
     def add_intercellular_spaces(self):
