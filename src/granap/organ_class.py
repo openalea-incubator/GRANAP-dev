@@ -17,7 +17,7 @@ from granap.generate_cell import CellGenerator
 from granap.cell_class import Cell
 from granap.cell_manager import CellManager
 from granap.network_base import AbstractNetwork
-
+from granap.input_data import OrganInputData
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -42,6 +42,37 @@ class Organ(AbstractNetwork, ABC):
         self._layers_polygons: List[Dict[str, Any]] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
         self.all_cells = CellManager()
+
+    @classmethod
+    def create_from_input(cls, input_data: OrganInputData) -> "Organ":
+        """
+        Factory method to initialize the appropriate Organ subclass 
+        (RootAnatomy or NeedleAnatomy) from an OrganInputData instance.
+        """
+        # Determine the organ type from the parameters
+        ptype_param = next((p for p in input_data.params if p["name"] == "planttype"), None)
+        organ_type = None
+
+        if ptype_param:
+            if ptype_param.get("organ") == "needle" or ptype_param.get("value") == 3:
+                organ_type = "needle"
+            elif ptype_param.get("organ") == "root" or ptype_param.get("value") in [1, 2, 1.0, 2.0]:
+                organ_type = "root"
+
+        # Fallback to duck-typing the input parameters if 'organ' isn't explicitly defined
+        if not organ_type:
+            names = {p["name"] for p in input_data.params}
+            if "stele" in names or "cortex" in names:
+                organ_type = "root"
+            else:
+                organ_type = "needle"
+
+        if organ_type == "needle":
+            from granap.needle_class import NeedleAnatomy
+            return NeedleAnatomy(input_data)
+        else:
+            from granap.root_class import RootAnatomy
+            return RootAnatomy(input_data)
     
     def add_layer(self, layer: Layer, position: Optional[int] = None) -> None:
         """
@@ -169,6 +200,9 @@ class Organ(AbstractNetwork, ABC):
         params = [l.to_dict() for l in self.layer_manager.get_layers()]
         central_layers = self._create_central_layers(polygon, params)
         layers_polygons.extend(central_layers)
+
+        # Optional reshape: let subclasses morph layer polygons
+        layers_polygons = self.reshape_layers(layers_polygons)
         
         return layers_polygons
     
@@ -227,6 +261,25 @@ class Organ(AbstractNetwork, ABC):
             self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
         
         return self._cells_gdf
+    
+    @abstractmethod
+    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Optionally reshape layer polygons after they have been built.
+
+        The default implementation is a no-op (returns the list unchanged).
+        Subclasses can override this to morph each layer's polygon — for
+        example, interpolating between the outer organ shape and an inner
+        ellipse so that the central cylinder has a different cross-section.
+
+        Args:
+            layers_polygons: List of layer polygon dictionaries as produced
+                by ``_build_layer_polygons``.
+
+        Returns:
+            The (potentially modified) list of layer polygon dictionaries.
+        """
+        return layers_polygons
 
     def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
         """

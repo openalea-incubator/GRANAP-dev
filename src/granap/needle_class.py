@@ -13,6 +13,7 @@ from granap.cell_manager import CellManager
 from granap.generate_cell import CellGenerator
 from granap.layer_class import Layer
 from granap.geometry_collection import GeometryProcessor
+from granap.shapes import PolygonInterpolator
 import matplotlib.pyplot as plt
 
 
@@ -24,16 +25,20 @@ class NeedleAnatomy(Organ):
     including transfusion tissue and resin ducts.
     """
     
-    def __init__(self, params: List[Dict[str, Any]] = None):
+    from granap.input_data import OrganInputData
+
+    def __init__(self, input_data: Any = None):
         """
         Initialize needle anatomy.
         """
         super().__init__()
-        # Initialize parameters
-        if params is None:
-            self._initialize_default_params()
+        # Initialize parameters from input_data or default
+        if hasattr(input_data, 'params'):
+            self.params = input_data.params
+        elif isinstance(input_data, list):
+            self.params = input_data
         else:
-            self.params = params
+            self._initialize_default_params()
         
         self._initialize_params()
         self._initialize_default_layers()
@@ -46,7 +51,7 @@ class NeedleAnatomy(Organ):
             # P. pinaster
             {"name": "planttype", "value": 3, "organ": "needle", "width": 1.8, "thickness": 1.1}, # global parameters
             {"name": "randomness", "value": 1.0, "smoothness": 0.3}, # 0 = No randomness, 3 = Maximum randomness; smoothness is the smoothing factor (0 = no smoothing, 1 = maximum smoothing)
-            {"name": "central_cylinder", "cell_diameter": 0.02, "layer_thickness": 0.43, "layer_length": 1.05, "vascular_width": 0.15, "vascular_height": 0.2}, # Cell diameter in millimeters
+            {"name": "central_cylinder", "shape": "half_ellipse", "cell_diameter": 0.02, "layer_thickness": 0.43, "layer_length": 1.05, "vascular_width": 0.15, "vascular_height": 0.2}, # Cell diameter in millimeters
             {"name": "transfusion_tissue", "tracheids_diameter": 0.05, "parenchyma_diameter": 0.03, "transfusion_tracheids_ratio": 0.5, "n_layers":2},
             {"name": "endodermis", "cell_diameter": 0.02, "cell_width": 0.05, "n_layers": 1, "order": 3, "shift": 5},
             {"name": "mesophyll", "cell_diameter": 0.08, "cell_width": 0.045, "n_layers": 3, "order": 4, "shift":10},
@@ -94,9 +99,9 @@ class NeedleAnatomy(Organ):
             Half-ellipse polygon
         """
         # check if width and thickness are provided
-        if self.global_params["width"] is None:
+        if self.global_params.get("width") is None: #key error
             self.global_params["width"] = 0
-        if self.global_params["thickness"] is None:
+        if self.global_params.get("thickness") is None: #key error
             self.global_params["thickness"] = 0
         # if width and thickness are not provided, calculate them from the layers     
         if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
@@ -115,6 +120,71 @@ class NeedleAnatomy(Organ):
             thickness = self.global_params["thickness"]
         
         return GeometryProcessor.half_ellipse_polygon(width, thickness)
+
+    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        When "central_cylinder" has shape="ellipse", interpolate each layer
+        polygon between the outer half-ellipse (t=0) and a full ellipse
+        aligned with the endodermis layer (t=1).
+
+        Layers from the outside down to the endodermis are gradually morphed.
+        Layers inward from the endodermis (transfusion, parenchyma …) are
+        fully changed to fit inside the ellipse.
+        """
+        if self.central_cylinder_params.get("shape") != "ellipse":
+            return layers_polygons
+
+        if not layers_polygons:
+            return layers_polygons
+
+        # --- build the target ellipse ----------------------------------------
+        # Use the layer_thickness and layer_length of the central cylinder as
+        # the semi-axes of the target full ellipse.
+        rx = self.central_cylinder_params["layer_length"] / 2
+        ry = self.central_cylinder_params["layer_thickness"] / 2 
+        n_pts = 120
+        angles = np.linspace(0, 2 * np.pi, n_pts, endpoint=False)
+        ellipse_coords = [(rx * np.cos(a), ry * np.sin(a)) for a in angles]
+        ellipse_coords = [(x, y + self.global_params["thickness"] / 2.2) for x, y in ellipse_coords]
+        target_ellipse = GeometryProcessor.buffer_polygon(
+            Polygon(ellipse_coords),
+            0, smooth_factor=0.0
+        )
+
+        # --- find the index of the endodermis layer --------------------------
+        layer_names = [lp["name"] for lp in layers_polygons]
+        
+        endo_idx = layer_names.index("endodermis")
+
+        # outside polygon (index 0) is the reference half-ellipse shape; we
+        # keep it as-is (t=0) and warp everything inward up to endo_idx (t=1).
+        outer_poly = layers_polygons[0]["polygon"]
+
+        # Pre-compute one interpolator between the outer shape and the ellipse.
+        try:
+            interp = PolygonInterpolator(outer_poly, target_ellipse)
+        except Exception:
+            # If PolygonInterpolator fails (degenerate geometry), skip reshape.
+            return layers_polygons
+
+        n_to_morph = endo_idx + 1  # indices 0 … endo_idx inclusive
+        
+        for i in range(1, n_to_morph):          # skip index 0 (outside)
+            t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1
+            print(t)
+            try:
+                new_poly = interp.fast_interpolate(t)
+                if not new_poly.is_empty and new_poly.is_valid:
+                    layers_polygons[i] = dict(layers_polygons[i])
+                    layers_polygons[i]["polygon"] = new_poly
+            except Exception:
+                pass  # leave this layer polygon unchanged on error
+
+        layers_polygons = layers_polygons[:endo_idx+1]  # remove layers after endodermis
+
+        layers_polygons.extend(self._create_central_layers(target_ellipse, params= self.params))  # add new central layers
+
+        return layers_polygons
     
     def _calculate_needle_width(self) -> float:
         """Calculate total needle width from layers."""
@@ -130,11 +200,11 @@ class NeedleAnatomy(Organ):
         # thickness of vascular cylinder
         thickness_vascular = self.central_cylinder_params["layer_thickness"]
         # thickness of all supplementary layers which is equal to width_layer
-        thickness_layer = width_layer
-        thickness_total = (2 * thickness_layer) + thickness_vascular
+        self.thickness_layer = width_layer
+        thickness_total = (2 * self.thickness_layer) + thickness_vascular
         
-        width = 2 * np.sqrt((width_vascular/2 + width_layer)**2 / 
-                            (1-(thickness_layer/thickness_total)**2))
+        width = 2 * np.sqrt((width_vascular/2 + self.thickness_layer)**2 / 
+                            (1-(self.thickness_layer/thickness_total)**2))
 
         return width
     

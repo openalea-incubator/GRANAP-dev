@@ -24,67 +24,124 @@ class RootAnatomy(Organ):
     circular cross-section and vascular cylinder.
     """
     
-    def __init__(self):
+    from granap.input_data import OrganInputData
+
+    def __init__(self, input_data: Any = None):
         """
         Initialize root anatomy.
         """
         super().__init__()
-        self._initialize_default_layers()
+        # Initialize parameters from input_data or default
+        if hasattr(input_data, 'params'):
+            self.params = input_data.params
+        elif isinstance(input_data, list):
+            self.params = input_data
+        else:
+            self.params = None
+
+        if self.params is None:
+            self._initialize_default_layers()
+
 
         # Root specific parameters
+            self.vascular_params = {
+                "thickness": 0.27,
+                "cell_diameter": 0.01,
+                "xylem_diameter": 0.063,
+                "protoxylem_diameter": 0.02,
+                "phloem_diameter": 0.012,
+                "n_vascular_bundles": 5,
+                "ratio_proto_meta": 2.2
+            }
+            self.intercellular_spaces_params = {
+                "cortex": 0
+            }
+            self.global_params = {}
+        else:
+            self._initialize_params()
+            self._initialize_default_layers()
+
+    def _initialize_params(self) -> None:
+        """Parse the structured input and set local attributes."""
+        # 1. Global params
+        self.global_params = next((p for p in self.params if p["name"] == "planttype"), {})
+
+        # 2. Vascular / Stele params
+        stele = next((p for p in self.params if p["name"] == "stele"), {})
+        xylem = next((p for p in self.params if p["name"] == "xylem"), {})
+        phloem = next((p for p in self.params if p["name"] == "phloem"), {})
+
         self.vascular_params = {
-            "thickness": 0.27,
-            "cell_diameter": 0.01,
-            "xylem_diameter": 0.063,
-            "protoxylem_diameter": 0.02,
-            "phloem_diameter": 0.012,
-            "n_vascular_bundles": 5,
-            "ratio_proto_meta": 2.2
+            "thickness": stele.get("layer_diameter", 0.27),
+            "cell_diameter": stele.get("cell_diameter", 0.01),
+            "xylem_diameter": xylem.get("max_size", 0.063),
+            "protoxylem_diameter": xylem.get("cell_diameter", 0.02),
+            "phloem_diameter": phloem.get("cell_diameter", 0.012),
+            "n_vascular_bundles": int(xylem.get("n_files", 5) if "n_files" in xylem else 5),
+            "ratio_proto_meta": xylem.get("ratio", 2.2)
         }
+
+        # 3. Intercellular spaces / aerenchyma
+        aerenchyma = next((p for p in self.params if p["name"] == "aerenchyma"), {})
         self.intercellular_spaces_params = {
-            "cortex": 0
+            "cortex": aerenchyma.get("proportion", 0)
         }
-    
+
+        # 4. Extract layer definitions (any param with 'order' that is not a vascular zone)
+        self.layers = [p for p in self.params if "order" in p and p["name"] not in ("stele", "xylem", "phloem", "aerenchyma")]
+        self.layers = sorted(self.layers, key=lambda x: float(x["order"]))
+
     def _initialize_default_layers(self) -> None:
         """Initialize default root layers."""
-        # Outer to inner (order: higher = outer)
-        self.layer_manager.add_layer(Layer(
-            name="epidermis",
-            cell_diameter=0.015,
-            n_layers=1,
-            shift=0.5,
-            order=6
-        ))
+        if hasattr(self, 'layers') and self.layers:
+            for param in self.layers:
+                self.layer_manager.add_layer(Layer(
+                    name=param["name"],
+                    cell_diameter=param.get("cell_diameter", 0.01),
+                    cell_width=param.get("cell_width", param.get("cell_diameter", 0.01)),
+                    shift=param.get("shift", 0.0),
+                    n_layers=int(param.get("n_layers", 1)),
+                    order=param.get("order", 0)
+                ))
+        else:
+            # Outer to inner (order: higher = outer)
+            self.layer_manager.add_layer(Layer(
+                name="epidermis",
+                cell_diameter=0.015,
+                n_layers=1,
+                shift=0.5,
+                order=6
+            ))
 
-        self.layer_manager.add_layer(Layer(
-            name="exodermis",
-            cell_diameter=0.03,
-            n_layers=1,
-            order=5
-        ))
-        
-        self.layer_manager.add_layer(Layer(
-            name="cortex",
-            cell_diameter=0.04,
-            n_layers=5,
-            order=4
-        ))
-        
-        self.layer_manager.add_layer(Layer(
-            name="endodermis",
-            cell_diameter=0.02,
-            cell_width=0.03,
-            n_layers=1,
-            order=3
-        ))
-        
-        self.layer_manager.add_layer(Layer(
-            name="pericycle",
-            cell_diameter=0.01,
-            cell_width=0.009,
-            n_layers=1,
-            order=2
-        ))
+            self.layer_manager.add_layer(Layer(
+                name="exodermis",
+                cell_diameter=0.03,
+                n_layers=1,
+                order=5
+            ))
+            
+            self.layer_manager.add_layer(Layer(
+                name="cortex",
+                cell_diameter=0.04,
+                n_layers=5,
+                order=4
+            ))
+            
+            self.layer_manager.add_layer(Layer(
+                name="endodermis",
+                cell_diameter=0.02,
+                cell_width=0.03,
+                n_layers=1,
+                order=3
+            ))
+            
+            self.layer_manager.add_layer(Layer(
+                name="pericycle",
+                cell_diameter=0.01,
+                cell_width=0.009,
+                n_layers=1,
+                order=2
+            ))
     
     def _create_base_shape(self) -> Polygon:
         """
@@ -148,6 +205,19 @@ class RootAnatomy(Organ):
             i_layer += 1
         
         return central_layers
+
+    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Reshape layers to fit the organ shape.
+        
+        Args:
+            layers_polygons: List of layer polygon dictionaries
+        
+        Returns:
+            List of reshaped layer polygon dictionaries
+        """
+        
+        return layers_polygons
     
     def set_vascular_params(self, **kwargs) -> None:
         """

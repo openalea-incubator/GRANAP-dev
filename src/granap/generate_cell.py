@@ -187,6 +187,85 @@ class CellGenerator:
                         id_cell += 1
                     id_group += 1
         
+        all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
+        return all_cells
+
+    @staticmethod
+    def resolve_cell_border_overlaps(all_cells: CellManager) -> CellManager:
+        """
+        Remove cell_border points from lower-priority id_groups that overlap
+        with higher-priority ones.
+
+        Priority order:
+          1. Higher id_layer wins (inner layers have precedence over outer).
+          2. Within the same id_layer, higher id_group wins.
+
+        A convex-hull footprint is built from each group's cell positions.
+        Cells from a lower-priority group whose position falls inside a
+        higher-priority footprint are removed.
+        """
+        from shapely.geometry import MultiPoint
+
+        if not all_cells.cells:
+            return all_cells
+
+        # --- build group metadata ----------------------------------------
+        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        for idx, cell in enumerate(all_cells.cells):
+            g = cell.id_group
+            if g not in groups:
+                groups[g] = {
+                    "id_layer": cell.id_layer,
+                    "cell_diameter": cell.diameter,
+                    "id_group": g,
+                    "indices": [],
+                }
+            groups[g]["indices"].append(idx)
+
+        # build a convex-hull footprint for each group
+        for meta in groups.values():
+            pts = [
+                (all_cells.cells[i].x, all_cells.cells[i].y)
+                for i in meta["indices"]
+            ]
+            if len(pts) >= 3:
+                meta["poly"] = MultiPoint(pts).convex_hull.buffer(meta["cell_diameter"] * 0.2)
+            elif pts:
+                r = all_cells.cells[meta["indices"][0]].diameter / 2
+                meta["poly"] = Point(pts[0]).buffer(r)
+            else:
+                meta["poly"] = None
+
+        # --- sort groups from highest to lowest priority -----------------
+        sorted_groups = sorted(
+            groups.values(),
+            key=lambda m: (m["id_layer"], m["id_group"]),
+            reverse=True,
+        )
+
+        # --- remove overlapping lower-priority cells --------------------
+        ids_to_remove: set = set()
+        for i, high in enumerate(sorted_groups):
+            if high["poly"] is None:
+                continue
+            for low in sorted_groups[i + 1:]:
+                if low["poly"] is None:
+                    continue
+                if not high["poly"].intersects(low["poly"]):
+                    continue
+                for idx in low["indices"]:
+                    if idx in ids_to_remove:
+                        continue
+                    cell = all_cells.cells[idx]
+                    if high["poly"].contains(Point(cell.x, cell.y)):
+                        ids_to_remove.add(idx)
+
+        if ids_to_remove:
+            all_cells.cells = [
+                c for i, c in enumerate(all_cells.cells)
+                if i not in ids_to_remove
+            ]
+
         return all_cells
 
     @staticmethod

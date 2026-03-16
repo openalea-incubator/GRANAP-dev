@@ -13,6 +13,8 @@ needle = NeedleAnatomy()
 
 needle.update_params("resin_duct", "n_files", 2)
 needle.update_params("stomata", "n_files", 10)
+needle.plot_layers(show=True, title=f"Needle Layers")
+
 needle.plot_cells(show=True, title=f"Needle Cells")
 
 
