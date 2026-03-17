@@ -4,7 +4,7 @@ Geometry processor module for handling polygon operations.
 
 import numpy as np
 import shapely as sp
-from typing import Tuple
+from typing import Tuple, List, Optional
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from cv2 import fitEllipse
 
@@ -155,6 +155,33 @@ class GeometryProcessor:
                 return sp.Polygon(coords_smooth)
         else:
             return polygon_buffered
+
+    @staticmethod
+    def union_polygons(polygons: List[Polygon]) -> Polygon:
+        """
+        Union a list of polygons.
+        
+        Args:
+            polygons: List of polygons
+        
+        Returns:
+            Union of all polygons
+        """
+        return sp.ops.unary_union(polygons)
+    
+    @staticmethod
+    def difference_polygons(polygon1: Polygon, polygon2: Polygon):
+        """
+        Difference two polygons.
+        
+        Args:
+            polygon1: First polygon
+            polygon2: Second polygon
+        
+        Returns:
+            Difference of the two polygons
+        """
+        return polygon1.difference(polygon2)
     
     @staticmethod
     def draw_ellipse(center: Tuple[float, float], axis: float, 
@@ -356,3 +383,7 @@ class GeometryProcessor:
         ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
     
         return ellipses
+
+
+
+

@@ -17,7 +17,7 @@ from granap.generate_cell import CellGenerator
 from granap.cell_class import Cell
 from granap.cell_manager import CellManager
 from granap.network_base import AbstractNetwork
-
+from granap.input_data import OrganInputData
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -42,6 +42,37 @@ class Organ(AbstractNetwork, ABC):
         self._layers_polygons: List[Dict[str, Any]] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
         self.all_cells = CellManager()
+
+    @classmethod
+    def create_from_input(cls, input_data: OrganInputData) -> "Organ":
+        """
+        Factory method to initialize the appropriate Organ subclass 
+        (RootAnatomy or NeedleAnatomy) from an OrganInputData instance.
+        """
+        # Determine the organ type from the parameters
+        ptype_param = next((p for p in input_data.params if p["name"] == "planttype"), None)
+        organ_type = None
+
+        if ptype_param:
+            if ptype_param.get("organ") == "needle" or ptype_param.get("value") == 3:
+                organ_type = "needle"
+            elif ptype_param.get("organ") == "root" or ptype_param.get("value") in [1, 2, 1.0, 2.0]:
+                organ_type = "root"
+
+        # Fallback to duck-typing the input parameters if 'organ' isn't explicitly defined
+        if not organ_type:
+            names = {p["name"] for p in input_data.params}
+            if "stele" in names or "cortex" in names:
+                organ_type = "root"
+            else:
+                organ_type = "needle"
+
+        if organ_type == "needle":
+            from granap.needle_class import NeedleAnatomy
+            return NeedleAnatomy(input_data)
+        else:
+            from granap.root_class import RootAnatomy
+            return RootAnatomy(input_data)
     
     def add_layer(self, layer: Layer, position: Optional[int] = None) -> None:
         """
@@ -54,6 +85,27 @@ class Organ(AbstractNetwork, ABC):
         self.layer_manager.add_layer(layer, position)
         self._invalidate_geometry()
     
+    def update_params(self, param_name: str, attribute: str, value: Any) -> None:
+        """
+        Update a parameter of the organ.
+    
+        self.params = [{"name": "param_name_1", "attribute_1": 0.0, "attribute_2": 0.0, ...},
+                       {"name": "param_name_2", "attribute_1": 0.0, "attribute_2": 0.0, ...},
+                       ...]
+    
+        Args:
+            param_name: Name of the parameter to update
+            attribute: Name of the attribute to update
+            value: New value of the parameter
+        """
+        for p in self.params:
+            if p["name"] == param_name:
+                p[attribute] = value
+                self._invalidate_geometry()
+                return
+        raise ValueError(f"Parameter '{param_name}' not found in params.")
+
+    
     def remove_layer(self, name: str) -> Layer:
         """
         Remove a tissue layer by name.
@@ -62,7 +114,7 @@ class Organ(AbstractNetwork, ABC):
             name: Name identifier of the layer
         
         Returns:
-            The removed Layer object
+            The removed Layer object    
         """
         removed = self.layer_manager.remove_layer(name)
         self._invalidate_geometry()
@@ -148,6 +200,9 @@ class Organ(AbstractNetwork, ABC):
         params = [l.to_dict() for l in self.layer_manager.get_layers()]
         central_layers = self._create_central_layers(polygon, params)
         layers_polygons.extend(central_layers)
+
+        # Optional reshape: let subclasses morph layer polygons
+        layers_polygons = self.reshape_layers(layers_polygons)
         
         return layers_polygons
     
@@ -171,23 +226,21 @@ class Organ(AbstractNetwork, ABC):
             )
 
             # add vascular tissue
-            self.allocate_vascular_tissue(layers_polygons)        
-            
+            self.allocate_vascular_tissue(layers_polygons)
+
+            # add organ specific tissues
+            self._organ_specific_tissues()
+
             vor = CellGenerator.voronoi_diagram(self.all_cells)
             
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
-            grouped_cells = CellGenerator.smooth_cells(grouped_cells)
+            grouped_cells = CellGenerator.simplify_cells(grouped_cells)
+            # repopulate all_cells with the grouped cells
+            self.all_cells = CellManager()
+            self.all_cells.cells = grouped_cells
+            self.add_intercellular_spaces()
             
-            # Populate layers with cells
-            # Map layer index to layer specific object
-            # Note: layers_polygons indices match the order of generation, 
-            # but we need to match them to self.layer_manager layers.
-            # The indices in generate_layer_polygons are:
-            # 0: outside
-            # 1..N: actual layers
-            # N+1..M: central layers
-            
-            for cell in grouped_cells:
+            for cell in self.all_cells.cells:
                 # Find the layer name from layers_polygons using id_layer
                 # id_layer is 0-indexed index of layers_polygons list
                 if 0 <= cell.id_layer < len(layers_polygons):
@@ -196,15 +249,35 @@ class Organ(AbstractNetwork, ABC):
                         layer = self.get_layer(layer_name)
                         if layer:
                             layer.cells.append(cell)
+
             
             # Convert to GeoDataFrame
-            cell_dicts = [c.cell_to_dict() for c in grouped_cells]
-            for i, c in enumerate(grouped_cells):
+            cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
+            for i, c in enumerate(self.all_cells.cells):
                 cell_dicts[i]['geometry'] = c.polygon
                 
             self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
         
         return self._cells_gdf
+    
+    @abstractmethod
+    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Optionally reshape layer polygons after they have been built.
+
+        The default implementation is a no-op (returns the list unchanged).
+        Subclasses can override this to morph each layer's polygon — for
+        example, interpolating between the outer organ shape and an inner
+        ellipse so that the central cylinder has a different cross-section.
+
+        Args:
+            layers_polygons: List of layer polygon dictionaries as produced
+                by ``_build_layer_polygons``.
+
+        Returns:
+            The (potentially modified) list of layer polygon dictionaries.
+        """
+        return layers_polygons
 
     def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
         """
@@ -238,9 +311,31 @@ class Organ(AbstractNetwork, ABC):
             polygon: Polygon boundary
         """
         pass
+
+    @abstractmethod
+    def _organ_specific_tissues(self):
+        """
+        Add organ specific tissues.
+        
+        Returns:
+        """
+        pass
+
+    @abstractmethod
+    def add_intercellular_spaces(self):
+        """
+        Compute and return intercellular (air space) polygons.
+
+        Returns
+        -------
+        CellManager
+            CellManager object with air space cells.
+            Return an empty CellManager when there are no air spaces.
+        """
+        pass
         
     
-    def plot_layers(self, show: bool = True) -> plt.Figure:
+    def plot_layers(self, show: bool = True, **kwargs) -> Optional[plt.Figure]:
         """
         Plot layer boundaries.
         
@@ -250,10 +345,14 @@ class Organ(AbstractNetwork, ABC):
         Returns:
             Matplotlib figure
         """
-        plt.close('all')
+        
         layers_polygons = self.generate_layer_polygons()
         
-        fig, ax = plt.subplots(figsize=(8, 8))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 10))
+
         colors = plt.cm.viridis(np.linspace(0, 1, len(layers_polygons)))
         
         for polygon_data, color in zip(layers_polygons, colors):
@@ -263,16 +362,18 @@ class Organ(AbstractNetwork, ABC):
         ax.set_aspect('equal')
         ax.set_xlabel("x (mm)")
         ax.set_ylabel("y (mm)")
-        ax.set_title(f"{self.__class__.__name__} - Layer Boundaries")
+        ax.set_title(kwargs.get('title', f"{self.__class__.__name__} - Layer Boundaries"))
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
         
-        if show:
-            plt.show()
-        
-        return fig
+        if fig is not None:
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return fig
+        return None
+
     
-    def plot_cells(self, show: bool = True) -> plt.Figure:
+    def plot_cells(self, show: bool = True, **kwargs) -> Optional[plt.Figure]:
         """
         Plot cell geometries.
         
@@ -284,7 +385,10 @@ class Organ(AbstractNetwork, ABC):
         """
         cells_gdf = self.generate_cells()
         
-        fig, ax = plt.subplots(figsize=(10, 10))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 10))
         
         cells_gdf.plot(
             ax=ax,
@@ -300,13 +404,14 @@ class Organ(AbstractNetwork, ABC):
         ax.set_aspect("equal", "box")
         ax.set_xlabel("x (mm)")
         ax.set_ylabel("y (mm)")
-        ax.set_title(f"{self.__class__.__name__} - Cross Section")
-        plt.tight_layout()
+        ax.set_title(kwargs.get('title', f"{self.__class__.__name__} - Cross Section"))
         
-        if show:
-            plt.show()
-        
-        return fig
+        if fig is not None:
+            plt.tight_layout()
+            if show:
+                plt.show()
+            return fig
+        return None
     
     def export_to_geopandas(self) -> gpd.GeoDataFrame:
         """
@@ -346,140 +451,30 @@ class Organ(AbstractNetwork, ABC):
     # ------------------------------------------------------------------
     # Network construction from Voronoi cell geometry
     # ------------------------------------------------------------------
-    def _build_network(self) -> None:
+    def _build_anatnetwork(self) -> None:
         """
         Populate ``self.graph`` from the cell GeoDataFrame.
 
         Algorithm
         ---------
-        1. Extract polygon vertices and edges; track which cells own
-           each edge.
-        2. Identify **junction vertices** — points where the set of
-           adjacent cells changes (triple junctions in a Voronoi).
-        3. Walk each cell boundary between consecutive junctions to
+        1. Delegate vertex snapping, vertex/edge maps, and junction
+           detection to :meth:`CellGenerator._build_topology`.
+        2. Walk each cell boundary between consecutive junctions to
            define **walls** (one wall per cell-pair interface).
-        4. Assign MECHA-compatible node indices and build the graph.
+        3. Assign MECHA-compatible node indices and build the graph.
         """
         cells_gdf = self.generate_cells()
-        n_dec = 6  # rounding precision for snapped vertex keys
 
-        # Phase 0 — snap nearby vertices together using a KD-tree
-        # This fixes floating-point mismatches between adjacent polygons
-        # that would otherwise prevent shared-vertex detection.
-        from scipy.spatial import cKDTree
+        # Phases 0–2 — snapping, topology maps, junction detection
+        polys    = list(cells_gdf["geometry"])
+        cell_ids = list(cells_gdf.index)
 
-        raw_cell_data: Dict[int, list] = {}   # row_idx → raw coords
-        all_raw_verts: list = []              # flat list of (x, y)
-        vert_global_idx: Dict[int, List[int]] = {}  # row_idx → [indices]
-
-        for row_idx, row in cells_gdf.iterrows():
-            poly = row["geometry"]
-            if poly is None or poly.is_empty:
-                continue
-            if isinstance(poly, MultiPolygon):
-                poly = max(poly.geoms, key=lambda g: g.area)
-            coords = list(poly.exterior.coords)
-            if coords[0] == coords[-1]:
-                coords = coords[:-1]
-            if len(coords) < 3:
-                continue
-            indices = []
-            for x, y in coords:
-                indices.append(len(all_raw_verts))
-                all_raw_verts.append((x, y))
-            raw_cell_data[row_idx] = coords
-            vert_global_idx[row_idx] = indices
-
-        if not all_raw_verts:
-            return
-
-        coords_arr = np.array(all_raw_verts)
-        kd_tree = cKDTree(coords_arr)
-
-        # Compute snap tolerance: 1 % of 5th-percentile edge length
-        edge_lengths = []
-        for coords in raw_cell_data.values():
-            n = len(coords)
-            for k in range(n):
-                el = np.hypot(
-                    coords[(k + 1) % n][0] - coords[k][0],
-                    coords[(k + 1) % n][1] - coords[k][1],
-                )
-                if el > 0:
-                    edge_lengths.append(el)
-        snap_tol = (
-            np.percentile(edge_lengths, 5) * 0.01
-            if edge_lengths
-            else 1e-4
+        cell_vkeys, _, edge_to_cells, junction_set = (
+            CellGenerator._build_topology(polys, cell_ids)
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate
-        canonical = [None] * len(all_raw_verts)
-        visited_snap = [False] * len(all_raw_verts)
-        for i in range(len(all_raw_verts)):
-            if visited_snap[i]:
-                continue
-            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
-            cx = float(np.mean(coords_arr[cluster, 0]))
-            cy = float(np.mean(coords_arr[cluster, 1]))
-            snapped = (round(cx, n_dec), round(cy, n_dec))
-            for ci in cluster:
-                visited_snap[ci] = True
-                canonical[ci] = snapped
-
-        # Phase 1 — build cell_vkeys, vertex_to_cells, edge_to_cells
-        vertex_to_cells: Dict[tuple, set] = {}
-        cell_vkeys: Dict[int, List[tuple]] = {}
-
-        for row_idx, gidxs in vert_global_idx.items():
-            vkeys_raw = [canonical[gi] for gi in gidxs]
-            # Remove consecutive duplicates introduced by snapping
-            vkeys: List[tuple] = [vkeys_raw[0]]
-            for vk in vkeys_raw[1:]:
-                if vk != vkeys[-1]:
-                    vkeys.append(vk)
-            if len(vkeys) > 1 and vkeys[-1] == vkeys[0]:
-                vkeys = vkeys[:-1]
-            if len(vkeys) < 3:
-                continue
-            cell_vkeys[row_idx] = vkeys
-            for vk in vkeys:
-                vertex_to_cells.setdefault(vk, set()).add(row_idx)
-
-        # Build edge → set of cells  (an "edge" = one polygon side)
-        edge_to_cells: Dict[tuple, set] = {}
-        for row_idx, vkeys in cell_vkeys.items():
-            n = len(vkeys)
-            for i in range(n):
-                ek = tuple(sorted((vkeys[i], vkeys[(i + 1) % n])))
-                edge_to_cells.setdefault(ek, set()).add(row_idx)
-
-        # Phase 2 — identify junction vertices
-        # A vertex is a junction if its incident edges belong to
-        # *different* sets of cells (= the boundary topology changes).
-        junction_set: set = set()
-
-        for vk in vertex_to_cells:
-            # Fast path: vertex shared by ≥3 cells is always a junction
-            if len(vertex_to_cells[vk]) >= 3:
-                junction_set.add(vk)
-                continue
-            # Check incident-edge cell-pair signatures
-            incident_pairs: set = set()
-            for row_idx in vertex_to_cells[vk]:
-                vks = cell_vkeys[row_idx]
-                n = len(vks)
-                for i in range(n):
-                    if vks[i] != vk:
-                        continue
-                    ek_prev = tuple(sorted((vks[(i - 1) % n], vk)))
-                    ek_next = tuple(sorted((vk, vks[(i + 1) % n])))
-                    if ek_prev in edge_to_cells:
-                        incident_pairs.add(frozenset(edge_to_cells[ek_prev]))
-                    if ek_next in edge_to_cells:
-                        incident_pairs.add(frozenset(edge_to_cells[ek_next]))
-            if len(incident_pairs) > 1:
-                junction_set.add(vk)
+        if not cell_vkeys:
+            return
 
         # Phase 3 — walk cell boundaries to define walls
         # A "wall" = the polyline segment between two consecutive
@@ -602,6 +597,7 @@ class Organ(AbstractNetwork, ABC):
         for row_idx, row in cells_gdf.iterrows():
             node_id = cell_row_to_node[row_idx]
             centroid = row["geometry"].centroid if row["geometry"] is not None else None
+            area = row["geometry"].area if row["geometry"] is not None else None
             cx = centroid.x if centroid else row["x"]
             cy = centroid.y if centroid else row["y"]
             self.graph.add_node(
@@ -611,6 +607,7 @@ class Organ(AbstractNetwork, ABC):
                 cgroup=row.get("cgroup", ""),
                 cell_type=row.get("type", ""),
                 position=(cx, cy),
+                area=area,
             )
 
         # Phase 6 — add edges
@@ -621,28 +618,14 @@ class Organ(AbstractNetwork, ABC):
 
         for wd in wall_registry.values():
             wall_id = wd["id"]
-            junc_a = self.n_walls + junction_vk_to_id[wd["junc_start"]]
-            junc_b = self.n_walls + junction_vk_to_id[wd["junc_end"]]
             cell_nodes = self._wall_to_cells[wall_id]
             wall_length = wd["length"]
-
-            # Apoplastic: wall ↔ junction
-            self.graph.add_edge(
-                wall_id, junc_a,
-                path="wall",
-                length=wall_length / 2.0,
-            )
-            self.graph.add_edge(
-                wall_id, junc_b,
-                path="wall",
-                length=wall_length / 2.0,
-            )
 
             # Transmembrane: cell ↔ wall
             for cn in cell_nodes:
                 pos_cell = self.graph.nodes[cn]["position"]
                 pos_wall = wd["midpoint"]
-                dist = np.hypot(
+                dist_wall_cell = np.hypot(
                     pos_wall[0] - pos_cell[0],
                     pos_wall[1] - pos_cell[1],
                 )
@@ -651,11 +634,30 @@ class Organ(AbstractNetwork, ABC):
                     cn, wall_id,
                     path="membrane",
                     length=wall_length,
-                    dist=dist,
+                    dist=dist_wall_cell,
                     d_vec=d_vec,
                 )
-
-            # Symplastic: cell ↔ cell (only if wall is shared by 2 cells)
+            
+            # each junction connected to the wall node
+            for junc in ["junc_start", "junc_end"]:
+                junc_id = self.n_walls + junction_vk_to_id[wd[junc]]
+                pos_junc = self.graph.nodes[junc_id]["position"]
+                dist_junc_wall_node = np.hypot(pos_junc[0] - pos_wall[0], pos_junc[1] - pos_wall[1])
+                lateral_distance = dist_wall_cell + dist_junc_wall_node
+                d_vec = np.array(pos_junc[0] - pos_wall[0], pos_junc[1] - pos_wall[1])
+                
+                # Apoplastic: wall ↔ junction
+                self.graph.add_edge(
+                        junc_id,
+                        wall_id,
+                        path = 'wall',
+                        length = wall_length / 2.0,
+                        lateral_distance = lateral_distance,
+                        d_vec = d_vec,
+                        distnode_wall_cell = dist_wall_cell,
+                )
+            
+            # Symplastic: cell ↔ cell
             if len(cell_nodes) == 2:
                 pos_a = self.graph.nodes[cell_nodes[0]]["position"]
                 pos_b = self.graph.nodes[cell_nodes[1]]["position"]
@@ -670,6 +672,7 @@ class Organ(AbstractNetwork, ABC):
                     dist=dist,
                     d_vec=d_vec,
                 )
+
     
     def get_statistics(self) -> Dict[str, Any]:
         """

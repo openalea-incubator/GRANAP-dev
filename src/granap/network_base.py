@@ -49,7 +49,7 @@ class AbstractNetwork(ABC):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def _build_network(self) -> None:
+    def _build_anatnetwork(self) -> None:
         """
         Populate ``self.graph`` with wall, junction and cell nodes,
         and connect them with the appropriate edges.
@@ -83,7 +83,7 @@ class AbstractNetwork(ABC):
 
         # Ensure the graph is built
         if self.graph.number_of_nodes() == 0:
-            self._build_network()
+            self._build_anatnetwork()
 
         n = self.n_total
         mat = lil_matrix((n, n))
@@ -236,7 +236,10 @@ class AbstractNetwork(ABC):
             edge_colors.append(edge_color_map.get(edge_type, 'purple'))
     
         # Draw the network
-        fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
+        ax = kwargs.get('ax')
+        fig = None
+        if ax is None:
+            fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
     
         nx.draw(
             self.graph,
@@ -250,7 +253,9 @@ class AbstractNetwork(ABC):
             alpha=kwargs.get('alpha', 0.7)
         )
     
-        ax.set_title(kwargs.get('title', 'Network Visualization'))
-        ax.set_aspect('equal')
-        plt.tight_layout()
-        plt.show()
+        # ax.set_title(kwargs.get('title', 'Network Visualization'))
+        ax.set_aspect('equal', adjustable='box')
+        
+        if fig is not None:
+            plt.tight_layout()
+            plt.show()

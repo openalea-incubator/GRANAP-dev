@@ -1,7 +1,9 @@
 
 from typing import List, Optional
 from granap.cell_class import Cell
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPoint
+from scipy.spatial import Delaunay
+from shapely.affinity import translate
 import numpy as np
 
 class CellManager:
@@ -19,6 +21,9 @@ class CellManager:
             if cell.id_cell == id_cell:
                 return cell
         return None
+
+    def get_cells_by_ids(self, ids: List[int]):
+        return [cell for cell in self.cells if cell.id_cell in ids]
 
     def extend_cells(self, cells: List[Cell]):
 
@@ -46,9 +51,21 @@ class CellManager:
     def get_cells_by_group(self, id_group: int):
         return [cell for cell in self.cells if cell.id_group == id_group]
 
+    def get_cells_by_groups(self, id_groups: List[int]):
+        return [cell for cell in self.cells if cell.id_group in id_groups]
+
     def get_cells_by_polygon(self, polygon: Polygon):
         # Check if cell has polygon attribute and it is not None
         return [cell for cell in self.cells if cell.polygon is not None and cell.polygon.intersects(polygon)]
+
+    def get_centroid_of_group(self, id_group: int):
+        group_cells = self.get_cells_by_group(id_group)
+        cx = np.mean([cell.x for cell in group_cells])
+        cy = np.mean([cell.y for cell in group_cells])
+        return cx, cy
+
+    def get_polygons(self):
+        return [cell.polygon for cell in self.cells if cell.polygon is not None]
     
     def remove_cells_by_polygon(self, polygon: Polygon):
         if not self.cells:
@@ -71,6 +88,7 @@ class CellManager:
     
     def recalculate_cell_properties(self):
         """Recalculate the properties of all cells in the list."""
+
         for i, cell in enumerate(self.cells):
             cell.angle = np.arctan2(cell.y, cell.x)
             if cell.polygon is not None:
@@ -85,6 +103,24 @@ class CellManager:
         # Filter cells that do not intersect the polygon
         # This creates a new list, avoiding modification during iteration
         self.cells = [cell for cell in self.cells if not cell.point.intersects(polygon)]
+
+    def remove_cells_by_ids(self, ids: []):
+        # filter cells
+        self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
+    
+    def get_last_id_group(self):
+        return max([cell.id_group for cell in self.cells])
+
+    def recenter_cells(self):
+        # re position cells to the center of the global cell population
+        x_center = np.mean([c.x for c in self.cells])
+        y_center = np.mean([c.y for c in self.cells])
+        for cell in self.cells:
+            cell.x = cell.x - x_center
+            cell.y = cell.y - y_center
+            cell.angle = np.arctan2(cell.y, cell.x)
+            if cell.polygon is not None:
+                cell.polygon = translate(cell.polygon, xoff = -x_center, yoff = -y_center)
 
     def plot_cells(self, ax = None):
         # plot cells coordinates
@@ -114,3 +150,4 @@ class CellManager:
         
         ax.set_aspect('equal', adjustable='box')
         plt.show()
+

@@ -8,7 +8,9 @@ import shapely as sp
 import geopandas as gpd
 from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, MultiPolygon
+from shapely.ops import unary_union
+from scipy.spatial import cKDTree
 
 from granap.geometry_collection import GeometryProcessor
 from granap.cell_class import Cell
@@ -185,6 +187,85 @@ class CellGenerator:
                         id_cell += 1
                     id_group += 1
         
+        all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
+        return all_cells
+
+    @staticmethod
+    def resolve_cell_border_overlaps(all_cells: CellManager) -> CellManager:
+        """
+        Remove cell_border points from lower-priority id_groups that overlap
+        with higher-priority ones.
+
+        Priority order:
+          1. Higher id_layer wins (inner layers have precedence over outer).
+          2. Within the same id_layer, higher id_group wins.
+
+        A convex-hull footprint is built from each group's cell positions.
+        Cells from a lower-priority group whose position falls inside a
+        higher-priority footprint are removed.
+        """
+        from shapely.geometry import MultiPoint
+
+        if not all_cells.cells:
+            return all_cells
+
+        # --- build group metadata ----------------------------------------
+        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        for idx, cell in enumerate(all_cells.cells):
+            g = cell.id_group
+            if g not in groups:
+                groups[g] = {
+                    "id_layer": cell.id_layer,
+                    "cell_diameter": cell.diameter,
+                    "id_group": g,
+                    "indices": [],
+                }
+            groups[g]["indices"].append(idx)
+
+        # build a convex-hull footprint for each group
+        for meta in groups.values():
+            pts = [
+                (all_cells.cells[i].x, all_cells.cells[i].y)
+                for i in meta["indices"]
+            ]
+            if len(pts) >= 3:
+                meta["poly"] = MultiPoint(pts).convex_hull.buffer(meta["cell_diameter"] * 0.2)
+            elif pts:
+                r = all_cells.cells[meta["indices"][0]].diameter / 2
+                meta["poly"] = Point(pts[0]).buffer(r)
+            else:
+                meta["poly"] = None
+
+        # --- sort groups from highest to lowest priority -----------------
+        sorted_groups = sorted(
+            groups.values(),
+            key=lambda m: (m["id_layer"], m["id_group"]),
+            reverse=True,
+        )
+
+        # --- remove overlapping lower-priority cells --------------------
+        ids_to_remove: set = set()
+        for i, high in enumerate(sorted_groups):
+            if high["poly"] is None:
+                continue
+            for low in sorted_groups[i + 1:]:
+                if low["poly"] is None:
+                    continue
+                if not high["poly"].intersects(low["poly"]):
+                    continue
+                for idx in low["indices"]:
+                    if idx in ids_to_remove:
+                        continue
+                    cell = all_cells.cells[idx]
+                    if high["poly"].contains(Point(cell.x, cell.y)):
+                        ids_to_remove.add(idx)
+
+        if ids_to_remove:
+            all_cells.cells = [
+                c for i, c in enumerate(all_cells.cells)
+                if i not in ids_to_remove
+            ]
+
         return all_cells
 
     @staticmethod
@@ -229,16 +310,8 @@ class CellGenerator:
                 
         # Group handling is trickier with objects. 
         # The original code used GeoPandas dissolve to union polygons by group.
-        # We need to replicate that logic or use GeoPandas intermediately.
-        
-        # Let's use GeoPandas for the geometric operations as before, 
-        # but map results back to a simplified list of cells (one per group).
-        
-        # ... Wait, if we group them, we reduce the number of cells. 
-        # The original code dissolved by id_group.
-        # This implies that multiple 'sub-cells' (border points) formed one actual biological cell.
-        
-        # So we should return a list of 'biological' cells (one per group).
+       
+        # return a list of 'biological' cells (one per group).
         
         cell_dicts = [c.cell_to_dict() for c in updated_cells.cells]
         for i, c in enumerate(updated_cells.cells):
@@ -275,151 +348,309 @@ class CellGenerator:
         return final_cells
     
     @staticmethod
-    def smooth_cells(grouped_cells: List[Cell]) -> List[Cell]:
+    def _build_topology(
+        polys: List,
+        cell_ids: List[Any],
+    ) -> Tuple[Dict[Any, List[tuple]], Dict[tuple, set], Dict[tuple, set], set]:
         """
-        Smooth cell boundaries by straightening shared edges.
-        
+        Build the shared vertex/edge topology for a collection of polygons.
+
+        Runs KD-tree vertex snapping (Phase 0), then constructs
+        ``cell_vkeys``, ``vertex_to_cells``, ``edge_to_cells`` (Phase 1),
+        and finally identifies junction vertices (Phase 2).
+
+        This helper is called by both :meth:`simplify_cells` and
+        ``Organ._build_anatnetwork`` so the logic lives in one place.
+
         Args:
-            grouped_cells: List of Cell objects
-        
+            polys:     Sequence of Shapely geometries (``None`` entries are
+                       skipped).  Index position must correspond to
+                       ``cell_ids``.
+            cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
+                       index, integer position, …).
+
         Returns:
-            List of smoothed Cell objects
+            ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set)``
+
+            * ``cell_vkeys``       – ``{cell_id: [snapped (x,y) tuples]}``
+            * ``vertex_to_cells``  – ``{(x,y): set(cell_ids)}``
+            * ``edge_to_cells``    – ``{edge_key: set(cell_ids)}``
+            * ``junction_set``     – set of ``(x,y)`` junction vertices
         """
-        # Convert to GeoDataFrame for processing
-        cell_dicts = [c.cell_to_dict() for c in grouped_cells]
-        for i, c in enumerate(grouped_cells):
-            cell_dicts[i]['geometry'] = c.polygon
-        
-        grouped_gdf = gpd.GeoDataFrame(cell_dicts)
-        from shapely.geometry import MultiPolygon
-        
-        geoms = grouped_gdf.geometry.tolist()
-        
-        # Build point map and edge map
-        point_map = {}
-        next_pt_id = 0
-        coords_list = []
-        
-        def get_pt_id_mem(x, y):
-            nonlocal next_pt_id
-            k = (round(x, 6), round(y, 6))
-            if k not in point_map:
-                point_map[k] = next_pt_id
-                coords_list.append(k)
-                next_pt_id += 1
-            return point_map[k]
-        
-        edge_to_polys = {}
-        poly_rings_ids = []
-        
-        for idx, poly in enumerate(geoms):
+        n_dec = 6
+
+        # ------------------------------------------------------------------
+        # Phase 0 — collect raw vertices and snap nearby ones together
+        # ------------------------------------------------------------------
+        raw_cell_data: Dict[Any, list] = {}
+        all_raw_verts: list = []
+        vert_global_idx: Dict[Any, List[int]] = {}
+
+        for cid, poly in zip(cell_ids, polys):
             if poly is None or poly.is_empty:
-                poly_rings_ids.append([])
                 continue
-            
-            # Handle both Polygon and MultiPolygon
             if isinstance(poly, MultiPolygon):
-                # For MultiPolygon, just use the largest polygon
-                poly = max(poly.geoms, key=lambda p: p.area)
-            
-            rings = [poly.exterior]
-            rings_pt_ids = []
-            
-            for ring in rings:
-                pts = list(ring.coords)
-                if pts[0] == pts[-1]:
-                    pts = pts[:-1]
-                
-                if len(pts) < 3:
-                    rings_pt_ids.append([])
-                    continue
-                
-                p_ids = [get_pt_id_mem(x, y) for x, y in pts]
-                rings_pt_ids.append(p_ids)
-                
-                n_pts = len(p_ids)
-                for i in range(n_pts):
-                    u = p_ids[i]
-                    v = p_ids[(i + 1) % n_pts]
-                    if u == v:
-                        continue
-                    
-                    edge_key = tuple(sorted((u, v)))
-                    if edge_key not in edge_to_polys:
-                        edge_to_polys[edge_key] = []
-                    edge_to_polys[edge_key].append(idx)
-            
-            poly_rings_ids.append(rings_pt_ids)
-        
-        # Reconstruct polygons with straightened boundaries
-        new_geoms = []
-        
-        for idx in range(len(geoms)):
-            rings_ids = poly_rings_ids[idx]
-            if not rings_ids:
-                new_geoms.append(geoms[idx])
+                poly = max(poly.geoms, key=lambda g: g.area)
+            coords = list(poly.exterior.coords)
+            if coords[0] == coords[-1]:
+                coords = coords[:-1]
+            if len(coords) < 3:
                 continue
-            
-            new_rings_coords = []
-            
-            for ring_pt_ids in rings_ids:
-                if not ring_pt_ids:
-                    continue
-                
-                n_pts = len(ring_pt_ids)
-                edge_neighbors = []
-                
-                for i in range(n_pts):
-                    u = ring_pt_ids[i]
-                    v = ring_pt_ids[(i + 1) % n_pts]
-                    edge_key = tuple(sorted((u, v)))
-                    
-                    neighbors = edge_to_polys.get(edge_key, [])
-                    
-                    other = None
-                    for n_idx in neighbors:
-                        if n_idx != idx:
-                            other = n_idx
-                            break
-                    edge_neighbors.append(other)
-                
-                # Filter vertices
-                optimized_ring = []
-                for k in range(n_pts):
-                    u = ring_pt_ids[k]
-                    
-                    prev_edge_idx = (k - 1) % n_pts
-                    curr_edge_idx = k
-                    
-                    n_prev = edge_neighbors[prev_edge_idx]
-                    n_curr = edge_neighbors[curr_edge_idx]
-                    
-                    if n_prev != n_curr:
-                        optimized_ring.append(u)
-                    elif n_prev is None:
-                        optimized_ring.append(u)
-                
-                if len(optimized_ring) < 3:
-                    optimized_ring = ring_pt_ids
-                
-                ring_coords = [coords_list[pid] for pid in optimized_ring]
-                new_rings_coords.append(ring_coords)
-            
-            if not new_rings_coords:
-                new_geoms.append(geoms[idx])
-            else:
-                ext = new_rings_coords[0]
-                if ext[0] != ext[-1]:
-                    ext.append(ext[0])
-                
-                new_poly = Polygon(ext)
-                new_geoms.append(new_poly)
-        
-        grouped_gdf.geometry = new_geoms
-        
-        # Update cells with smoothed geometries
-        for i, cell in enumerate(grouped_cells):
-            if i < len(new_geoms):
-                 cell.polygon = new_geoms[i]
-                 
+            indices = []
+            for x, y in coords:
+                indices.append(len(all_raw_verts))
+                all_raw_verts.append((x, y))
+            raw_cell_data[cid] = coords
+            vert_global_idx[cid] = indices
+
+        if not all_raw_verts:
+            return {}, {}, {}, set()
+
+        coords_arr = np.array(all_raw_verts)
+        kd_tree = cKDTree(coords_arr)
+
+        # Snap tolerance: 1 % of 5th-percentile edge length
+        edge_lengths = []
+        for coords in raw_cell_data.values():
+            n = len(coords)
+            for k in range(n):
+                el = np.hypot(
+                    coords[(k + 1) % n][0] - coords[k][0],
+                    coords[(k + 1) % n][1] - coords[k][1],
+                )
+                if el > 0:
+                    edge_lengths.append(el)
+        snap_tol = (
+            np.percentile(edge_lengths, 5) * 0.01
+            if edge_lengths
+            else 1e-4
+        )
+
+        # Cluster nearby vertices → canonical snapped coordinate
+        canonical: List = [None] * len(all_raw_verts)
+        visited_snap = [False] * len(all_raw_verts)
+        for i in range(len(all_raw_verts)):
+            if visited_snap[i]:
+                continue
+            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
+            cx = float(np.mean(coords_arr[cluster, 0]))
+            cy = float(np.mean(coords_arr[cluster, 1]))
+            snapped = (round(cx, n_dec), round(cy, n_dec))
+            for ci in cluster:
+                visited_snap[ci] = True
+                canonical[ci] = snapped
+
+        # ------------------------------------------------------------------
+        # Phase 1 — build cell_vkeys, vertex_to_cells, edge_to_cells
+        # ------------------------------------------------------------------
+        vertex_to_cells: Dict[tuple, set] = {}
+        cell_vkeys: Dict[Any, List[tuple]] = {}
+
+        for cid, gidxs in vert_global_idx.items():
+            vkeys_raw = [canonical[gi] for gi in gidxs]
+            vkeys: List[tuple] = [vkeys_raw[0]]
+            for vk in vkeys_raw[1:]:
+                if vk != vkeys[-1]:
+                    vkeys.append(vk)
+            if len(vkeys) > 1 and vkeys[-1] == vkeys[0]:
+                vkeys = vkeys[:-1]
+            if len(vkeys) < 3:
+                continue
+            cell_vkeys[cid] = vkeys
+            for vk in vkeys:
+                vertex_to_cells.setdefault(vk, set()).add(cid)
+
+        edge_to_cells: Dict[tuple, set] = {}
+        for cid, vkeys in cell_vkeys.items():
+            n = len(vkeys)
+            for i in range(n):
+                ek = tuple(sorted((vkeys[i], vkeys[(i + 1) % n])))
+                edge_to_cells.setdefault(ek, set()).add(cid)
+
+        # ------------------------------------------------------------------
+        # Phase 2 — identify junction vertices
+        # ------------------------------------------------------------------
+        junction_set: set = set()
+
+        for vk in vertex_to_cells:
+            if len(vertex_to_cells[vk]) >= 3:
+                junction_set.add(vk)
+                continue
+            incident_pairs: set = set()
+            for cid in vertex_to_cells[vk]:
+                vks = cell_vkeys[cid]
+                n = len(vks)
+                for i in range(n):
+                    if vks[i] != vk:
+                        continue
+                    ek_prev = tuple(sorted((vks[(i - 1) % n], vk)))
+                    ek_next = tuple(sorted((vk, vks[(i + 1) % n])))
+                    if ek_prev in edge_to_cells:
+                        incident_pairs.add(frozenset(edge_to_cells[ek_prev]))
+                    if ek_next in edge_to_cells:
+                        incident_pairs.add(frozenset(edge_to_cells[ek_next]))
+            if len(incident_pairs) > 1:
+                junction_set.add(vk)
+
+        return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
+
+    @staticmethod
+    def simplify_cells(grouped_cells: List[Cell]) -> List[Cell]:
+        """
+        Simplify cell boundaries by retaining only junction vertices.
+
+        Delegates topology computation to :meth:`_build_topology` (Phases
+        0–2: KD-tree snapping, vertex/edge maps, junction detection), then
+        rebuilds each polygon keeping only its junction vertices (Phase 3).
+
+        Args:
+            grouped_cells: List of Cell objects with polygon geometries.
+
+        Returns:
+            The same list with simplified polygon geometries in place.
+        """
+        polys = [c.polygon for c in grouped_cells]
+        cell_ids = list(range(len(grouped_cells)))
+
+        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
+            polys, cell_ids
+        )
+
+        if not cell_vkeys:
+            return grouped_cells
+
+        # Phase 3 — rebuild each polygon keeping only junction vertices
+        for idx, cell in enumerate(grouped_cells):
+            if idx not in cell_vkeys:
+                continue
+
+            vkeys = cell_vkeys[idx]
+            simplified = [vk for vk in vkeys if vk in junction_set]
+
+            if len(simplified) < 3:
+                simplified = vkeys
+
+            ring_coords = list(simplified)
+            if ring_coords[0] != ring_coords[-1]:
+                ring_coords.append(ring_coords[0])
+
+            new_poly = Polygon(ring_coords)
+            if not new_poly.is_valid:
+                new_poly = new_poly.buffer(0)
+            cell.polygon = new_poly
+
         return grouped_cells
+
+    @staticmethod
+    def create_stomata(cells, stomata_setting, debug= False):
+        """
+        Create stomata on a cell.
+
+        Args:
+            cells: triplet of Cell object.
+            stomata_setting: Dictionary with stomata settings.
+            debug: Whether to plot the stomata.
+        """
+
+        width = stomata_setting["width"]
+        depth = stomata_setting["depth"]
+        sub_chamber = stomata_setting["sub_chamber"]
+
+        # get unique id_group of the cells
+        id_groups = [cell.id_group for cell in cells]
+        id_groups = np.unique(id_groups)
+        cell = cells[0] # template cell
+
+        triplet = CellManager()
+        triplet.cells = cells
+        cell_prev_cx, cell_prev_cy = triplet.get_centroid_of_group(id_groups[0])
+        cx, cy = triplet.get_centroid_of_group(id_groups[1])
+        cell_next_cx, cell_next_cy = triplet.get_centroid_of_group(id_groups[2])
+
+        # use axis of the cell triplet as the orientation
+        dx = cell_next_cx - cell_prev_cx
+        dy = cell_next_cy - cell_prev_cy
+        tangent_angle = np.arctan2(dy, dx)
+        angle = tangent_angle + np.pi/2 # perpendicular (inward) orientation
+
+    
+        def local_to_global_poly(local_pts):
+            global_pts = []
+            tangential_angle = angle + np.pi/2
+            inward_angle = angle + np.pi
+
+            for lx, ly in local_pts:
+                # - 0.4*cell.height*np.cos(tangential_angle) 
+                # - 0.4*cell.height*np.cos(inward_angle)
+                gx = cx + lx * np.cos(tangential_angle) - 0.4*cell.height*np.cos(tangential_angle) + ly * np.cos(inward_angle) - 0.4*cell.height*np.cos(inward_angle)
+                gy = cy + lx * np.sin(tangential_angle) - 0.4*cell.height*np.sin(tangential_angle) + ly * np.sin(inward_angle) - 0.4*cell.height*np.sin(inward_angle)
+                global_pts.append((gx, gy))
+            return Polygon(global_pts)
+    
+        def create_local_ellipse(cx_l, cy_l, rx, ry):
+            pts = []
+            for t in np.linspace(0, 2*np.pi, 30):
+                pts.append((cx_l + rx * np.cos(t), cy_l + ry * np.sin(t)))
+            return local_to_global_poly(pts)
+    
+        def create_local_rectangle(cx_l, cy_l, w, h):
+            pts = [
+                (cx_l - w/2, cy_l - h/2),
+                (cx_l + w/2, cy_l - h/2),
+                (cx_l + w/2, cy_l + h/2),
+                (cx_l - w/2, cy_l + h/2)
+            ]
+            return local_to_global_poly(pts)
+    
+        # Create guard cells
+        gc_rx = cell.width / 2
+        gc_ry = cell.width / 2
+        gc1_x = -width / 2
+        gc2_x = width / 2
+        gc_y = depth
+    
+        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry/2)
+        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry/2)
+    
+        rect_w = cell.width * 0.6
+        rect_h = depth
+        rect_y = depth / 2
+    
+        guard_cell_1_rect = create_local_rectangle(gc1_x - 0.2 * cell.width, rect_y, rect_w, rect_h)
+        guard_cell_2_rect = create_local_rectangle(gc2_x + 0.2 * cell.width, rect_y, rect_w, rect_h)
+    
+        guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
+        guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
+    
+        guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
+        guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
+    
+        # Create sub-stomatal chamber
+        chamber_rx = width
+        chamber_ry = sub_chamber
+        chamber_y = gc_y
+        sub_stomatal_chamber = create_local_ellipse(0, chamber_y, chamber_rx * 0.75, chamber_ry)
+    
+        # Create pore
+        pore_w = width
+        if pore_w < 0:
+            pore_w = 0.005  # fallback
+        pore_h = chamber_y
+        pore_poly = create_local_rectangle(0, pore_h / 2, pore_w, pore_h)
+    
+        # Combine geometries
+        spacing_poly = pore_poly.difference(unary_union([guard_cell_1_poly, guard_cell_2_poly]))
+        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, guard_cell_1_poly, guard_cell_2_poly]))
+    
+        if hasattr(sub_stomatal_chamber, 'geoms'):
+            sub_stomatal_chamber = sub_stomatal_chamber.geoms[0]
+    
+        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly])
+    
+        if debug:
+            print(carve_poly.area)
+
+        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly
+
+    
+    

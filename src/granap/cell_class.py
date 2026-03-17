@@ -1,11 +1,12 @@
 import numpy as np
 from shapely.geometry import Polygon, Point
+from granap.geometry_collection import GeometryProcessor
 
 class Cell:
 
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0, 
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
-                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None):
+                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None):
 
         self.x = x
         self.y = y
@@ -21,6 +22,7 @@ class Cell:
         self.radius = radius if radius != None else np.sqrt(x**2 + y**2)
         self.area = area if area != None else np.pi * (diameter/2)**2
         self.polygon = polygon if polygon != None else None
+        self.axis = axis if axis != None else None
         
 
     def jitter(self, shift: float = 0.0001):
@@ -44,3 +46,8 @@ class Cell:
                 "radius": self.radius,
                 "area": self.area,
                 }
+    
+    def smooth(self, smooth_factor: float = 0.01):
+        """Smooth the cell polygon."""
+        self.polygon = GeometryProcessor.buffer_polygon(self.polygon, 0, smooth_factor=smooth_factor)
+
