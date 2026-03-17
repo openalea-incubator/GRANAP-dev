@@ -238,9 +238,7 @@ class Organ(AbstractNetwork, ABC):
             # repopulate all_cells with the grouped cells
             self.all_cells = CellManager()
             self.all_cells.cells = grouped_cells
-            air_spaces_cells = self.add_intercellular_spaces()
-            self.all_cells.cells.extend(air_spaces_cells.cells)
-            self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
+            self.add_intercellular_spaces()
             
             for cell in self.all_cells.cells:
                 # Find the layer name from layers_polygons using id_layer

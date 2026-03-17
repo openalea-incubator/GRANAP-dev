@@ -692,7 +692,9 @@ class NeedleAnatomy(Organ):
             )
             air_spaces_cells.cells.append(air_space_cell)
         # add the air spaces cells to the all_cells
-        return air_spaces_cells
+        
+        self.all_cells.cells.extend(air_spaces_cells.cells)
+        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
 
 
     def add_stomata(self):

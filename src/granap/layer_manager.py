@@ -120,6 +120,15 @@ class LayerManager:
                 })
         return expanded
     
+    def get_layers_params(self) -> List[Dict[str, Any]]:
+        """
+        Get parameters of all layers.
+        
+        Returns:
+            List of dictionaries with layer parameters
+        """
+        return [{"name": layer.name, "cell_diameter": layer.cell_diameter, "cell_width": layer.cell_width or 0, "shift": layer.shift, "n_layers": layer.n_layers, "order": layer.order} for layer in self._layers]
+    
     def clear(self) -> None:
         """Remove all layers."""
         self._layers.clear()
