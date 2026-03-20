@@ -177,6 +177,24 @@ class AbstractNetwork(ABC):
                     self._matrix[u, v] = K
                     self._matrix[v, u] = K
 
+    def fill_matrix_from_dict(
+        self,
+        K_dict: dict, # type: dict[str, float]
+        label: str,
+    ) -> None:
+        """
+        Fill entries of the adjacency matrix from a dictionary of hydraulic conductivities.
+
+        Parameters
+        ----------
+        K_dict : dict[str, float]
+            Dictionary matching cell types to hydraulic conductivity values.
+        label : str
+            Path type to target (e.g. "apoplastic", "transmembrane", "symplastic").
+        """
+        for cell_type, K in K_dict.items():
+            self.fill_matrix(K, label, cell_type)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

@@ -3,7 +3,7 @@ Plant anatomy base module providing abstract interface.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -433,6 +433,25 @@ class Organ(AbstractNetwork, ABC):
         # Drop geometry column for CSV export
         cells_df = cells_gdf.drop(columns=['geometry'])
         cells_df.to_csv(filepath, index=False)
+
+    def write_to_xml(self, path: str):
+        """Write anatomy cross section as .xml file."""
+        from granap.anatomy_writer import AnatomyWriter
+        AnatomyWriter(self).write_to_xml(path)
+        
+    def write_to_obj(self, path: str, membrane: bool = True, shrink_factor: float = 1):
+        """Write anatomy cross section as .obj file."""
+        from granap.anatomy_writer import AnatomyWriter
+        AnatomyWriter(self).write_to_obj(path, membrane=membrane, shrink_factor=shrink_factor)
+        
+    def write_to_geo(self, path: str, dim: int = 2, celldomain: bool = False, 
+                     cell_wall_thickness: Union[float, Dict[str, float]] = 0.2, 
+                     corner_smoothing: Union[float, Dict[str, float]] = 0.5):
+        """Write anatomy cross section as .geo file for GMSH."""
+        from granap.anatomy_writer import AnatomyWriter
+        AnatomyWriter(self).write_to_geo(path, dim=dim, celldomain=celldomain, 
+                                        cell_wall_thickness=cell_wall_thickness, 
+                                        corner_smoothing=corner_smoothing)
 
     def export_to_adjencymatrix(self) -> lil_matrix:
         """
