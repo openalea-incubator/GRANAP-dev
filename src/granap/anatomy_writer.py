@@ -4,7 +4,7 @@ import math
 import numpy as np
 import shapely as sp
 from typing import Dict, Any, Union, List
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, Point
 
 from granap.organ_class import Organ
 from granap.geometry_collection import GeometryProcessor
@@ -133,7 +133,7 @@ class AnatomyWriter:
             f.write("\n".join(xml_lines))
         print(f"XML saved to {path}")
 
-    def write_to_obj(self, path: str, membrane: bool = True, shrink_factor: float = 0.001):
+    def write_to_obj(self, path: str, membrane: bool = True, wall: bool = True, shrink_factor: float = 0.001):
         """
         Write a .obj from the generated cross section geometry.
         If membrane is True, write shrank cell polygons as faces.
@@ -173,6 +173,32 @@ class AnatomyWriter:
                     v_indices = [str(get_v_idx(x, y)) for x, y in coords]
                     if len(v_indices) >= 3:
                         faces_lines.append("f " + " ".join(v_indices))
+            if wall:
+                wall_poly = poly.difference(buffed_poly)
+    
+                if wall_poly.is_empty:
+                    return faces_lines
+    
+                if isinstance(wall_poly, MultiPolygon):
+                    polys = wall_poly.geoms
+                else:
+                    polys = [wall_poly]
+    
+                for p in polys:
+                    # outer ring
+                    outer = list(p.exterior.coords)
+                    for i in range(len(outer) - 1):
+                        v1 = get_v_idx(*outer[i])
+                        v2 = get_v_idx(*outer[i + 1])
+                        faces_lines.append(f"l {v1} {v2}")
+    
+                    # inner rings (holes)
+                    for interior in p.interiors:
+                        inner = list(interior.coords)
+                        for i in range(len(inner) - 1):
+                            v1 = get_v_idx(*inner[i])
+                            v2 = get_v_idx(*inner[i + 1])
+                            faces_lines.append(f"l {v1} {v2}")
             else:
                 coords = list(poly.exterior.coords)
                 for i in range(len(coords) - 1):
@@ -187,6 +213,10 @@ class AnatomyWriter:
         for cell in self.cells:
             if cell.polygon is None:
                 continue
+
+            if cell.type in ["air space", "pore", "xylem"]:
+                continue
+
     
             poly = cell.polygon
     
@@ -248,6 +278,7 @@ class AnatomyWriter:
             if not r_poly_smooth.is_empty:
                 inner_polygons.append({
                     "id_cell": cell.id_cell,
+                    "type": cell.type,
                     "polygon": r_poly_smooth
                 })
 
@@ -309,9 +340,19 @@ class AnatomyWriter:
                 
             return line_ids
 
+        # which cell is at centroid closer to (0,0) of the cross-section
+        center_cell = self.cells[0]
+        for cell in self.cells:
+            if cell.polygon.centroid.distance(Point(0,0)) < center_cell.polygon.centroid.distance(Point(0,0)):
+                center_cell = cell
+
         # Write each inner cell
+        cell_curves = []
+        air_space_curves = []
         for item in inner_polygons:
             poly = item["polygon"]
+            id_cell = item["id_cell"]
+            id_type = item["type"]
             if poly.geom_type == 'MultiPolygon':
                 geoms = list(poly.geoms)
             else:
@@ -322,6 +363,12 @@ class AnatomyWriter:
                 
                 cl_idx = c_loop
                 geo_lines.append(f"Curve Loop({cl_idx}) = {{{', '.join(map(str, line_ids))}}};")
+                if id_cell == center_cell.id_cell:
+                    center_curve = [cl_idx]
+                elif id_type in ["air space", "pore"]:
+                    air_space_curves.append(cl_idx)
+                else:
+                    cell_curves.append(cl_idx)
                 geo_lines.append("//+")
                 geo_lines.append(f"Surface({s_idx}) = {{{cl_idx}}};")
                 geo_lines.append("//+")
@@ -355,7 +402,9 @@ class AnatomyWriter:
             geo_lines.append(f"Plane Surface({s_idx}) = {{{', '.join(map(str, plane_surfaces))}}};")
             geo_lines.append("//+")
             geo_lines.append(f"Physical Surface(0) = {{{s_idx}}};")
-            geo_lines.append(f'Physical Curve("inner", 1) = {{{", ".join(map(str, range(1, v_idx-1)))}}};')
+            geo_lines.append(f'Physical Curve("cells", 1) = {{{", ".join(map(str, cell_curves))}}};')
+            geo_lines.append(f'Physical Curve("air space", 2) = {{{", ".join(map(str, air_space_curves))}}};')
+            geo_lines.append(f'Physical Curve("center", 3) = {{{", ".join(map(str, center_curve))}}};')
             
             s_idx += 1
             c_loop += 2

@@ -453,6 +453,54 @@ class Organ(AbstractNetwork, ABC):
                                         cell_wall_thickness=cell_wall_thickness, 
                                         corner_smoothing=corner_smoothing)
 
+    def to_domain(self,
+                  cell_wall_thickness: Union[float, Dict[str, float]] = 1.0,
+                  corner_smoothing: Union[float, Dict[str, float]] = 0.5,
+                  celldomain: bool = False,
+                  simplify_tol: float = 1.0,
+                  **kwargs) -> "OrganDomain":
+        """Return a bvpy-compatible :class:`OrganDomain` ready for FEniCS.
+
+        Convenience wrapper around :class:`~granap.organ_domain.OrganDomain`.
+        All extra ``**kwargs`` (``cell_size``, ``cell_type``, ``dim``, ``clear``,
+        ``algorithm``, …) are forwarded to bvpy's
+        :class:`~bvpy.domains.abstract.AbstractDomain`.
+
+        Parameters
+        ----------
+        cell_wall_thickness : float or dict, optional
+            Wall thickness in μm (after ×1000 scaling).  Default ``1``.
+        corner_smoothing : float or dict, optional
+            Polygon corner smoothing factor.  Default ``0.5``.
+        celldomain : bool, optional
+            If ``True``, each cell gets its own Physical Group label.
+        simplify_tol : float, optional
+            Douglas–Peucker tolerance (μm) to reduce point count.  Default ``1``.
+        **kwargs
+            Forwarded to :class:`~bvpy.domains.abstract.AbstractDomain`
+            (e.g. ``cell_size=50``, ``dim=2``, ``clear=True``).
+
+        Returns
+        -------
+        OrganDomain
+            A Gmsh OCC domain ready for :meth:`~OrganDomain.discretize`.
+
+        Examples
+        --------
+        >>> domain = organ.to_domain(cell_wall_thickness=1, cell_size=50, dim=2, clear=True)
+        >>> domain.discretize()
+        >>> print(domain.sub_domain_names)
+        """
+        from granap.organ_domain import OrganDomain
+        return OrganDomain(
+            self,
+            cell_wall_thickness=cell_wall_thickness,
+            corner_smoothing=corner_smoothing,
+            celldomain=celldomain,
+            simplify_tol=simplify_tol,
+            **kwargs,
+        )
+
     def export_to_adjencymatrix(self) -> lil_matrix:
         """
         Build the hydraulic network from cell geometry and return
