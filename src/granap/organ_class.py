@@ -458,6 +458,7 @@ class Organ(AbstractNetwork, ABC):
                   corner_smoothing: Union[float, Dict[str, float]] = 0.5,
                   celldomain: bool = False,
                   simplify_tol: float = 1.0,
+                  symplast: bool = False,
                   **kwargs) -> "OrganDomain":
         """Return a bvpy-compatible :class:`OrganDomain` ready for FEniCS.
 
@@ -476,6 +477,11 @@ class Organ(AbstractNetwork, ABC):
             If ``True``, each cell gets its own Physical Group label.
         simplify_tol : float, optional
             Douglas–Peucker tolerance (μm) to reduce point count.  Default ``1``.
+        symplast : bool, optional
+            If ``True`` (default), inner cell lumens are meshed alongside the
+            apoplast.  If ``False``, only the apoplast (cell-wall layer) is
+            meshed — inner cells are used as holes only and are not labelled,
+            avoiding bvpy's partial-labelling Warning.
         **kwargs
             Forwarded to :class:`~bvpy.domains.abstract.AbstractDomain`
             (e.g. ``cell_size=50``, ``dim=2``, ``clear=True``).
@@ -498,6 +504,7 @@ class Organ(AbstractNetwork, ABC):
             corner_smoothing=corner_smoothing,
             celldomain=celldomain,
             simplify_tol=simplify_tol,
+            symplast=symplast,
             **kwargs,
         )
 

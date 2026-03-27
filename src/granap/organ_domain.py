@@ -57,6 +57,7 @@ _OUTER_DOMAIN_TAG = 0
 _CELLS_BOUNDARY_TAG = 1
 _AIR_BOUNDARY_TAG = 2
 _CENTER_BOUNDARY_TAG = 3
+_XYLEM_BOUNDARY_TAG = 4
 
 
 class OrganDomain(AbstractDomain, OccModel):
@@ -114,7 +115,8 @@ class OrganDomain(AbstractDomain, OccModel):
         cell_wall_thickness: Union[float, Dict[str, float]] = 1.0,
         corner_smoothing: Union[float, Dict[str, float]] = 0.5,
         celldomain: bool = False,
-        simplify_tol: float = 1.0,
+        simplify_tol: float = 0.2,
+        symplast: bool = True,
         **kwargs,
     ):
         # Default to 2-D triangular mesh if caller did not specify
@@ -122,7 +124,7 @@ class OrganDomain(AbstractDomain, OccModel):
         kwargs.setdefault("cell_type", "triangle")
 
         super().__init__(**kwargs)
-        self.geometry(organ, cell_wall_thickness, corner_smoothing, celldomain, simplify_tol)
+        self.geometry(organ, cell_wall_thickness, corner_smoothing, celldomain, simplify_tol, symplast)
 
     # ------------------------------------------------------------------
     # bvpy interface
@@ -132,15 +134,28 @@ class OrganDomain(AbstractDomain, OccModel):
         self,
         organ: Organ,
         cell_wall_thickness: Union[float, Dict[str, float]] = 1.0,
-        corner_smoothing: Union[float, Dict[str, float]] = 0.5,
+        corner_smoothing: Union[float, Dict[str, float]] = 3,
         celldomain: bool = False,
-        simplify_tol: float = 1.0,
+        simplify_tol: float = 0.05,
+        symplast: bool = True,
     ) -> None:
         """Build the Gmsh OCC model from a GRANAP Organ.
 
         Called automatically from :meth:`__init__`.  You can call it again to
         rebuild the geometry with different parameters without creating a new
         instance (after ``gmsh.clear()``).
+
+        Parameters
+        ----------
+        symplast : bool
+            * ``True`` (default) – inner cell surfaces are meshed and labelled
+              with Physical Groups.  The full cross-section (apoplast + symplast)
+              is simulated.
+            * ``False`` – inner cell surfaces are used only as *holes* in the
+              apoplast surface and are **not** meshed or labelled.  Only the
+              apoplast (cell-wall) layer is simulated.  This avoids the
+              partial-labelling Warning raised by bvpy when some dim-2 surfaces
+              are untagged.
         """
         writer = AnatomyWriter(organ)
         inner_polygons, final_polygon = writer.prep_geo(cell_wall_thickness, corner_smoothing)
@@ -170,7 +185,7 @@ class OrganDomain(AbstractDomain, OccModel):
 
             first_v = v_idx
             for x, y in coords:
-                self.factory.addPoint(round(x, 2), round(y, 2), 0.0, tag=v_idx)
+                self.factory.addPoint(round(x, 4), round(y, 4), 0.0, tag=v_idx)
                 v_idx += 1
 
             line_tags = []
@@ -192,6 +207,8 @@ class OrganDomain(AbstractDomain, OccModel):
         # Track boundary curve tags by purpose
         cell_curves = []
         air_curves = []
+        xylem_curves = []
+
         center_curve = None
 
         # Find the cell whose polygon centroid is closest to (0, 0) — the "center" cell
@@ -216,26 +233,29 @@ class OrganDomain(AbstractDomain, OccModel):
                 if not line_tags:
                     continue
 
-                # Curve loop
+                # Curve loop — always needed as a hole reference for the apoplast
                 self.factory.addCurveLoop(line_tags, tag=cl_idx)
                 inner_cl_tags.append(cl_idx)
 
-                # Plane surface (no holes for individual cells)
-                self.factory.addPlaneSurface([cl_idx], tag=s_idx)
+                if symplast:
+                    # Plane surface for each inner cell (meshed)
+                    self.factory.addPlaneSurface([cl_idx], tag=s_idx)
 
-                # Categorise curves for boundary labels
+                    # Track surface by cell type
+                    type_to_surfaces.setdefault(cell_type, []).append(cl_idx)
+                    s_idx += 1
+
+                # Categorise curves for boundary labels (always, for ds markers)
                 if id_cell == center_id:
                     center_curve = line_tags[:]
-                elif cell_type in ("air space", "pore", "aerenchyma"):
+                elif cell_type in ("air space", "aerenchyma", "pore"):
                     air_curves.extend(line_tags)
+                elif cell_type in ("xylem", "protoxylem", "metaxylem"):
+                    xylem_curves.extend(line_tags)
                 else:
                     cell_curves.extend(line_tags)
 
-                # Track surface by cell type
-                type_to_surfaces.setdefault(cell_type, []).append(cl_idx)
-
                 cl_idx += 1
-                s_idx += 1
 
         # ---------- outer tissue boundary ----------
         outer_geoms = (
@@ -267,57 +287,66 @@ class OrganDomain(AbstractDomain, OccModel):
         # ---------- Physical Groups (surfaces = dim 2) ----------
         all_typed_surface_tags = []
 
-        if celldomain:
-            # One Physical Group per cell surface (tag = s_idx_of_that_surface)
-            for ctype, stags in type_to_surfaces.items():
-                base_tag = _CELL_TYPE_TAGS.get(ctype, 99)
+        if symplast:
+            if celldomain:
+                # One Physical Group per cell surface
+                for ctype, stags in type_to_surfaces.items():
+                    base_tag = _CELL_TYPE_TAGS.get(ctype, 99)
 
-                if base_tag in all_typed_surface_tags: # skip most used tags
-                    base_tag += 21
-                while base_tag in all_typed_surface_tags: # skip already used tags
-                    base_tag += 1
+                    if base_tag in all_typed_surface_tags:  # avoid collision
+                        base_tag += 21
+                    while base_tag in all_typed_surface_tags:
+                        base_tag += 1
 
-                self.model.addPhysicalGroup(2, stags, tag=base_tag, name = f"{ctype}")
-                all_typed_surface_tags.append(base_tag)
-        else:
-            # One Physical Group per cell type
-            tag_to_surfaces = {}
-            tag_to_name = {}
-            next_unknown_tag = max(list(_CELL_TYPE_TAGS.values()) + [99]) + 1
-            
-            for ctype, stags in type_to_surfaces.items():
-                pg_tag = _CELL_TYPE_TAGS.get(ctype)
-                if pg_tag is None:
-                    pg_tag = next_unknown_tag
-                    next_unknown_tag += 1
-                
-                if pg_tag not in tag_to_surfaces:
-                    tag_to_surfaces[pg_tag] = []
-                    tag_to_name[pg_tag] = ctype
-                else:
-                    tag_to_name[pg_tag] += f"_{ctype}"
-                    
-                tag_to_surfaces[pg_tag].extend(stags)
-                
-            for pg_tag, stags in tag_to_surfaces.items():
-                self.model.addPhysicalGroup(2, stags, tag=pg_tag, name = f"{tag_to_name[pg_tag]}")
-                all_typed_surface_tags.extend(stags)
+                    self.model.addPhysicalGroup(2, stags, tag=base_tag, name=f"{ctype}")
+                    all_typed_surface_tags.append(base_tag)
+            else:
+                # One Physical Group per cell type (merge same-type cells)
+                tag_to_surfaces: Dict[int, list] = {}
+                tag_to_name: Dict[int, str] = {}
+                next_unknown_tag = max(list(_CELL_TYPE_TAGS.values()) + [99]) + 1
 
-        # Outer (wall/apoplast) domain
+                for ctype, stags in type_to_surfaces.items():
+                    pg_tag = _CELL_TYPE_TAGS.get(ctype)
+                    if pg_tag is None:
+                        pg_tag = next_unknown_tag
+                        next_unknown_tag += 1
+
+                    if pg_tag not in tag_to_surfaces:
+                        tag_to_surfaces[pg_tag] = []
+                        tag_to_name[pg_tag] = ctype
+                    else:
+                        tag_to_name[pg_tag] += f"_{ctype}"
+
+                    tag_to_surfaces[pg_tag].extend(stags)
+
+                for pg_tag, stags in tag_to_surfaces.items():
+                    self.model.addPhysicalGroup(2, stags, tag=pg_tag, name=f"{tag_to_name[pg_tag]}")
+                    all_typed_surface_tags.extend(stags)
+
+        # Outer (wall/apoplast) domain — always tagged
         if outer_surface_tags:
-            self.model.addPhysicalGroup(2, outer_surface_tags, tag=_OUTER_DOMAIN_TAG, name = "apoplast")
+            self.model.addPhysicalGroup(2, outer_surface_tags, tag=_OUTER_DOMAIN_TAG, name="apoplast")
             all_typed_surface_tags.extend(outer_surface_tags)
 
         # ---------- Physical Groups (curves = dim 1) ----------
         if cell_curves:
-            self.model.addPhysicalGroup(1, cell_curves, tag=_CELLS_BOUNDARY_TAG, name = "cells")
+            self.model.addPhysicalGroup(1, cell_curves, tag=_CELLS_BOUNDARY_TAG, name="cells")
         if air_curves:
             self.model.addPhysicalGroup(1, air_curves, tag=_AIR_BOUNDARY_TAG, name = "air_space")
         if center_curve:
             self.model.addPhysicalGroup(1, center_curve, tag=_CENTER_BOUNDARY_TAG, name = "center")
+        if xylem_curves:
+            self.model.addPhysicalGroup(1, xylem_curves, tag=_XYLEM_BOUNDARY_TAG, name = "xylem")
 
         # Store surface tags for inspection / CSG operations
         self.surfaces = {
             ctype: stags for ctype, stags in type_to_surfaces.items()
         }
         self.surfaces["apoplast"] = outer_surface_tags
+        
+        # Expose boundary tags for easy BC setup
+        self.symplast_boundary_tag = _CELLS_BOUNDARY_TAG
+        self.air_boundary_tag = _AIR_BOUNDARY_TAG
+        self.center_boundary_tag = _CENTER_BOUNDARY_TAG
+        self.xylem_boundary_tag = _XYLEM_BOUNDARY_TAG

@@ -105,9 +105,9 @@ class RootAnatomy(Organ):
         aerenchyma = next((p for p in self.params if p["name"] == "aerenchyma"), {})
         self.intercellular_spaces_params = {
             "cortex": inter_cellular_space.get("size", 0),
-            "aerenchyma_proportion": aerenchyma.get("proportion", 0.2),
+            "aerenchyma_proportion": aerenchyma.get("proportion", 0),
             "aerenchyma_type": aerenchyma.get("type", 1),
-            "n_files": aerenchyma.get("n_files", 2),
+            "n_files": aerenchyma.get("n_files", 0),
         }
 
         # 4. Extract layer definitions (any param with 'order' that is not a vascular zone)
@@ -383,8 +383,12 @@ class RootAnatomy(Organ):
     def fit_metaxylem_elements(self, polygon):
         # from polygon, fit two ellipses
         n_xylem_cells = self.vascular_params["n_vascular_bundles"]
-
-        slices = GeometryProcessor.pizza_slice(polygon.buffer(-self.vascular_params["xylem_diameter"]/4), n_xylem_cells)
+        if n_xylem_cells == 0:
+            return
+        elif n_xylem_cells == 1:
+            slices = [polygon]
+        else:
+            slices = GeometryProcessor.pizza_slice(polygon.buffer(-self.vascular_params["xylem_diameter"]/4), n_xylem_cells)
         cells_in_slices, list_xylem_polygons = self.vascular_elements_in_slice(slices)
         self.vascular_cells = cells_in_slices
         self.vascular_polygons = list_xylem_polygons

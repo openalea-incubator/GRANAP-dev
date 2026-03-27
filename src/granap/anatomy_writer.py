@@ -235,7 +235,7 @@ class AnatomyWriter:
         print(f"OBJ saved to {path}")
 
     def prep_geo(self, cell_wall_thickness: Union[float, Dict[str, float]] = 0.5, 
-                 corner_smoothing: Union[float, Dict[str, float]] = 0.5):
+                 corner_smoothing: Union[float, Dict[str, float]] = 5):
         """
         Pre-proc for .geo file generation.
         Returns list of shrunken inner luminal polygons and one full tissue outer boundary.
@@ -256,7 +256,7 @@ class AnatomyWriter:
             
         def get_smoothing(c_type):
             if isinstance(corner_smoothing, dict):
-                return corner_smoothing.get(c_type, corner_smoothing.get("default", 0.5))
+                return corner_smoothing.get(c_type, corner_smoothing.get("default", 5))
             return corner_smoothing
 
         for cell in self.cells:
@@ -269,6 +269,9 @@ class AnatomyWriter:
                 
             # Scale coordinates by 1000 to match GMSH expected micron scale
             r_poly = shapely.affinity.scale(poly, xfact=1000, yfact=1000, origin=(0, 0))
+            # improve the resolution of the polygon
+            coords = GeometryProcessor.resample_coords(r_poly.exterior.coords, int(len(r_poly.exterior.coords)*5))
+            r_poly = Polygon(coords)
             
             thickness = get_thickness(cell.type)
             smoothing = get_smoothing(cell.type)
@@ -313,7 +316,7 @@ class AnatomyWriter:
         s_idx = 1
         c_loop = 1
 
-        def register_polygon_edges(poly, tol=1.0):
+        def register_polygon_edges(poly, tol=0.2):
             nonlocal v_idx, l_idx
             
             # Use shapely's Douglas-Peucker simplification to reduce points drastically

@@ -805,7 +805,7 @@ class NeedleAnatomy(Organ):
                         x=i_coord[0], y=i_coord[1],
                         diameter=np.sqrt(poly.area/np.pi)*2,
                         id_cell=i_cell, id_layer=0, id_group=id_stomata,
-                    type="air space")
+                    type="pore")
                     organ_specific_cells.cells.append(spacing_cell)
 
 
