@@ -14,8 +14,11 @@ root = RootAnatomy()
 
 root.update_params("inter_cellular_space", "aerenchyma_proportion", 0.1)
 root.update_params("inter_cellular_space", "cortex", 0.01)
-root.update_params("inter_cellular_space", "n_files", 5)
-root.update_params("inter_cellular_space", "aerenchyma_type", 2)
+root.update_params("inter_cellular_space", "n_files", 20)
+root.update_params("inter_cellular_space", "aerenchyma_type", 1)
+
+root.update_params("stele", "n_vascular_bundles", 3)
+
 # root.plot_layers(show=True, title=f"Root Layers")
 
 root.plot_cells(show=True, title=f"Root Cells")

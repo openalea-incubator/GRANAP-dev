@@ -5,10 +5,37 @@ import numpy as np
 import shapely as sp
 from typing import Dict, Any, Union, List
 from shapely.geometry import Polygon, MultiPolygon, Point
+from shapely.affinity import scale
+import matplotlib.pyplot as plt
+from matplotlib.colors import to_hex
 
 from granap.organ_class import Organ
 from granap.geometry_collection import GeometryProcessor
 
+
+DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
+    "epidermis": 2,
+    "exodermis": 2,
+    "hypodermis": 2,
+    "endodermis": 1.5,
+    "cortex": 1,
+    "mesophyll": 1,
+    "parenchyma": 1,
+    "vascular_parenchyma": 1,
+    "pericycle": 1,
+    "phloem": 1,
+    "xylem": 1.5,
+    "protoxylem": 1.5,
+    "metaxylem": 2,
+    "cambium": 1,
+    "duct": 5,
+    "guard cell": 2,
+    "Strasburger cell": 1,
+    "outerwall": 2,
+    "air space": 0.001,
+    "pore": 0.001,
+    "aerenchyma": 0.001,
+}
 
 class AnatomyWriter:
     """
@@ -234,15 +261,100 @@ class AnatomyWriter:
     
         print(f"OBJ saved to {path}")
 
-    def prep_geo(self, cell_wall_thickness: Union[float, Dict[str, float]] = 0.5, 
-                 corner_smoothing: Union[float, Dict[str, float]] = 5):
+    def write_to_svg(self, path: str, shrink_factor: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS, 
+                        corner_smoothing: Union[float, Dict[str, float]] = 0.5):
+        """
+        Write a .svg from the generated cross section geometry.
+        Uses prep_geo logic for cell rendering.
+        """
+        inner_polygons, final_polygon = self.prep_geo(self.cells, cell_wall_thickness=shrink_factor, corner_smoothing=corner_smoothing)
+        
+        svg_lines = []
+        
+        valid_cells = [c for c in self.cells if c.polygon is not None]
+        if not valid_cells:
+            print("No valid cells to export.")
+            return
+
+        min_x, max_x = float('inf'), float('-inf')
+        min_y, max_y = float('inf'), float('-inf')
+
+        # Colors for cell groups
+        viridis = plt.get_cmap("viridis")
+
+        cell_types_list = []
+        for cell in valid_cells:
+            if cell.type not in cell_types_list:
+                cell_types_list.append(cell.type)
+        
+        # shuffle cell types list (1, last, 2, last-1, ...)
+        shuffled_cell_types_list = [""]*len(cell_types_list)
+        for i in range(len(cell_types_list)//2 + 1):
+            shuffled_cell_types_list[i*2] = cell_types_list[0]
+            cell_types_list.remove(cell_types_list[0])
+            if len(cell_types_list) > 0:
+                shuffled_cell_types_list[i*2+1] = cell_types_list[-1]
+                cell_types_list.remove(cell_types_list[-1])
+
+        
+        cell_colors = {"default": "#440154"}
+        for i, cell_type in enumerate(shuffled_cell_types_list):
+            cell_colors[cell_type] = to_hex(viridis(i / max(1, len(shuffled_cell_types_list) - 1)))
+
+        # Calculate bounding box
+        bounds = final_polygon.bounds
+        min_x = min(min_x, bounds[0])
+        min_y = min(min_y, bounds[1])
+        max_x = max(max_x, bounds[2])
+        max_y = max(max_y, bounds[3])
+            
+        width = (max_x - min_x)
+        height = (max_y - min_y)
+        
+        pad_x, pad_y = width * 0.05, height * 0.05
+        min_x, min_y = min_x - pad_x, min_y - pad_y
+        width, height = width + 2*pad_x, height + 2*pad_y
+        
+        svg_lines.append(f'<?xml version="1.0" encoding="UTF-8" standalone="no"?>')
+        svg_lines.append(f'<svg viewBox="{min_x} {min_y} {width} {height}" xmlns="http://www.w3.org/2000/svg">')
+        svg_lines.append(f'\t<rect x="{min_x}" y="{min_y}" width="{width}" height="{height}" fill="white" />')
+
+        def get_svg_points(poly):
+            return " ".join([f"{x},{y}" for x, y in poly.exterior.coords])
+            
+        def get_svg_path(poly):
+            d = f"M {poly.exterior.coords[0][0]} {poly.exterior.coords[0][1]} "
+            for x, y in list(poly.exterior.coords)[1:]:
+                d += f"L {x} {y} "
+            for interior in poly.interiors:
+                d += f"M {interior.coords[0][0]} {interior.coords[0][1]} "
+                for x, y in list(interior.coords)[1:]:
+                    d += f"L {x} {y} "
+            return d
+
+        svg_lines.append(f'\t<polygon points="{get_svg_points(final_polygon)}" fill="black" stroke="none" />')
+
+        for cell in inner_polygons:
+            color = cell_colors.get(cell["type"], cell_colors["default"])
+            poly = cell["polygon"]
+            svg_lines.append(f'\t<polygon points="{get_svg_points(poly)}" fill="{color}" stroke="none" />')
+                
+        svg_lines.append("</svg>")
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(svg_lines))
+        print(f"SVG saved to {path}")
+
+    @staticmethod
+    def prep_geo(cells: List, cell_wall_thickness: Union[float, Dict[str, float]], 
+                 corner_smoothing: Union[float, Dict[str, float]]):
         """
         Pre-proc for .geo file generation.
         Returns list of shrunken inner luminal polygons and one full tissue outer boundary.
         Uses GeometryProcessor for buffering and smoothing.
         Geometry is scaled by 1000 (microns).
         """
-        import shapely.affinity
+        
         inner_polygons = []
         outer_tissue_polygons = []
 
@@ -259,7 +371,7 @@ class AnatomyWriter:
                 return corner_smoothing.get(c_type, corner_smoothing.get("default", 5))
             return corner_smoothing
 
-        for cell in self.cells:
+        for cell in cells:
             if cell.polygon is None:
                 continue
             
@@ -268,7 +380,7 @@ class AnatomyWriter:
                 poly = poly.buffer(0)
                 
             # Scale coordinates by 1000 to match GMSH expected micron scale
-            r_poly = shapely.affinity.scale(poly, xfact=1000, yfact=1000, origin=(0, 0))
+            r_poly = scale(poly, xfact=1000, yfact=1000, origin=(0, 0))
             # improve the resolution of the polygon
             coords = GeometryProcessor.resample_coords(r_poly.exterior.coords, int(len(r_poly.exterior.coords)*5))
             r_poly = Polygon(coords)
@@ -296,13 +408,13 @@ class AnatomyWriter:
         return inner_polygons, final_polygon
 
     def write_to_geo(self, path: str, dim: int = 2, celldomain: bool = False,
-                     cell_wall_thickness: Union[float, Dict[str, float]] = 1, 
+                     cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS, 
                      corner_smoothing: Union[float, Dict[str, float]] = 0.5):
         """
         Write .geo file for GMSH.
         Calls prep_geo to compute cell lumina and the outer boundary.
         """
-        inner_polygons, final_polygon = self.prep_geo(cell_wall_thickness, corner_smoothing)
+        inner_polygons, final_polygon = self.prep_geo(self.cells, cell_wall_thickness, corner_smoothing)
         
         geo_lines = [
             '// Gmsh project',

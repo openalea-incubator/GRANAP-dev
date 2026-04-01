@@ -434,79 +434,26 @@ class Organ(AbstractNetwork, ABC):
         cells_df = cells_gdf.drop(columns=['geometry'])
         cells_df.to_csv(filepath, index=False)
 
-    def write_to_xml(self, path: str):
+    def write_to_xml(self, path: str, **kwargs):
         """Write anatomy cross section as .xml file."""
         from granap.anatomy_writer import AnatomyWriter
-        AnatomyWriter(self).write_to_xml(path)
+        AnatomyWriter(self).write_to_xml(path, **kwargs)
         
-    def write_to_obj(self, path: str, membrane: bool = True, shrink_factor: float = 1):
+    def write_to_obj(self, path: str, **kwargs):
         """Write anatomy cross section as .obj file."""
         from granap.anatomy_writer import AnatomyWriter
-        AnatomyWriter(self).write_to_obj(path, membrane=membrane, shrink_factor=shrink_factor)
+        AnatomyWriter(self).write_to_obj(path, **kwargs)
+
+    def write_to_svg(self, path: str, **kwargs):
+        """Write anatomy cross section as .svg file."""
+        from granap.anatomy_writer import AnatomyWriter
+        AnatomyWriter(self).write_to_svg(path, **kwargs)
         
-    def write_to_geo(self, path: str, dim: int = 2, celldomain: bool = False, 
-                     cell_wall_thickness: Union[float, Dict[str, float]] = 0.2, 
-                     corner_smoothing: Union[float, Dict[str, float]] = 0.5):
+    def write_to_geo(self, path: str, **kwargs):
         """Write anatomy cross section as .geo file for GMSH."""
         from granap.anatomy_writer import AnatomyWriter
-        AnatomyWriter(self).write_to_geo(path, dim=dim, celldomain=celldomain, 
-                                        cell_wall_thickness=cell_wall_thickness, 
-                                        corner_smoothing=corner_smoothing)
+        AnatomyWriter(self).write_to_geo(path, **kwargs)
 
-    def to_domain(self,
-                  cell_wall_thickness: Union[float, Dict[str, float]] = 1.0,
-                  corner_smoothing: Union[float, Dict[str, float]] = 0.5,
-                  celldomain: bool = False,
-                  simplify_tol: float = 1.0,
-                  symplast: bool = False,
-                  **kwargs) -> "OrganDomain":
-        """Return a bvpy-compatible :class:`OrganDomain` ready for FEniCS.
-
-        Convenience wrapper around :class:`~granap.organ_domain.OrganDomain`.
-        All extra ``**kwargs`` (``cell_size``, ``cell_type``, ``dim``, ``clear``,
-        ``algorithm``, …) are forwarded to bvpy's
-        :class:`~bvpy.domains.abstract.AbstractDomain`.
-
-        Parameters
-        ----------
-        cell_wall_thickness : float or dict, optional
-            Wall thickness in μm (after ×1000 scaling).  Default ``1``.
-        corner_smoothing : float or dict, optional
-            Polygon corner smoothing factor.  Default ``0.5``.
-        celldomain : bool, optional
-            If ``True``, each cell gets its own Physical Group label.
-        simplify_tol : float, optional
-            Douglas–Peucker tolerance (μm) to reduce point count.  Default ``1``.
-        symplast : bool, optional
-            If ``True`` (default), inner cell lumens are meshed alongside the
-            apoplast.  If ``False``, only the apoplast (cell-wall layer) is
-            meshed — inner cells are used as holes only and are not labelled,
-            avoiding bvpy's partial-labelling Warning.
-        **kwargs
-            Forwarded to :class:`~bvpy.domains.abstract.AbstractDomain`
-            (e.g. ``cell_size=50``, ``dim=2``, ``clear=True``).
-
-        Returns
-        -------
-        OrganDomain
-            A Gmsh OCC domain ready for :meth:`~OrganDomain.discretize`.
-
-        Examples
-        --------
-        >>> domain = organ.to_domain(cell_wall_thickness=1, cell_size=50, dim=2, clear=True)
-        >>> domain.discretize()
-        >>> print(domain.sub_domain_names)
-        """
-        from granap.organ_domain import OrganDomain
-        return OrganDomain(
-            self,
-            cell_wall_thickness=cell_wall_thickness,
-            corner_smoothing=corner_smoothing,
-            celldomain=celldomain,
-            simplify_tol=simplify_tol,
-            symplast=symplast,
-            **kwargs,
-        )
 
     def export_to_adjencymatrix(self) -> lil_matrix:
         """
