@@ -498,8 +498,10 @@ class RootAnatomy(Organ):
                 
                         for cell in cortex_cells:
                             carved = cell.polygon.difference(air_union)
-                            if not carved.is_empty:
+                            if not carved.is_empty and carved.area > 1E-6:
                                 cell.polygon = carved
+                            else:
+                                cell.polygon = None
                 
                         # create cells for the air spaces
                         id_cell = len(self.all_cells.cells)
@@ -518,12 +520,25 @@ class RootAnatomy(Organ):
                             air_spaces_cells.cells.append(air_space_cell)
 
         # 2. Aerenchyma generation logic
-        aerenchyma_prop = self.intercellular_spaces_params.get("aerenchyma_proportion", 0)
+        aerenchyma_prop = self.intercellular_spaces_params.get("cortex", 0)
+        n_files = int(self.intercellular_spaces_params.get("n_files", 1))
+
+        # Define n_files angular sectors uniformly spaced from a random start
+        start_angle = np.random.uniform(0, 2 * np.pi)
+
+        def cell_quadrant(cell):
+            """Return the sector index [0, n_files) for a cell."""
+            cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+            rel = (cell_angle - start_angle) % (2 * np.pi)
+            return int(rel / (2 * np.pi / n_files)) % n_files
 
         self.all_cells.cells.extend(air_spaces_cells.cells)
         self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
 
         if aerenchyma_prop > 0:
+            if aerenchyma_prop > 1:
+                print("Aerenchyma proportion is greater than 1, setting it to 1")
+                aerenchyma_prop = 1
             cortex_cells = self.all_cells.get_cells_by_type("cortex")
             if cortex_cells:
                 # Exclude the innermost cortex layer (closest to endodermis)
@@ -534,22 +549,21 @@ class RootAnatomy(Organ):
                 if candidates:
                     total_cortex_area = sum(c.polygon.area for c in cortex_cells if c.polygon is not None)
                     total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
+                    max_possible_area = sum(c.polygon.area for c in candidates if c.polygon is not None)
+                    
                     target_aerenchyma_area = (total_cortex_area + total_air_area) * aerenchyma_prop
+                    
+                    if target_aerenchyma_area > max_possible_area:
+                        print(f"Warning: asked proportion ({aerenchyma_prop:.2f}) requires {target_aerenchyma_area:.2f} area, which is greater than available cells ({max_possible_area:.2f}). Lowering aerenchyma_proportion.")
+                        aerenchyma_prop = max_possible_area / (total_cortex_area + total_air_area)
+                        target_aerenchyma_area = max_possible_area
+                        
+                    print(f"Targeted aerenchyma prop: {(target_aerenchyma_area/ (total_cortex_area + total_air_area)):.3f}")
 
-                    n_files = int(self.intercellular_spaces_params.get("n_files", 1))
                     aerenchyma_type = int(self.intercellular_spaces_params.get("aerenchyma_type", 1))
 
                     # Per-quadrant target: each of the n_files sectors contributes equally
-                    target_per_quadrant = target_aerenchyma_area / n_files
-
-                    # Define n_files angular sectors uniformly spaced from a random start
-                    start_angle = np.random.uniform(0, 2 * np.pi)
-
-                    def cell_quadrant(cell):
-                        """Return the sector index [0, n_files) for a cell."""
-                        cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-                        rel = (cell_angle - start_angle) % (2 * np.pi)
-                        return int(rel / (2 * np.pi / n_files)) % n_files
+                    target_per_quadrant = (target_aerenchyma_area - total_air_area) / ((n_files)**1.12+1)
 
                     # Partition candidates into per-quadrant buckets
                     quadrant_buckets = [[] for _ in range(n_files)]
@@ -619,7 +633,8 @@ class RootAnatomy(Organ):
         if merge_pool:
             n_pool = len(merge_pool)
             parent = list(range(n_pool))
-
+            
+            cell_quadrants = [cell_quadrant(c) for c in merge_pool]
             def _find(i):
                 while parent[i] != i:
                     parent[i] = parent[parent[i]]
@@ -630,24 +645,28 @@ class RootAnatomy(Organ):
                 ri, rj = _find(i), _find(j)
                 if ri != rj:
                     parent[ri] = rj
-
+                    
             for i in range(n_pool):
+                qi = cell_quadrants[i]
                 for j in range(i + 1, n_pool):
+                    qj = cell_quadrants[j]
+                    if qi != qj:
+                        continue
+                        
                     pi = merge_pool[i].polygon
                     pj = merge_pool[j].polygon
                     if pi.touches(pj) or pi.intersects(pj):
                         _union(i, j)
-
+                        
             groups: dict = defaultdict(list)
             for i, c in enumerate(merge_pool):
                 groups[_find(i)].append(c)
-
+                
             fused_cells = []
             for group in groups.values():
                 if len(group) == 1:
                     fused_cells.append(group[0])
                     continue
-
                 fused_polygon = unary_union([c.polygon for c in group])
                 fused_type = "air space"
                 fused_cell = Cell(
@@ -655,7 +674,7 @@ class RootAnatomy(Organ):
                     y=fused_polygon.centroid.y,
                     diameter=np.sqrt(fused_polygon.area / np.pi) * 2,
                     id_cell=min(c.id_cell for c in group),
-                    id_layer=int(round(np.mean([c.id_layer for c in group]))),
+                    id_layer=int(np.ceil(np.mean([c.id_layer for c in group]))),
                     id_group=min(c.id_group for c in group),
                     type=fused_type,
                     polygon=fused_polygon,
@@ -666,6 +685,33 @@ class RootAnatomy(Organ):
             self.all_cells.remove_cells_by_ids([c.id_cell for c in merge_pool])
             self.all_cells.cells.extend(fused_cells)
 
-            self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
 
+        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
+
+        total_cortex_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("cortex") if c.polygon is not None)
+        total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
+        print(f"Actual aerenchyma prop: {(total_air_area / (total_cortex_area + total_air_area)):.3f}")
+
+        # Check if any cortex cells are entirely trapped inside air spaces.
+        # same method than for inter_cellular_space (carve)
+
+        air_spaces = self.all_cells.get_cells_by_type("air space")
+        cortex_cells = self.all_cells.get_cells_by_type("cortex")
+        
+        # extend the list of cells that are susceptible to be removed
+        cortex_cells.extend(a for a in air_spaces if a.id_layer == 0)
+
+        air_union = unary_union([a.polygon for a in air_spaces if a.polygon is not None and a.id_layer != 0])
+
+        for cell in cortex_cells:
+            carved = cell.polygon.difference(air_union)
+            if not carved.is_empty and carved.area > 1E-6:
+                cell.polygon = carved
+            else:
+                self.all_cells.remove_cells_by_ids([cell.id_cell])
+
+        
+        
+
+        
         
