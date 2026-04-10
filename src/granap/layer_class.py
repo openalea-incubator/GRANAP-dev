@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from granap.cell_class import Cell
 from shapely.geometry import Polygon
+from granap.input_data import LayerDefaultParams
 
 
 @dataclass
@@ -61,12 +62,13 @@ class Layer:
     def from_dict(cls, data: Dict[str, Any]) -> 'Layer':
         """Create a Layer from dictionary representation."""
         # Extract known fields
-        name = data.get("name", "unknown")
-        cell_diameter = data.get("cell_diameter", 0.01)
-        n_layers = data.get("n_layers", 1)
-        order = data.get("order", 0)
-        cell_width = data.get("cell_width", cell_diameter)
-        shift = data.get("shift", 0.0)
+        _defaults = LayerDefaultParams()
+        name = data.get("name", _defaults.name)
+        cell_diameter = data.get("cell_diameter", _defaults.cell_diameter_default)
+        n_layers = data.get("n_layers", _defaults.n_layers_default)
+        order = data.get("order", _defaults.order_default)
+        cell_width = data.get("cell_width", data.get("cell_diameter", _defaults.cell_width_default))
+        shift = data.get("shift", _defaults.shift_default)
         
         # Everything else goes into additional_params
         additional_params = {

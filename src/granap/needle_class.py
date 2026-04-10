@@ -14,82 +14,54 @@ from granap.generate_cell import CellGenerator
 from granap.layer_class import Layer
 from granap.geometry_collection import GeometryProcessor
 from granap.shapes import PolygonInterpolator
+from granap.input_data import OrganInputData
 import matplotlib.pyplot as plt
 
 
 class NeedleAnatomy(Organ):
     """
     Needle cross-sectional anatomy.
-    
+
     Implements the specific structure of gymnosperm needle leaves,
     including transfusion tissue and resin ducts.
     """
-    
-    from granap.input_data import OrganInputData
 
     def __init__(self, input_data: Any = None):
         """
         Initialize needle anatomy.
         """
         super().__init__()
-        # Initialize parameters from input_data or default
-        if hasattr(input_data, 'params'):
-            self.params = input_data.params
+        if isinstance(input_data, OrganInputData):
+            self.params = input_data.to_dict_list()
         elif isinstance(input_data, list):
             self.params = input_data
         else:
-            self._initialize_default_params()
-        
+            self.params = OrganInputData.for_needle().to_dict_list()
+
         self._initialize_params()
         self._initialize_default_layers()
 
-            
-    def _initialize_default_params(self) -> Dict[str, Any]:
-        """Initialize default parameters."""
-
-        self.params = [
-            # P. pinaster
-            {"name": "planttype", "value": 3, "organ": "needle", "width": 1.8, "thickness": 1.1}, # global parameters
-            {"name": "randomness", "value": 1.0, "smoothness": 0.3}, # 0 = No randomness, 3 = Maximum randomness; smoothness is the smoothing factor (0 = no smoothing, 1 = maximum smoothing)
-            {"name": "central_cylinder", "shape": "half_ellipse", "cell_diameter": 0.02, "layer_thickness": 0.43, "layer_length": 1.05, "vascular_width": 0.15, "vascular_height": 0.2}, # Cell diameter in millimeters
-            {"name": "transfusion_tissue", "tracheids_diameter": 0.05, "parenchyma_diameter": 0.03, "transfusion_tracheids_ratio": 0.5, "n_layers":2},
-            {"name": "endodermis", "cell_diameter": 0.02, "cell_width": 0.05, "n_layers": 1, "order": 3, "shift": 5},
-            {"name": "mesophyll", "cell_diameter": 0.08, "cell_width": 0.045, "n_layers": 3, "order": 4, "shift":10},
-            {"name": "hypodermis", "cell_diameter": 0.0225, "n_layers": 2, "order": 5},
-            {"name": "epidermis", "cell_diameter": 0.02, "n_layers": 1, "order": 6},
-            {"name": "xylem", "n_files": 10, "cell_diameter": 0.007, "n_clusters": 4, "n_per_cluster": 3}, # Number of files
-            {"name": "phloem", "n_files": 8, "cell_diameter": 0.003}, 
-            {"name": "cambium", "cell_diameter": 0.002}, 
-            {"name": "resin_duct", "diameter": 0.1, "n_files": 3, "cell_diameter": 0.02},
-            {"name": "inter_cellular_spaces", "mesophyll": 0.01},
-            {"name": "stomata", "n_files": 4, "width": 0.025, "depth": 0.06, "sub_chamber": 0.04},
-            {"name": "Strasburger cells", "layer_diameter": 0.002, "cell_diameter": 0.05}
-        ]
-
     def _initialize_params(self) -> None:
         """Initialize central layers."""
-        # get the central cylinder parameters
-        self.central_cylinder_params = [param for param in self.params if param["name"] == "central_cylinder"][0]
-        # get the transfusion tissue parameters
-        self.transfusion_params = [param for param in self.params if param["name"] == "transfusion_tissue"][0]
-        # get the global parameters
-        self.global_params = [param for param in self.params if param["name"] == "planttype"][0]
+        # 1. Global params
+        self.global_params = next(p for p in self.params if p["name"] == "planttype")
+        # 2. Central cylinder params
+        self.central_cylinder_params = next(p for p in self.params if p["name"] == "central_cylinder")
+        # 3. Transfusion tissue params
+        self.transfusion_params = next(p for p in self.params if p["name"] == "transfusion_tissue")
 
+        # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
+        self.intercellular_spaces_params = next((p for p in self.params if p["name"] == "inter_cellular_spaces"), {})
+        self.aerenchyma_params = next((p for p in self.params if p["name"] == "aerenchyma"), {})
+
+        # 4. Extract layer definitions (any param with 'order' that is not a vascular zone)
         self.layers = [param for param in self.params if "order" in param]
         self.layers = sorted(self.layers, key=lambda x: x["order"])        
     
     def _initialize_default_layers(self) -> None:
         """Initialize default needle layers."""
-        layer_array = []
         for param in self.layers:
-            self.layer_manager.add_layer(Layer(
-                name=param["name"],
-                cell_diameter=param["cell_diameter"],
-                cell_width=param.get("cell_width", param["cell_diameter"]),
-                shift=param.get("shift", 0.0),
-                n_layers=param.get("n_layers", 1),
-                order=param.get("order", 0)
-            ))
+            self.layer_manager.add_layer(Layer.from_dict(param))
     
     def _create_base_shape(self) -> Polygon:
         """
@@ -98,12 +70,7 @@ class NeedleAnatomy(Organ):
         Returns:
             Half-ellipse polygon
         """
-        # check if width and thickness are provided
-        if self.global_params.get("width") is None: #key error
-            self.global_params["width"] = 0
-        if self.global_params.get("thickness") is None: #key error
-            self.global_params["thickness"] = 0
-        # if width and thickness are not provided, calculate them from the layers     
+        # if width and thickness are not provided (set to 0), calculate them from the layers
         if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
             width = self._calculate_needle_width()
             thickness = self._calculate_needle_thickness()
@@ -610,55 +577,46 @@ class NeedleAnatomy(Organ):
 
 
     def add_intercellular_spaces(self):
-        """
-        Compute intercellular (air space) for the mesophyll layer.
+        """Orchestrate intercellular space and aerenchyma generation."""
+        self.add_intercellular()
+        self.add_aerenchyma()
+        self.merge_intercellular_aerenchyma()
 
-        Mesophyll cell polygons are smoothed, and the difference between the
-        original union and the smoothed union yields the gap regions that represent air spaces.  Each air
-        space polygon is then simplified to reduce its vertex count.
+    def add_intercellular(self):
+        """Compute air spaces for the tissue defined in intercellular_spaces_params."""
+        tissue = self.intercellular_spaces_params.get("tissue")
+        smoothness = self.intercellular_spaces_params.get("smoothness", 0)
+        if not tissue or not smoothness:
+            return
 
-        """
-        intercellular_spaces_params = [
-            p for p in self.params if p["name"] == "inter_cellular_spaces"
-        ]
-        if not intercellular_spaces_params:
-            return []
+        tissue_cells = self.all_cells.get_cells_by_type(tissue)
+        tissue_polys = [c.polygon for c in tissue_cells if c.polygon is not None]
+        if len(tissue_polys) < 2:
+            return
 
-        # Collect mesophyll polygons (cells are *not* touched)
-        mesophyll_cells = self.all_cells.get_cells_by_type("mesophyll")
-        mesophyll_polys = [
-            c.polygon for c in mesophyll_cells if c.polygon is not None
-        ]
-        if len(mesophyll_polys) < 2:
-            return []
+        full_union = GeometryProcessor.union_polygons(tissue_polys)
+        full_union_buffed = full_union.buffer(-tissue_cells[0].diameter * 0.5)
 
-        full_union = GeometryProcessor.union_polygons(mesophyll_polys)
-        full_union_buffed = full_union.buffer(-mesophyll_cells[0].diameter*0.5)
-  
-        # smooth the polygons
         smoothed = []
-        for poly in mesophyll_polys:
-            shrunk = GeometryProcessor.buffer_polygon(poly, 0, smooth_factor=intercellular_spaces_params[0]["mesophyll"])
+        for poly in tissue_polys:
+            shrunk = GeometryProcessor.buffer_polygon(poly, 0, smooth_factor=smoothness)
             if not shrunk.is_empty:
                 smoothed.append(shrunk)
 
         if not smoothed:
-            return []
+            return
 
         smoothed_union = GeometryProcessor.union_polygons(smoothed)
         air_region = full_union.difference(smoothed_union)
 
-        # Decompose into individual polygons
         if isinstance(air_region, MultiPolygon):
             raw_air_polys = list(air_region.geoms)
         elif air_region.is_empty:
-            return []
+            return
         else:
             raw_air_polys = [air_region]
 
-        # Simplify each air space polygon (reduce vertex count)
-        # Tolerance ~ 5 % of the median equivalent radius of mesophyll cells
-        r_values = [np.sqrt(p.area / np.pi) for p in mesophyll_polys]
+        r_values = [np.sqrt(p.area / np.pi) for p in tissue_polys]
         tol = float(np.median(r_values)) * 0.05
 
         air_space_polys = []
@@ -668,33 +626,216 @@ class NeedleAnatomy(Organ):
                 if not simplified.is_empty and simplified.area > 1E-6:
                     air_space_polys.append(simplified)
 
+        if not air_space_polys:
+            return
+
         air_union = GeometryProcessor.union_polygons(air_space_polys)
 
-        for cell in mesophyll_cells:
+        for cell in tissue_cells:
             carved = cell.polygon.difference(air_union)
-            if not carved.is_empty:
+            if not carved.is_empty and carved.area > 1E-6:
                 cell.polygon = carved
+            else:
+                cell.polygon = None
 
-        # create cells for the air spaces
-        air_spaces_cells = CellManager()
         id_cell = len(self.all_cells.cells)
         for air_space_polygon in air_space_polys:
             id_cell += 1
-            air_space_cell = Cell(
-                x = air_space_polygon.centroid.x,
-                y = air_space_polygon.centroid.y,
-                diameter = np.sqrt(air_space_polygon.area/np.pi)*2,
+            self.all_cells.cells.append(Cell(
+                x=air_space_polygon.centroid.x,
+                y=air_space_polygon.centroid.y,
+                diameter=np.sqrt(air_space_polygon.area / np.pi) * 2,
                 id_cell=id_cell,
                 id_layer=0,
                 id_group=id_cell,
                 type="air space",
                 polygon=air_space_polygon,
-            )
-            air_spaces_cells.cells.append(air_space_cell)
-        # add the air spaces cells to the all_cells
-        
-        self.all_cells.cells.extend(air_spaces_cells.cells)
+            ))
+
         self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
+
+    def add_aerenchyma(self):
+        """Generate aerenchyma in the tissue defined in aerenchyma_params."""
+        aerenchyma_prop = self.aerenchyma_params.get("aerenchyma_proportion", 0)
+        if not aerenchyma_prop:
+            return
+
+        tissue = self.aerenchyma_params.get("tissue")
+        n_files = int(self.aerenchyma_params.get("n_files", 1))
+        aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
+
+        self._aerenchyma_n_files = n_files
+        self._aerenchyma_start_angle = np.random.uniform(0, 2 * np.pi)
+        start_angle = self._aerenchyma_start_angle
+
+        def cell_quadrant(cell):
+            cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+            rel = (cell_angle - start_angle) % (2 * np.pi)
+            return int(rel / (2 * np.pi / n_files)) % n_files
+
+        if aerenchyma_prop > 1:
+            print("Aerenchyma proportion is greater than 1, setting it to 1")
+            aerenchyma_prop = 1
+
+        tissue_cells = self.all_cells.get_cells_by_type(tissue)
+        if not tissue_cells:
+            return
+
+        max_tissue_layer = max(c.id_layer for c in tissue_cells)
+        candidates = [c for c in tissue_cells if c.id_layer < max_tissue_layer]
+        candidates.extend(self.all_cells.get_cells_by_type("air space"))
+
+        if not candidates:
+            return
+
+        total_tissue_area = sum(c.polygon.area for c in tissue_cells if c.polygon is not None)
+        total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
+        max_possible_area = sum(c.polygon.area for c in candidates if c.polygon is not None)
+
+        target_aerenchyma_area = (total_tissue_area + total_air_area) * aerenchyma_prop
+
+        if target_aerenchyma_area > max_possible_area:
+            print(f"Warning: asked proportion ({aerenchyma_prop:.2f}) requires {target_aerenchyma_area:.2f} area, which is greater than available cells ({max_possible_area:.2f}). Lowering aerenchyma_proportion.")
+            aerenchyma_prop = max_possible_area / (total_tissue_area + total_air_area)
+            target_aerenchyma_area = max_possible_area
+
+        print(f"Targeted aerenchyma prop: {(target_aerenchyma_area / (total_tissue_area + total_air_area)):.3f}")
+
+        target_per_quadrant = (target_aerenchyma_area - total_air_area) / ((n_files) ** 1.12 + 1)
+
+        quadrant_buckets = [[] for _ in range(n_files)]
+        for c in candidates:
+            quadrant_buckets[cell_quadrant(c)].append(c)
+
+        if aerenchyma_type == 1:
+            for q, bucket in enumerate(quadrant_buckets):
+                central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
+                def _ang_dist(cell, ca=central_angle):
+                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+                    d = abs(a - ca)
+                    return min(d, 2 * np.pi - d)
+                bucket.sort(key=_ang_dist)
+        elif aerenchyma_type == 2:
+            for q, bucket in enumerate(quadrant_buckets):
+                if not bucket:
+                    continue
+                central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
+                def _ang_dist_seed(cell, ca=central_angle):
+                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+                    d = abs(a - ca)
+                    return min(d, 2 * np.pi - d)
+                seed = min(bucket, key=_ang_dist_seed)
+                bucket.sort(key=lambda c, s=seed: np.hypot(c.x - s.x, c.y - s.y))
+
+        quadrant_area = [0.0] * n_files
+        quadrant_idx = [0] * n_files
+
+        changed = True
+        while changed:
+            changed = False
+            for q in range(n_files):
+                if quadrant_area[q] >= target_per_quadrant:
+                    continue
+                bucket = quadrant_buckets[q]
+                while quadrant_idx[q] < len(bucket):
+                    cell = bucket[quadrant_idx[q]]
+                    quadrant_idx[q] += 1
+                    if cell.type != "air space" and cell.polygon is not None:
+                        cell.type = "air space"
+                        quadrant_area[q] += cell.polygon.area
+                        changed = True
+                        break
+
+        tissue = self.aerenchyma_params.get("tissue")
+        total_tissue_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type(tissue) if c.polygon is not None)
+        total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
+        print(f"Actual aerenchyma prop: {(total_air_area / (total_tissue_area + total_air_area)):.3f}")
+
+    def merge_intercellular_aerenchyma(self):
+        """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""
+        from collections import defaultdict
+
+        n_files = getattr(self, '_aerenchyma_n_files', 1)
+        start_angle = getattr(self, '_aerenchyma_start_angle', 0.0)
+
+        def cell_quadrant(cell):
+            cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+            rel = (cell_angle - start_angle) % (2 * np.pi)
+            return int(rel / (2 * np.pi / n_files)) % n_files
+
+        seen_ids: set = set()
+        merge_pool = []
+        for c in list(self.all_cells.cells):
+            if c.type == "air space" and c.polygon is not None:
+                oid = id(c)
+                if oid not in seen_ids:
+                    seen_ids.add(oid)
+                    merge_pool.append(c)
+
+        if merge_pool:
+            n_pool = len(merge_pool)
+            parent = list(range(n_pool))
+            cell_quadrants = [cell_quadrant(c) for c in merge_pool]
+
+            def _find(i):
+                while parent[i] != i:
+                    parent[i] = parent[parent[i]]
+                    i = parent[i]
+                return i
+
+            def _union(i, j):
+                ri, rj = _find(i), _find(j)
+                if ri != rj:
+                    parent[ri] = rj
+
+            for i in range(n_pool):
+                for j in range(i + 1, n_pool):
+                    if cell_quadrants[i] != cell_quadrants[j]:
+                        continue
+                    if merge_pool[i].polygon.touches(merge_pool[j].polygon) or merge_pool[i].polygon.intersects(merge_pool[j].polygon):
+                        _union(i, j)
+
+            groups: dict = defaultdict(list)
+            for i, c in enumerate(merge_pool):
+                groups[_find(i)].append(c)
+
+            fused_cells = []
+            for group in groups.values():
+                if len(group) == 1:
+                    fused_cells.append(group[0])
+                    continue
+                fused_polygon = unary_union([c.polygon for c in group])
+                fused_cells.append(Cell(
+                    x=fused_polygon.centroid.x,
+                    y=fused_polygon.centroid.y,
+                    diameter=np.sqrt(fused_polygon.area / np.pi) * 2,
+                    id_cell=min(c.id_cell for c in group),
+                    id_layer=int(np.ceil(np.mean([c.id_layer for c in group]))),
+                    id_group=min(c.id_group for c in group),
+                    type="air space",
+                    polygon=fused_polygon,
+                ))
+
+            self.all_cells.remove_cells_by_ids([c.id_cell for c in merge_pool])
+            self.all_cells.cells.extend(fused_cells)
+
+        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
+
+        # Carve tissue cells that are trapped inside air spaces
+        tissue = self.aerenchyma_params.get("tissue")
+        air_spaces = self.all_cells.get_cells_by_type("air space")
+        tissue_cells = self.all_cells.get_cells_by_type(tissue)
+        tissue_cells.extend(a for a in air_spaces if a.id_layer == 0)
+
+        air_union = unary_union([a.polygon for a in air_spaces if a.polygon is not None and a.id_layer != 0])
+
+        for cell in tissue_cells:
+            carved = cell.polygon.difference(air_union)
+            if not carved.is_empty and carved.area > 1E-6:
+                cell.polygon = carved
+            else:
+                self.all_cells.remove_cells_by_ids([cell.id_cell])
+
 
 
     def add_stomata(self):

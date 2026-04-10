@@ -49,8 +49,11 @@ class Organ(AbstractNetwork, ABC):
         Factory method to initialize the appropriate Organ subclass 
         (RootAnatomy or NeedleAnatomy) from an OrganInputData instance.
         """
+        # Normalize params to plain dicts for uniform access
+        params = input_data.to_dict_list() if isinstance(input_data, OrganInputData) else input_data.params
+
         # Determine the organ type from the parameters
-        ptype_param = next((p for p in input_data.params if p["name"] == "planttype"), None)
+        ptype_param = next((p for p in params if p["name"] == "planttype"), None)
         organ_type = None
 
         if ptype_param:
@@ -61,7 +64,7 @@ class Organ(AbstractNetwork, ABC):
 
         # Fallback to duck-typing the input parameters if 'organ' isn't explicitly defined
         if not organ_type:
-            names = {p["name"] for p in input_data.params}
+            names = {p["name"] for p in params}
             if "stele" in names or "cortex" in names:
                 organ_type = "root"
             else:

@@ -111,7 +111,7 @@ class LayerManager:
         """
         expanded = []
         for layer in self.get_ordered_layers():
-            for i in range(layer.n_layers):
+            for i in range(int(layer.n_layers)):
                 expanded.append({
                     "name": layer.name,
                     "cell_diameter": layer.cell_diameter,
