@@ -537,7 +537,7 @@ class NetworkExporter:
     def __init__(self, organ: Organ):
         self.organ = organ
 
-    def export(self, network: AbstractNetwork) -> None:
+    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS) -> None:
         """
         Populate the provided network graph from the cell GeoDataFrame.
 
@@ -555,6 +555,11 @@ class NetworkExporter:
         # Phases 0–2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
+        
+        def get_thickness(c_type: str) -> float:
+            if isinstance(cell_wall_thickness, dict):
+                return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
+            return float(cell_wall_thickness)
 
         cell_vkeys, _, edge_to_cells, junction_set = (
             CellGenerator._build_topology(polys, cell_ids)
@@ -591,6 +596,7 @@ class NetworkExporter:
                         "junc_end": vkeys[0],
                         "midpoint": (mid_x, mid_y),
                         "length": length,
+                        "wall_thickness": 0.0,
                         "cells": [],
                     }
                     next_wall_id += 1
@@ -632,12 +638,26 @@ class NetworkExporter:
                         "junc_end": junc_end,
                         "midpoint": (mid_x, mid_y),
                         "length": length,
+                        "wall_thickness": 0.0,
                         "cells": [],
                     }
                     next_wall_id += 1
 
                 if row_idx not in wall_registry[wall_key]["cells"]:
                     wall_registry[wall_key]["cells"].append(row_idx)
+
+        # Compute true wall_thickness based on adjacent cells
+        for wd in wall_registry.values():
+            w_thick = 0.0
+            for r in wd["cells"]:
+                row = cells_gdf.loc[r]
+                c_type = row.get("type", "")
+                w_thick += get_thickness(c_type)
+            
+            if len(wd["cells"]) == 1:
+                w_thick += get_thickness("outerwall")
+                
+            wd["wall_thickness"] = w_thick
 
         # Phase 4 — assign MECHA-compatible node indices
         network.n_walls = len(wall_registry)
@@ -667,6 +687,7 @@ class NetworkExporter:
                 type="apo",
                 position=wd["midpoint"],
                 length=wd["length"],
+                wall_thickness=wd["wall_thickness"],
             )
 
         # Junction nodes
@@ -707,6 +728,7 @@ class NetworkExporter:
             wall_id = wd["id"]
             cell_nodes = network._wall_to_cells[wall_id]
             wall_length = wd["length"]
+            wall_thickness = wd["wall_thickness"]
 
             # Transmembrane: cell ↔ wall
             for cn in cell_nodes:
@@ -723,6 +745,7 @@ class NetworkExporter:
                     length=wall_length,
                     dist=dist_wall_cell,
                     d_vec=d_vec,
+                    wall_thickness=wall_thickness,
                 )
             
             # each junction connected to the wall node
@@ -742,6 +765,7 @@ class NetworkExporter:
                         lateral_distance = lateral_distance,
                         d_vec = d_vec,
                         distnode_wall_cell = dist_wall_cell,
+                        wall_thickness=wall_thickness,
                 )
             
             # Symplastic: cell ↔ cell

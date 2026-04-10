@@ -250,7 +250,7 @@ class Organ(AbstractNetwork, ABC):
                         if layer:
                             layer.cells.append(cell)
 
-            
+            self.all_cells.recalculate_cell_properties()
             # Convert to GeoDataFrame
             cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
             for i, c in enumerate(self.all_cells.cells):
