@@ -22,7 +22,7 @@ DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
     "cortex": 1,
     "mesophyll": 1,
     "parenchyma": 1,
-    "vascular_parenchyma": 1,
+    "stele": 1,
     "pericycle": 1,
     "phloem": 1,
     "xylem": 1.5,
@@ -63,7 +63,7 @@ class AnatomyWriter:
             "exodermis": 1, "epidermis": 2, "endodermis": 3, "passage_cell": 3, "cortex": 4,
             "stele": 5, "xylem": 13, "pericycle": 16, "companion_cell": 12, "phloem": 11,
             "inter_cellular_space": 4, "aerenchyma": 4, "cambium": 11, "metaxylem": 13,
-            "protoxylem": 13, "air space": 4, "vascular_parenchyma": 5
+            "protoxylem": 13, "air space": 4, "stele": 5
         }
 
         # Use the same GeoDataFrame (and same index) as NetworkExporter.export().
@@ -303,6 +303,8 @@ class AnatomyWriter:
         # shuffle cell types list (1, last, 2, last-1, ...)
         shuffled_cell_types_list = [""]*len(cell_types_list)
         for i in range(len(cell_types_list)//2 + 1):
+            if not cell_types_list:
+                break
             shuffled_cell_types_list[i*2] = cell_types_list[0]
             cell_types_list.remove(cell_types_list[0])
             if len(cell_types_list) > 0:
