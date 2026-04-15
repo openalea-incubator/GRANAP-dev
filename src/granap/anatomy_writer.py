@@ -66,18 +66,18 @@ class AnatomyWriter:
             "protoxylem": 13, "air space": 4, "vascular_parenchyma": 5
         }
 
-        # Use the same GeoDataFrame (and same index) as NetworkExporter.export()
+        # Use the same GeoDataFrame (and same index) as NetworkExporter.export().
+        # IMPORTANT: apply the IDENTICAL valid-geometry filter so that both paths
+        # call _build_topology with the exact same polygon set → same KD-tree
+        # snap_tol, same clusters, same canonical junction coordinates.
         cells_gdf = self.organ.generate_cells()
-
-        # Filter to rows with valid (non-null, non-empty) geometry, preserving the
-        # original GDF index so that XML cell id == GDF row index == graph node offset
         valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
             lambda g: g is not None and not g.is_empty
         )
         valid_gdf = cells_gdf[valid_mask]
 
         polys    = list(valid_gdf["geometry"])
-        cell_ids = list(valid_gdf.index)   # ← same IDs used by NetworkExporter
+        cell_ids = list(valid_gdf.index)
 
         cell_vkeys, _, _, junction_set = CellGenerator._build_topology(polys, cell_ids)
 
@@ -564,10 +564,19 @@ class NetworkExporter:
         from granap.generate_cell import CellGenerator
         cells_gdf = self.organ.generate_cells()
 
+        # Filter to cells with valid (non-null, non-empty) geometry — must match
+        # the same filter used in write_to_xml so that both paths call
+        # _build_topology with exactly the same polygon set, guaranteeing
+        # identical KD-tree snapping results and canonical junction coordinates.
+        valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
+            lambda g: g is not None and not g.is_empty
+        )
+        cells_gdf = cells_gdf[valid_mask]
+
         # Phases 0–2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
-        
+
         def get_thickness(c_type: str) -> float:
             if isinstance(cell_wall_thickness, dict):
                 return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))

@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import time
 
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
@@ -36,7 +37,10 @@ for aer in asked_proportions:
     root.update_params("inter_cellular_space", "aerenchyma_type", 1)
     root.update_params("inter_cellular_space", "cortex", aer)
     root.update_params("inter_cellular_space", "n_files", int(np.ceil(10*aer)*2))
+    time_start = time.time()
     root.generate_cells()
+    time_end = time.time()
+    print("Time to generate cells:", time_end - time_start)
     cortex_cells = root.all_cells.get_cells_by_type('cortex')
     air_spaces = root.all_cells.get_cells_by_type('air space')
     total_cortex_area = sum(c.polygon.area for c in cortex_cells if c.polygon is not None)
