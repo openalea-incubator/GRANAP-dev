@@ -51,7 +51,7 @@ class NeedleAnatomy(Organ):
         self.transfusion_params = next(p for p in self.params if p["name"] == "transfusion_tissue")
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
-        self.intercellular_spaces_params = next((p for p in self.params if p["name"] == "inter_cellular_spaces"), {})
+        self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
         self.aerenchyma_params = next((p for p in self.params if p["name"] == "aerenchyma"), {})
 
         # 4. Extract layer definitions (any param with 'order' that is not a vascular zone)
@@ -583,23 +583,57 @@ class NeedleAnatomy(Organ):
         self.merge_intercellular_aerenchyma()
 
     def add_intercellular(self):
-        """Compute air spaces for the tissue defined in intercellular_spaces_params."""
-        tissue = self.intercellular_spaces_params.get("tissue")
-        smoothness = self.intercellular_spaces_params.get("smoothness", 0)
-        if not tissue or not smoothness:
+        """Compute air spaces for each inter_cellular_spaces entry.
+
+        Each entry may list one or more tissues. When multiple tissues are given,
+        cells from all of them are processed together so that intercellular spaces
+        are also generated at the boundary between adjacent tissues.
+        Smoothness can be a single float (applied to every tissue) or a list with
+        one value per tissue.
+        """
+        for ics in self.intercellular_spaces_params:
+            self._apply_intercellular(ics)
+
+    def _apply_intercellular(self, ics: dict) -> None:
+        """Apply one inter_cellular_spaces entry to the relevant tissue cells."""
+        tissues = ics.get("tissue", [])
+        if isinstance(tissues, str):
+            tissues = [tissues]
+        if not tissues:
             return
 
-        tissue_cells = self.all_cells.get_cells_by_type(tissue)
-        tissue_polys = [c.polygon for c in tissue_cells if c.polygon is not None]
+        smoothness = ics.get("smoothness", 0)
+        if isinstance(smoothness, (int, float)):
+            smoothness_per_tissue = [float(smoothness)] * len(tissues)
+        else:
+            smoothness_per_tissue = [float(s) for s in smoothness]
+
+        if not any(smoothness_per_tissue):
+            return
+
+        # Collect cells from all tissues, tracking the smoothness for each cell
+        all_tissue_cells = []
+        cell_smoothness: dict = {}
+        for tissue_name, s in zip(tissues, smoothness_per_tissue):
+            cells = self.all_cells.get_cells_by_type(tissue_name)
+            for c in cells:
+                cell_smoothness[id(c)] = s
+            all_tissue_cells.extend(cells)
+
+        tissue_polys = [c.polygon for c in all_tissue_cells if c.polygon is not None]
         if len(tissue_polys) < 2:
             return
 
         full_union = GeometryProcessor.union_polygons(tissue_polys)
-        full_union_buffed = full_union.buffer(-tissue_cells[0].diameter * 0.5)
+        min_diameter = min(c.diameter for c in all_tissue_cells)
+        full_union_buffed = full_union.buffer(-min_diameter * 0.5)
 
         smoothed = []
-        for poly in tissue_polys:
-            shrunk = GeometryProcessor.buffer_polygon(poly, 0, smooth_factor=smoothness)
+        for cell in all_tissue_cells:
+            if cell.polygon is None:
+                continue
+            s = cell_smoothness[id(cell)]
+            shrunk = GeometryProcessor.buffer_polygon(cell.polygon, 0, smooth_factor=s)
             if not shrunk.is_empty:
                 smoothed.append(shrunk)
 
@@ -631,7 +665,9 @@ class NeedleAnatomy(Organ):
 
         air_union = GeometryProcessor.union_polygons(air_space_polys)
 
-        for cell in tissue_cells:
+        for cell in all_tissue_cells:
+            if cell.polygon is None:
+                continue
             carved = cell.polygon.difference(air_union)
             if not carved.is_empty and carved.area > 1E-6:
                 cell.polygon = carved

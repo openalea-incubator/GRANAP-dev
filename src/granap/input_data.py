@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 import copy
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -37,20 +37,40 @@ class PlantTypeParams(BaseParams):
 
 class SteleParams(BaseParams):
     name               : str   = "stele"
-    thickness          : float = Field(default=0.27,  ge=0.00001, title = "Thickness") # No upper limit
-    cell_diameter      : float = Field(default=0.01,  ge=0.00001, title = "Cell Diameter") # No upper limit
-    xylem_diameter     : float = Field(default=0.063, ge=0.00001, title = "Xylem Diameter") # No upper limit
-    protoxylem_diameter: float = Field(default=0.02,  ge=0.00001, title = "Protoxylem Diameter") # No upper limit
-    phloem_diameter    : float = Field(default=0.012, ge=0.00001, title = "Phloem Diameter") # No upper limit
-    n_vascular_bundles : int   = Field(default=5,     ge=1, title = "Number of Vascular Bundles") # No upper limit
-    ratio_proto_meta   : float = Field(default=2.2,   ge=0.0, title = "Ratio of Protoxylem to Metaxylem") # No upper limit
+    thickness          : float = Field(default=0.27,  ge=0.00001, title="Thickness")
+    cell_diameter      : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
+    cell_diameter_max  : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
+    xylem_diameter         : float = Field(default=0.06,  ge=0.00001, title="Xylem Diameter")
+    xylem_diameter_sd      : float = Field(default=0.005,   ge=0.0,     title="Xylem Diameter SD",      description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
+    protoxylem_diameter    : float = Field(default=0.01,  ge=0.00001, title="Protoxylem Diameter")
+    protoxylem_diameter_sd : float = Field(default=0.002,   ge=0.0,     title="Protoxylem Diameter SD", description="Standard deviation of protoxylem bundle diameter (sampled per bundle).")
+    phloem_diameter        : float = Field(default=0.005, ge=0.00001, title="Phloem Diameter")
+    phloem_diameter_sd     : float = Field(default=0.001,   ge=0.0,     title="Phloem Diameter SD",     description="Standard deviation of phloem bundle diameter (sampled per bundle).")
+    n_phloem_per_bundle     : int   = Field(default=5,  ge=1, title="Number of Phloem Cells per Bundle",     description="Number of sieve elements packed inside each phloem bundle using a front-chain layout.")
+    n_protoxylem_per_bundle : int   = Field(default=2,  ge=1, title="Number of Protoxylem Cells per Bundle", description="Number of protoxylem elements packed inside each protoxylem bundle using a front-chain layout.")
+    n_vascular_bundles : int   = Field(default=5,     ge=1,       title="Number of Vascular Bundles")
+    ratio_proto_meta   : float = Field(default=2.2,   ge=0.0,     title="Ratio of Protoxylem to Metaxylem")
+    # 5PL size-gradient shape parameters
+    size_gradient_inflection : float = Field(default=0.3, ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point (0 = center, 1 = edge). Values > 1 push the inflection outside the stele.")
+    size_gradient_steepness  : float = Field(default=3.0, ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL. Higher values produce a sharper size transition.")
+    size_gradient_asymmetry  : float = Field(default=1.0, ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry parameter m of the 5PL. Values > 1 compress the gradient toward smaller radii.")
 
 
 class InterCellularSpacesParams(BaseParams):
-    name      : str   = "inter_cellular_spaces"
-    tissue    : str   = "stele"
-    inter_cellular_space_proportion : float = Field(default=0.1, ge=0.0, le=1.0, title = "Intercellular Space Proportion", description = "Proportion of intercellular spaces in the tissue from 0 to 1")
-    smoothness: float = Field(default=0.05, ge=0.0, le=1.0, title = "Smoothness", description = "Smoothness of the inter cellular spaces from 0 to 1")
+    name      : str             = "inter_cellular_spaces"
+    tissue    : List[str]       = Field(default=["cortex", "exodermis"], title="Tissue", description="One or more tissue names to apply intercellular spaces to. Adjacent tissues in the list will have spaces generated at their shared boundary.")
+    inter_cellular_space_proportion : float = Field(default=0.1, ge=0.0, le=1.0, title="Intercellular Space Proportion", description="Proportion of intercellular spaces in the tissue from 0 to 1")
+    smoothness: Union[float, List[float]] = Field(default=[0.05, 0.05], title="Smoothness", description="Smoothness per tissue (0–1). Provide a single float applied to all tissues, or a list with one value per tissue.")
+
+    @model_validator(mode="after")
+    def _check_smoothness_length(self) -> "InterCellularSpacesParams":
+        if isinstance(self.smoothness, list):
+            if len(self.smoothness) != len(self.tissue):
+                raise ValueError(
+                    f"smoothness has {len(self.smoothness)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                    "lengths must match, or provide a single float applied to all tissues."
+                )
+        return self
 
 
 class AerenchymaParams(BaseParams):
@@ -118,7 +138,6 @@ class NeedlePlantTypeParams(BaseParams):
 class RandomnessParams(BaseParams):
     name      : str   = "randomness"
     value     : float = Field(default=1.0, ge=0.0, le=3.0, title = "Value", description = "Value of the randomness")
-    smoothness: float = Field(default=0.3, ge=0.0, le=1.0, title = "Smoothness", description = "Smoothness of the randomness")
 
 
 class CentralCylinderParams(BaseParams):
@@ -172,9 +191,19 @@ class ResinDuctParams(BaseParams):
 
 
 class NeedleInterCellularSpacesParams(BaseParams):
-    name      : str   = "inter_cellular_spaces"
-    tissue    : str   = "mesophyll"
-    smoothness: float = Field(default=0.01, ge=0.0, le=1.0, title = "Smoothness", description = "Smoothness of the inter cellular spaces")
+    name      : str             = "inter_cellular_spaces"
+    tissue    : List[str]       = Field(default=["mesophyll", "endodermis"], title="Tissue", description="One or more tissue names to apply intercellular spaces to. Adjacent tissues in the list will have spaces generated at their shared boundary.")
+    smoothness: Union[float, List[float]] = Field(default=[0.01, 0.01], title="Smoothness", description="Smoothness per tissue (0–1). Provide a single float applied to all tissues, or a list with one value per tissue.")
+
+    @model_validator(mode="after")
+    def _check_smoothness_length(self) -> "NeedleInterCellularSpacesParams":
+        if isinstance(self.smoothness, list):
+            if len(self.smoothness) != len(self.tissue):
+                raise ValueError(
+                    f"smoothness has {len(self.smoothness)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                    "lengths must match, or provide a single float applied to all tissues."
+                )
+        return self
 
 
 class NeedleAerenchymaParams(BaseParams):

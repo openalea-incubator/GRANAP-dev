@@ -224,28 +224,36 @@ class GeometryProcessor:
         """
         Finds the approximate center of the Maximum Inscribed Circle (Pole of Inaccessibility).
         """
+        cx, cy, _ = GeometryProcessor.get_inscribed_circle(polygon)
+        return cx, cy
+
+    @staticmethod
+    def get_inscribed_circle(polygon) -> Tuple[float, float, float]:
+        """
+        Return (cx, cy, radius) of the largest circle that fits inside *polygon*.
+
+        Uses the same binary-search erosion as get_chebyshev_center but also
+        exposes the inscribed-circle radius so callers can reason about available
+        space without running the search twice.
+        """
         try:
-            # Initial bounds for binary search
             min_x, min_y, max_x, max_y = polygon.bounds
             lb = 0.0
             ub = min(max_x - min_x, max_y - min_y) / 2.0
-            
-            # Binary search for the largest buffer distance that isn't empty
-            for _ in range(15):
+
+            for _ in range(20):
                 mid = (lb + ub) / 2.0
                 if polygon.buffer(-mid).is_empty:
                     ub = mid
                 else:
                     lb = mid
-            
-            # Get the centroid of the deepest valid erosion
+
             deepest = polygon.buffer(-lb * 0.99)
             if deepest.is_empty:
-                return polygon.centroid.x, polygon.centroid.y
-            else:
-                return deepest.centroid.x, deepest.centroid.y
-        except:
-            return polygon.centroid.x, polygon.centroid.y
+                return polygon.centroid.x, polygon.centroid.y, lb
+            return deepest.centroid.x, deepest.centroid.y, lb
+        except Exception:
+            return polygon.centroid.x, polygon.centroid.y, 0.0
 
     @staticmethod
     def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
@@ -343,6 +351,252 @@ class GeometryProcessor:
         return slices
     
     @staticmethod
+    def _front_chain_positions(r: float, n: int) -> List[np.ndarray]:
+        """
+        Compute centres of n equal circles of radius r using a greedy front-chain
+        algorithm (similar to the circlify / D3 circle-pack approach).
+
+        Each new circle is placed tangent to the adjacent pair in the current front
+        chain that minimises the resulting enclosing-circle radius.  The returned
+        centres are re-centred on their mean.
+        """
+        D = 2.0 * r  # distance between touching circle centres
+
+        if n == 1:
+            return [np.zeros(2)]
+        if n == 2:
+            return [np.array([-r, 0.0]), np.array([r, 0.0])]
+
+        cx_list = [-r, r]
+        cy_list = [0.0, 0.0]
+        # Circular doubly-linked list for the front chain
+        nxt = [1, 0]
+        prv = [1, 0]
+
+        def _place(a, b):
+            """Outer-tangent position for a new circle touching circles a and b."""
+            ax, ay = cx_list[a], cy_list[a]
+            bx, by = cx_list[b], cy_list[b]
+            dx, dy = bx - ax, by - ay
+            d = np.hypot(dx, dy)
+            if d < 1e-12 or d > 2 * D + 1e-9:
+                return None
+            theta = np.arctan2(dy, dx)
+            # Law of cosines: angle at a in triangle (a, b, new) with all sides = D
+            alpha = np.arccos(np.clip(d / (2 * D), -1.0, 1.0))
+            return ax + D * np.cos(theta + alpha), ay + D * np.sin(theta + alpha)
+
+        def _ok(px, py):
+            return all(np.hypot(px - cx_list[i], py - cy_list[i]) >= D - 1e-6
+                       for i in range(len(cx_list)))
+
+        for _ in range(2, n):
+            best_pos = None
+            best_R   = float('inf')
+            best_a   = 0
+
+            a = 0
+            for _step in range(len(cx_list) + 2):
+                b = nxt[a]
+                p = _place(a, b)
+                if p is not None and _ok(*p):
+                    R = max(
+                        max(np.hypot(cx_list[i], cy_list[i]) for i in range(len(cx_list))),
+                        np.hypot(p[0], p[1]),
+                    ) + r
+                    if R < best_R:
+                        best_R, best_pos, best_a = R, p, a
+                a = b
+                if a == 0:
+                    break
+
+            if best_pos is None:
+                # Fallback: spiral outward from the last placed circle
+                ang = np.arctan2(cy_list[-1], cx_list[-1]) if np.hypot(cx_list[-1], cy_list[-1]) > 1e-9 else 0.0
+                best_pos = (cx_list[-1] + D * np.cos(ang), cy_list[-1] + D * np.sin(ang))
+                best_a = len(cx_list) - 1
+
+            k = len(cx_list)
+            cx_list.append(best_pos[0])
+            cy_list.append(best_pos[1])
+            nxt.append(0)
+            prv.append(0)
+
+            # Insert k between best_a and its successor in the front chain
+            b = nxt[best_a]
+            nxt[best_a] = k;  prv[k] = best_a
+            nxt[k] = b;       prv[b] = k
+
+            # Prune: if the new circle and nxt[b] are already touching, b is
+            # enclosed and can be removed from the front chain.
+            c_ = nxt[b]
+            if c_ != best_a and np.hypot(cx_list[k] - cx_list[c_], cy_list[k] - cy_list[c_]) < D + 1e-6:
+                nxt[k] = c_
+                prv[c_] = k
+
+        # Re-centre on mean
+        mx = sum(cx_list) / len(cx_list)
+        my = sum(cy_list) / len(cy_list)
+        return [np.array([x - mx, y - my]) for x, y in zip(cx_list, cy_list)]
+
+    @staticmethod
+    def _front_chain_positions_variable(radii: List[float]) -> List[np.ndarray]:
+        """
+        Compute centres of n circles with potentially different radii using a greedy
+        front-chain algorithm.  Circle k is placed tangent to the pair (a, b) on the
+        current front that minimises the resulting enclosing-circle radius.
+
+        The returned centres are re-centred on their mean position.
+        """
+        n = len(radii)
+        if n == 1:
+            return [np.zeros(2)]
+
+        r0, r1 = radii[0], radii[1]
+        # Place circle 0 at x = -r0 and circle 1 at x = r1 so they are tangent at the origin
+        cx_list = [-r0, r1]
+        cy_list = [0.0, 0.0]
+        nxt = [1, 0]
+        prv = [1, 0]
+
+        def _place(a, b, r_new):
+            """Outer-tangent position for a circle of radius r_new touching circles a and b."""
+            ax, ay = cx_list[a], cy_list[a]
+            bx, by = cx_list[b], cy_list[b]
+            dx, dy = bx - ax, by - ay
+            d = np.hypot(dx, dy)
+            da = radii[a] + r_new   # required distance from centre a to new centre
+            db = radii[b] + r_new   # required distance from centre b to new centre
+            if d < 1e-12 or d > da + db + 1e-9:
+                return None
+            # Law of cosines: cos(alpha) at vertex a in triangle (a, new, b)
+            cos_alpha = np.clip((d * d + da * da - db * db) / (2.0 * d * da), -1.0, 1.0)
+            alpha = np.arccos(cos_alpha)
+            theta = np.arctan2(dy, dx)
+            return ax + da * np.cos(theta + alpha), ay + da * np.sin(theta + alpha)
+
+        def _ok(px, py, r_new):
+            return all(
+                np.hypot(px - cx_list[i], py - cy_list[i]) >= radii[i] + r_new - 1e-6
+                for i in range(len(cx_list))
+            )
+
+        for k_new in range(2, n):
+            r_new = radii[k_new]
+            best_pos = None
+            best_R   = float('inf')
+            best_a   = 0
+
+            a = 0
+            for _step in range(len(cx_list) + 2):
+                b = nxt[a]
+                p = _place(a, b, r_new)
+                if p is not None and _ok(*p, r_new):
+                    R = max(
+                        max(np.hypot(cx_list[i], cy_list[i]) + radii[i] for i in range(len(cx_list))),
+                        np.hypot(p[0], p[1]) + r_new,
+                    )
+                    if R < best_R:
+                        best_R, best_pos, best_a = R, p, a
+                a = b
+                if a == 0:
+                    break
+
+            if best_pos is None:
+                # Fallback: place the new circle outward from the last placed one
+                ang = np.arctan2(cy_list[-1], cx_list[-1]) if np.hypot(cx_list[-1], cy_list[-1]) > 1e-9 else 0.0
+                d_fallback = radii[len(cx_list) - 1] + r_new
+                best_pos = (cx_list[-1] + d_fallback * np.cos(ang), cy_list[-1] + d_fallback * np.sin(ang))
+                best_a = len(cx_list) - 1
+
+            k = len(cx_list)
+            cx_list.append(best_pos[0])
+            cy_list.append(best_pos[1])
+            nxt.append(0)
+            prv.append(0)
+
+            b = nxt[best_a]
+            nxt[best_a] = k;  prv[k] = best_a
+            nxt[k] = b;       prv[b] = k
+
+            c_ = nxt[b]
+            if c_ != best_a and np.hypot(cx_list[k] - cx_list[c_], cy_list[k] - cy_list[c_]) < radii[k] + radii[c_] + 1e-6:
+                nxt[k] = c_
+                prv[c_] = k
+
+        mx = sum(cx_list) / len(cx_list)
+        my = sum(cy_list) / len(cy_list)
+        return [np.array([x - mx, y - my]) for x, y in zip(cx_list, cy_list)]
+
+    @staticmethod
+    def pack_circles_variable(cell_diameters: List[float],
+                              n_points: int = 64) -> Tuple[List[Polygon], Polygon]:
+        """
+        Pack circles with individually sampled diameters using the variable-radius
+        front-chain algorithm.
+
+        Args:
+            cell_diameters: Diameter of each individual circle (one value per cell)
+            n_points: Number of polygon vertices per circle
+
+        Returns:
+            (small_circles, parent_circle)
+            - small_circles: list of Polygon, one per cell, centred at origin
+            - parent_circle: Polygon of the minimum enclosing circle (at origin)
+        """
+        radii = [d / 2.0 for d in cell_diameters]
+        positions = GeometryProcessor._front_chain_positions_variable(radii)
+
+        parent_r = max(np.hypot(p[0], p[1]) + r for p, r in zip(positions, radii))
+
+        theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
+        ux, uy = np.cos(theta), np.sin(theta)
+
+        small_circles = [
+            sp.Polygon(np.column_stack((p[0] + r * ux, p[1] + r * uy)))
+            for p, r in zip(positions, radii)
+        ]
+        parent_circle = sp.Polygon(np.column_stack((parent_r * ux, parent_r * uy)))
+
+        return small_circles, parent_circle
+
+    @staticmethod
+    def pack_circles(cell_diameter: float, n_cells: int,
+                     n_points: int = 64) -> Tuple[List[Polygon], Polygon]:
+        """
+        Pack n_cells equal circles of cell_diameter using a front-chain algorithm.
+
+        The parent (enclosing) circle size is derived from the packing — it is the
+        minimum circle that contains all placed cells.  All geometry is centred at
+        the origin; translate to the desired bundle position after calling.
+
+        Args:
+            cell_diameter: Diameter of each individual circle to pack
+            n_cells: Number of circles
+            n_points: Number of polygon vertices per circle
+
+        Returns:
+            (small_circles, parent_circle)
+            - small_circles: list of Polygon, one per cell, centred at origin
+            - parent_circle: Polygon of the minimum enclosing circle (at origin)
+        """
+        r = cell_diameter / 2.0
+        positions = GeometryProcessor._front_chain_positions(r, n_cells)
+
+        parent_r = max(np.hypot(p[0], p[1]) for p in positions) + r
+
+        theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
+        ux, uy = np.cos(theta), np.sin(theta)
+
+        small_circles = [
+            sp.Polygon(np.column_stack((p[0] + r * ux, p[1] + r * uy)))
+            for p in positions
+        ]
+        parent_circle = sp.Polygon(np.column_stack((parent_r * ux, parent_r * uy)))
+
+        return small_circles, parent_circle
+
+    @staticmethod
     def two_ellipses(polygon, rx, ry):
         # vertical splitting line (make it long enough to fully cross the polygon)
         center = polygon.centroid
@@ -383,7 +637,4 @@ class GeometryProcessor:
         ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
     
         return ellipses
-
-
-
 
