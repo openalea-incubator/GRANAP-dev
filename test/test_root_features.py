@@ -10,7 +10,7 @@ sys.path.append(os.path.abspath('..'))
 from granap.root_class import RootAnatomy
 
 t_start = time.time()
-# Create a needle anatomy
+# Create a root anatomy
 root = RootAnatomy()
 root.update_params("cortex", "n_layers", 5)
 root.update_params("inter_cellular_spaces", "tissue", "cortex")
