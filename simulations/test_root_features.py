@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import time
 
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
@@ -36,7 +37,10 @@ for aer in asked_proportions:
     root.update_params("inter_cellular_space", "aerenchyma_type", 1)
     root.update_params("inter_cellular_space", "cortex", aer)
     root.update_params("inter_cellular_space", "n_files", int(np.ceil(10*aer)*2))
+    time_start = time.time()
     root.generate_cells()
+    time_end = time.time()
+    print("Time to generate cells:", time_end - time_start)
     cortex_cells = root.all_cells.get_cells_by_type('cortex')
     air_spaces = root.all_cells.get_cells_by_type('air space')
     total_cortex_area = sum(c.polygon.area for c in cortex_cells if c.polygon is not None)
@@ -98,23 +102,4 @@ plt.ylabel("k_root")
 plt.title("Root hydraulic conductivity")
 plt.show()
 
-os.remove("test_ganache_type1_0.1.xml")
-os.remove("test_ganache_type2_0.1.xml")
-os.remove("test_ganache_type1_0.2.xml")
-os.remove("test_ganache_type2_0.2.xml")
-os.remove("test_ganache_type1_0.3.xml")
-os.remove("test_ganache_type2_0.3.xml")
-os.remove("test_ganache_type1_0.4.xml")
-os.remove("test_ganache_type2_0.4.xml")
-os.remove("test_ganache_type1_0.5.xml")
-os.remove("test_ganache_type2_0.5.xml")
-os.remove("test_ganache_type1_0.6.xml")
-os.remove("test_ganache_type2_0.6.xml")
-os.remove("test_ganache_type1_0.7.xml")
-os.remove("test_ganache_type2_0.7.xml")
-os.remove("test_ganache_type1_0.8.xml")
-os.remove("test_ganache_type2_0.8.xml")
-os.remove("test_ganache_type1_0.9.xml")
-os.remove("test_ganache_type2_0.9.xml")
-os.remove("test_ganache_type1_1.xml")
-os.remove("test_ganache_type2_1.xml")
+

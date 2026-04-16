@@ -52,9 +52,13 @@ class AnatomyWriter:
     def write_to_xml(self, path: str):
         """
         Write the root anatomy as an XML file matching GRANAR format.
+
+        Cell ordering and wall IDs are derived from ``self.organ.generate_cells()``
+        using the same GeoDataFrame index as ``NetworkExporter.export``, so that
+        XML cell id attributes map 1-to-1 to the GRANAP graph cell node ids.
         """
         from granap.generate_cell import CellGenerator
-        
+
         cellgroups = {
             "exodermis": 1, "epidermis": 2, "endodermis": 3, "passage_cell": 3, "cortex": 4,
             "stele": 5, "xylem": 13, "pericycle": 16, "companion_cell": 12, "phloem": 11,
@@ -62,22 +66,31 @@ class AnatomyWriter:
             "protoxylem": 13, "air space": 4, "stele": 5
         }
 
-        valid_cells = [c for c in self.cells if c.polygon is not None]
-        polys = [c.polygon for c in valid_cells]
-        cell_ids = list(range(len(valid_cells)))
-        
+        # Use the same GeoDataFrame (and same index) as NetworkExporter.export().
+        # IMPORTANT: apply the IDENTICAL valid-geometry filter so that both paths
+        # call _build_topology with the exact same polygon set → same KD-tree
+        # snap_tol, same clusters, same canonical junction coordinates.
+        cells_gdf = self.organ.generate_cells()
+        valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
+            lambda g: g is not None and not g.is_empty
+        )
+        valid_gdf = cells_gdf[valid_mask]
+
+        polys    = list(valid_gdf["geometry"])
+        cell_ids = list(valid_gdf.index)
+
         cell_vkeys, _, _, junction_set = CellGenerator._build_topology(polys, cell_ids)
 
         wall_registry = {}
-        next_wall_id = 0
-        cell_walls = {i: [] for i in cell_ids}
+        next_wall_id  = 0
+        cell_walls    = {idx: [] for idx in cell_ids}
 
         for row_idx, vkeys in cell_vkeys.items():
             n = len(vkeys)
             junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
 
             if len(junc_positions) < 2:
-                # no junctions -> single wall loop
+                # no junctions → single wall loop
                 wall_key = tuple(sorted(vkeys))
                 if wall_key not in wall_registry:
                     wall_registry[wall_key] = {"id": next_wall_id, "points": list(vkeys) + [vkeys[0]]}
@@ -87,7 +100,7 @@ class AnatomyWriter:
 
             for jp in range(len(junc_positions)):
                 start_idx = junc_positions[jp]
-                end_idx = junc_positions[(jp + 1) % len(junc_positions)]
+                end_idx   = junc_positions[(jp + 1) % len(junc_positions)]
 
                 segment = []
                 i = start_idx
@@ -101,13 +114,13 @@ class AnatomyWriter:
                     continue
 
                 junc_start = segment[0]
-                junc_end = segment[-1]
-                wall_key = tuple(sorted((junc_start, junc_end)))
+                junc_end   = segment[-1]
+                wall_key   = tuple(sorted((junc_start, junc_end)))
 
                 if wall_key not in wall_registry:
                     wall_registry[wall_key] = {"id": next_wall_id, "points": segment}
                     next_wall_id += 1
-                    
+
                 cell_walls[row_idx].append(wall_registry[wall_key]["id"])
 
         xml_lines = [
@@ -118,17 +131,16 @@ class AnatomyWriter:
             '\t\t\t<parameter io="0" name="python_export" type="default" value="1"/>',
             '\t\t</parameters>',
             '\t</metadata>',
-            f'\t<cells count="{len(valid_cells)}">'
+            f'\t<cells count="{len(valid_gdf)}">'
         ]
 
-        for i, cell in enumerate(valid_cells):
-            group_id = cellgroups.get(cell.type, 0)
-            xml_lines.append(f'\t\t<cell id="{i}" group="{group_id}" truncated="false" >')
+        # Write cells using GDF index as id — matches graph node numbering
+        for row_idx, row in valid_gdf.iterrows():
+            group_id = cellgroups.get(row.get("type", ""), 0)
+            xml_lines.append(f'\t\t<cell id="{row_idx}" group="{group_id}" truncated="false" >')
             xml_lines.append(f'\t\t\t<walls>')
-            
-            for wid in cell_walls[i]:
+            for wid in cell_walls[row_idx]:
                 xml_lines.append(f'\t\t\t\t<wall id="{wid}"/>')
-            
             xml_lines.append(f'\t\t\t</walls>')
             xml_lines.append(f'\t\t</cell>')
 
@@ -144,7 +156,7 @@ class AnatomyWriter:
             xml_lines.append(f'\t\t\t</points>')
             xml_lines.append(f'\t\t</wall>')
         xml_lines.append('\t</walls>')
-        
+
         xml_lines.append('\t<groups>')
         xml_lines.append('\t\t<cellgroups>')
         for cname, cid in cellgroups.items():
@@ -539,7 +551,7 @@ class NetworkExporter:
     def __init__(self, organ: Organ):
         self.organ = organ
 
-    def export(self, network: AbstractNetwork) -> None:
+    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS) -> None:
         """
         Populate the provided network graph from the cell GeoDataFrame.
 
@@ -554,9 +566,23 @@ class NetworkExporter:
         from granap.generate_cell import CellGenerator
         cells_gdf = self.organ.generate_cells()
 
+        # Filter to cells with valid (non-null, non-empty) geometry — must match
+        # the same filter used in write_to_xml so that both paths call
+        # _build_topology with exactly the same polygon set, guaranteeing
+        # identical KD-tree snapping results and canonical junction coordinates.
+        valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
+            lambda g: g is not None and not g.is_empty
+        )
+        cells_gdf = cells_gdf[valid_mask]
+
         # Phases 0–2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
+
+        def get_thickness(c_type: str) -> float:
+            if isinstance(cell_wall_thickness, dict):
+                return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
+            return float(cell_wall_thickness)
 
         cell_vkeys, _, edge_to_cells, junction_set = (
             CellGenerator._build_topology(polys, cell_ids)
@@ -593,6 +619,7 @@ class NetworkExporter:
                         "junc_end": vkeys[0],
                         "midpoint": (mid_x, mid_y),
                         "length": length,
+                        "wall_thickness": 0.0,
                         "cells": [],
                     }
                     next_wall_id += 1
@@ -634,12 +661,26 @@ class NetworkExporter:
                         "junc_end": junc_end,
                         "midpoint": (mid_x, mid_y),
                         "length": length,
+                        "wall_thickness": 0.0,
                         "cells": [],
                     }
                     next_wall_id += 1
 
                 if row_idx not in wall_registry[wall_key]["cells"]:
                     wall_registry[wall_key]["cells"].append(row_idx)
+
+        # Compute true wall_thickness based on adjacent cells
+        for wd in wall_registry.values():
+            w_thick = 0.0
+            for r in wd["cells"]:
+                row = cells_gdf.loc[r]
+                c_type = row.get("type", "")
+                w_thick += get_thickness(c_type)
+            
+            if len(wd["cells"]) == 1:
+                w_thick += get_thickness("outerwall")
+                
+            wd["wall_thickness"] = w_thick
 
         # Phase 4 — assign MECHA-compatible node indices
         network.n_walls = len(wall_registry)
@@ -669,6 +710,7 @@ class NetworkExporter:
                 type="apo",
                 position=wd["midpoint"],
                 length=wd["length"],
+                wall_thickness=wd["wall_thickness"],
             )
 
         # Junction nodes
@@ -709,6 +751,7 @@ class NetworkExporter:
             wall_id = wd["id"]
             cell_nodes = network._wall_to_cells[wall_id]
             wall_length = wd["length"]
+            wall_thickness = wd["wall_thickness"]
 
             # Transmembrane: cell ↔ wall
             for cn in cell_nodes:
@@ -725,6 +768,7 @@ class NetworkExporter:
                     length=wall_length,
                     dist=dist_wall_cell,
                     d_vec=d_vec,
+                    wall_thickness=wall_thickness,
                 )
             
             # each junction connected to the wall node
@@ -744,6 +788,7 @@ class NetworkExporter:
                         lateral_distance = lateral_distance,
                         d_vec = d_vec,
                         distnode_wall_cell = dist_wall_cell,
+                        wall_thickness=wall_thickness,
                 )
             
             # Symplastic: cell ↔ cell
