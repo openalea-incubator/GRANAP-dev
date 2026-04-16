@@ -521,7 +521,7 @@ class RootAnatomy(Organ):
 
             for pt in seed_coords[1:]:  # seed_coords[0] duplicates the last point
                 new_cell = Cell(
-                    type="xylem parenchyma",
+                    type="stele",
                     x=pt[0],
                     y=pt[1],
                     diameter=cell_diameter,
@@ -718,7 +718,7 @@ class RootAnatomy(Organ):
 
         print(f"Targeted aerenchyma prop: {(target_aerenchyma_area / (total_tissue_area + total_air_area)):.3f}")
 
-        target_per_quadrant = (target_aerenchyma_area - total_air_area) / ((n_files) ** 1.12 + 1)
+        target_per_quadrant = (target_aerenchyma_area - total_air_area) / n_files # ((n_files) ** 1.12 + 1)
 
         quadrant_buckets = [[] for _ in range(n_files)]
         for c in candidates:

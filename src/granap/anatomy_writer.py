@@ -173,6 +173,79 @@ class AnatomyWriter:
             f.write("\n".join(xml_lines))
         print(f"XML saved to {path}")
 
+    def write_xml_geometry(self, path: str, barrier: List= [1,3]):
+        """
+        write the MECHA geometry files (retro-compatible)
+
+        """
+
+        cells_gdf = self.organ.generate_cells()
+        valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
+            lambda g: g is not None and not g.is_empty
+        )
+        valid_gdf = cells_gdf[valid_mask]
+
+        passage_cells = valid_gdf[valid_gdf["type"] == "passage_cell"].index.tolist()
+        aerenchyma_cells = valid_gdf[valid_gdf["type"].isin(["aerenchyma", "air space", "pore"])].index.tolist()
+
+        xml_lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<param>',
+            '\t<!-- Plant type -->',
+            '\t<Plant value="Root"/>',
+            '\t<!-- Image path and properties -->',
+            '\t<path value=""/>',
+            '\t<im_scale value="1000"/>',
+            '\t<Maturityrange>'
+        ]
+        
+        for b in barrier:
+            xml_lines.append(f'\t\t<Maturity Barrier="{b}" height="200" Nlayers="1"/>')
+            
+        xml_lines.extend([
+            '\t</Maturityrange>',
+            '\t<Printrange>',
+            '\t\t<Print_layer value="0"/>',
+            '\t</Printrange>',
+            '\t<Xwalls value="1"/>',
+            '\t<PileUp value="0"/>',
+            '\t<passage_cell_range>'
+        ])
+
+        if not passage_cells:
+            xml_lines.append('\t\t<passage_cell id="-1"/>')
+        else:
+            for pid in passage_cells:
+                xml_lines.append(f'\t\t<passage_cell id="{pid}"/>')
+
+        xml_lines.append('\t</passage_cell_range>')
+        xml_lines.append('\t<aerenchyma_range>')
+
+        for aid in aerenchyma_cells:
+            xml_lines.append(f'\t\t<aerenchyma id="{aid}"/>')
+        
+        xml_lines.extend([
+            '\t</aerenchyma_range>',
+            '\t<InterC_perim_search value="0"/>',
+            '\t<InterC_perim1 value="0"/>',
+            '\t<InterC_perim2 value="0"/>',
+            '\t<InterC_perim3 value="0"/>',
+            '\t<InterC_perim4 value="0"/>',
+            '\t<InterC_perim5 value="0"/>',
+            '\t<kInterC value="0.0"/>',
+            '\t<cell_per_layer cortex="nan" stele="nan"/>',
+            '\t<diffusion_length cortex="nan" stele="nan"/>',
+            '\t<thickness value="1.5"/>',
+            '\t<PD_section value="7.47E-5"/>',
+            '\t<Xylem_pieces flag="0"/>',
+            '</param>'
+        ])
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(xml_lines) + "\n")
+        
+        print(f"Geometry XML saved to {path}")
+
     def write_to_obj(self, path: str, membrane: bool = True, wall: bool = True, shrink_factor: float = 0.001):
         """
         Write a .obj from the generated cross section geometry.
