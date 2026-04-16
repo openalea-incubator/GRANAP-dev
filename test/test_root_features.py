@@ -12,12 +12,10 @@ from granap.root_class import RootAnatomy
 t_start = time.time()
 # Create a needle anatomy
 root = RootAnatomy()
-root.update_params(param_name="aerenchyma", attribute="aerenchyma_proportion", value = 0.8)
-root.update_params(param_name="aerenchyma", attribute="n_files", value = 20)
-root.update_params(param_name="cortex", attribute="n_layers", value = 15)
-root.update_params(param_name="endodermis", attribute="n_layers", value = 10)
-print(root.params)
-
+root.update_params("cortex", "n_layers", 10)
+root.update_params("inter_cellular_spaces", "tissue", "cortex")
+root.update_params("inter_cellular_spaces", "smoothness", 0.05)
+# root.plot_layers(show=True, title=f"Root Layers")
 
 root.generate_cells()
 t_end = time.time()

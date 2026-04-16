@@ -104,6 +104,13 @@ class Organ(AbstractNetwork, ABC):
         for p in self.params:
             if p["name"] == param_name:
                 p[attribute] = value
+                # Sync the corresponding Layer object in layer_manager if one exists
+                layer = self.layer_manager.get_layer(param_name)
+                if layer is not None:
+                    if hasattr(layer, attribute):
+                        setattr(layer, attribute, value)
+                    else:
+                        layer.additional_params[attribute] = value
                 self._invalidate_geometry()
                 return
         raise ValueError(f"Parameter '{param_name}' not found in params.")
