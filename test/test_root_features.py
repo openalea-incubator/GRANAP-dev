@@ -11,7 +11,7 @@ from granap.visualization import plot_layers_simple, plot_section
 
 # Create a needle anatomy
 root = RootAnatomy()
-
+root.update_params("cortex", "n_layers", 10)
 root.update_params("inter_cellular_spaces", "tissue", "cortex")
 root.update_params("inter_cellular_spaces", "smoothness", 0.05)
 # root.plot_layers(show=True, title=f"Root Layers")
