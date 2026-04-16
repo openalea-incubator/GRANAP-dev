@@ -4,13 +4,12 @@ from granap.geometry_collection import GeometryProcessor
 
 class Cell:
 
-    def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0, 
+    def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
                 angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None):
 
         self.x = x
         self.y = y
-        self.point = Point(x, y)
         self.diameter = diameter
         self.width = width if width != 0 else diameter
         self.height = height if height != 0 else diameter
@@ -23,7 +22,10 @@ class Cell:
         self.area = area if area != None else np.pi * (diameter/2)**2
         self.polygon = polygon if polygon != None else None
         self.axis = axis if axis != None else None
-        
+
+    @property
+    def point(self):
+        return Point(self.x, self.y)
 
     def jitter(self, shift: float = 0.0001):
         """Jitter the cell position."""
@@ -32,7 +34,6 @@ class Cell:
             self.y += np.random.uniform(-shift, shift)*self.diameter
             self.angle = np.arctan2(self.y, self.x)
             self.radius = np.sqrt(self.x**2 + self.y**2)
-            self.point = Point(self.x, self.y)
 
     def cell_to_dict(self):
         return {"type": self.type, "x": self.x, "y": self.y, 

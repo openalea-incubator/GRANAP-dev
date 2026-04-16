@@ -77,30 +77,25 @@ class CellGenerator:
         
         major_axis = cell_height
         minor_axis = cell_width if cell_width != 0 else cell_height
-        
+
         n_points = 15 if cell_height != cell_width else 10
-        
-        cells_border = []
-        for i, cell_coord in enumerate(cell_coords):
-            if i == len(cell_coords) - 1:
-                next_cell_coord = cell_coords[0]
-            else:
-                next_cell_coord = cell_coords[i + 1]
-            
-            prev_cell_coord = cell_coords[i - 1]
-            
-            axis = np.arctan2(
-                next_cell_coord[1] - prev_cell_coord[1],
-                next_cell_coord[0] - prev_cell_coord[0]
+
+        # Vectorised orientation: next/prev neighbours via array roll
+        next_coords = np.roll(cell_coords, -1, axis=0)
+        prev_coords = np.roll(cell_coords,  1, axis=0)
+        axes = np.arctan2(
+            next_coords[:, 1] - prev_coords[:, 1],
+            next_coords[:, 0] - prev_coords[:, 0],
+        )
+
+        cells_border = [
+            GeometryProcessor.draw_ellipse(
+                cell_coord, axis,
+                major_axis / 2, minor_axis / 2,
+                n_points=n_points,
             )
-            
-            cells_border.append(
-                GeometryProcessor.draw_ellipse(
-                    cell_coord, axis, 
-                    major_axis / 2, minor_axis / 2, 
-                    n_points=n_points
-                )
-            )
+            for cell_coord, axis in zip(cell_coords, axes)
+        ]
         return cells_border
     
     @staticmethod
@@ -128,23 +123,17 @@ class CellGenerator:
                 layer.get("shift", 0)
             )
             
-            if layer["cell_width"] != 0 and layer["cell_width"] < layer["cell_diameter"]:
+            if layer["cell_width"] != 0:
                 layer_cell_borders = CellGenerator.cell_border(
-                    cells_coords, 
-                    layer["cell_width"] * 0.7, 
-                    layer["cell_diameter"] * 0.7
-                )
-            elif layer["cell_width"] != 0 and layer["cell_width"] > layer["cell_diameter"]:
-                layer_cell_borders = CellGenerator.cell_border(
-                    cells_coords, 
-                    layer["cell_width"] * 0.7, 
-                    layer["cell_diameter"] * 0.7
+                    cells_coords,
+                    layer["cell_width"] * 0.7,
+                    layer["cell_diameter"] * 0.7,
                 )
             else:
                 layer_cell_borders = CellGenerator.cell_border(
-                    cells_coords, 
-                    layer["cell_diameter"] * 0.7, 
-                    layer["cell_width"] * 0.7
+                    cells_coords,
+                    layer["cell_diameter"] * 0.7,
+                    layer["cell_width"] * 0.7,
                 )
             
             for i, cell_coord in enumerate(cells_coords[1:]):
@@ -205,6 +194,7 @@ class CellGenerator:
         higher-priority footprint are removed.
         """
         from shapely.geometry import MultiPoint
+        from shapely.strtree import STRtree
 
         if not all_cells.cells:
             return all_cells
@@ -244,20 +234,30 @@ class CellGenerator:
         )
 
         # --- remove overlapping lower-priority cells --------------------
+        # Build STRtree over all group footprints so we only run the
+        # expensive contains() check for geometrically nearby pairs.
+        valid_groups = [m for m in sorted_groups if m["poly"] is not None]
+        if not valid_groups:
+            return all_cells
+
+        polys = [m["poly"] for m in valid_groups]
+        tree = STRtree(polys)
+
         ids_to_remove: set = set()
-        for i, high in enumerate(sorted_groups):
-            if high["poly"] is None:
-                continue
-            for low in sorted_groups[i + 1:]:
-                if low["poly"] is None:
+        for i, high in enumerate(valid_groups):
+            high_poly = polys[i]
+            # query returns indices whose bounding boxes overlap high_poly
+            for j in tree.query(high_poly):
+                if j <= i:          # only lower-priority groups
                     continue
-                if not high["poly"].intersects(low["poly"]):
+                low = valid_groups[j]
+                if not high_poly.intersects(polys[j]):
                     continue
                 for idx in low["indices"]:
                     if idx in ids_to_remove:
                         continue
                     cell = all_cells.cells[idx]
-                    if high["poly"].contains(Point(cell.x, cell.y)):
+                    if high_poly.contains(Point(cell.x, cell.y)):
                         ids_to_remove.add(idx)
 
         if ids_to_remove:

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 from scipy.sparse import lil_matrix
-
+import time
 from granap.layer_class import Layer
 from granap.layer_manager import LayerManager
 from granap.geometry_collection import GeometryProcessor
@@ -224,9 +224,13 @@ class Organ(AbstractNetwork, ABC):
             GeoDataFrame with cell geometries
         """
         if self._cells_gdf is None:
+            t_start = time.time()   
             layers_polygons = self.generate_layer_polygons()
+            t_end = time.time()
+            print("Time to generate layer polygons:", t_end - t_start)
             center = layers_polygons[0]["polygon"].centroid
-            
+
+            t_start = time.time()
             # Clear existing cells in layers
             for layer in self.layer_manager.get_layers():
                 layer.cells = []
@@ -234,22 +238,38 @@ class Organ(AbstractNetwork, ABC):
             self.all_cells = CellGenerator.generate_cells_info(
                 layers_polygons, center
             )
+            t_end = time.time()
+            print("Time to generate cells info:", t_end - t_start)
 
+            t_start = time.time()
             # add vascular tissue
             self.allocate_vascular_tissue(layers_polygons)
 
             # add organ specific tissues
             self._organ_specific_tissues()
+            t_end = time.time()
+            print("Time to add vascular and organ specific tissues:", t_end - t_start)
 
+            t_start = time.time()
             vor = CellGenerator.voronoi_diagram(self.all_cells)
-            
+            t_end = time.time()
+            print("Time to generate voronoi diagram:", t_end - t_start)
+
+            t_start = time.time()
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
             grouped_cells = CellGenerator.simplify_cells(grouped_cells)
             # repopulate all_cells with the grouped cells
             self.all_cells = CellManager()
             self.all_cells.cells = grouped_cells
+            t_end = time.time()
+            print("Time to process voronoi groups and simplify cells:", t_end - t_start)
+
+            t_start = time.time()
             self.add_intercellular_spaces()
+            t_end = time.time()
+            print("Time to add intercellular spaces:", t_end - t_start)
             
+            t_start = time.time()
             for cell in self.all_cells.cells:
                 # Find the layer name from layers_polygons using id_layer
                 # id_layer is 0-indexed index of layers_polygons list
@@ -259,14 +279,23 @@ class Organ(AbstractNetwork, ABC):
                         layer = self.get_layer(layer_name)
                         if layer:
                             layer.cells.append(cell)
+            t_end = time.time()
+            print("Time to populate layers with cells:", t_end - t_start)
 
+            t_start = time.time()
             self.all_cells.recalculate_cell_properties()
+            t_end = time.time()
+            print("Time to recalculate cell properties:", t_end - t_start)
+            
+            t_start = time.time()
             # Convert to GeoDataFrame
             cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
             for i, c in enumerate(self.all_cells.cells):
                 cell_dicts[i]['geometry'] = c.polygon
                 
             self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
+            t_end = time.time()
+            print("Time to convert to GeoDataFrame:", t_end - t_start)
         
         return self._cells_gdf
     
