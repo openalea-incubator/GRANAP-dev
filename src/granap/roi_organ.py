@@ -16,17 +16,19 @@ class RoiOrgan(Organ):
     An Organ class generated from a folder of ImageJ ROI files.
     Bypasses procedural generation to directly populate the Cell network.
     """
-    def __init__(self, folder_path: str, mm_per_pixel: float = 0.001, **kwargs):
+    def __init__(self, folder_path: str, mm_per_pixel: float = 0.001, smooth_factor: float = 0.5, **kwargs):
         """
         Initialize the RoiOrgan anatomy structure.
         
         Args:
             folder_path: Path to the directory containing .roi files.
             mm_per_pixel: Scaling factor to convert ROI pixel coordinates to mm.
+            smooth_factor: Factor to smooth the ROI polygons.
         """
         super().__init__(**kwargs)
         self.folder_path = folder_path
         self.mm_per_pixel = mm_per_pixel
+        self.smooth_factor: float = smooth_factor
         # Immediately parse the folder to set up cells
         self._load_rois()
 
@@ -66,7 +68,7 @@ class RoiOrgan(Organ):
             # Scale coordinates and close the polygon loop
             scaled_coords = [(pt[0] * self.mm_per_pixel, pt[1] * self.mm_per_pixel) for pt in coords]
             scaled_coords.append(scaled_coords[0])  # Close the loop
-            smooth_coords = GeometryProcessor.smoothing_polygon(scaled_coords, 0.5)
+            smooth_coords = GeometryProcessor.smoothing_polygon(scaled_coords, smooth_factor=self.smooth_factor)
 
             poly = Polygon(smooth_coords)
             

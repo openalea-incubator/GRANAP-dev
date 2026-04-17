@@ -22,8 +22,9 @@ def test_manual_roi_loading():
     Update the folder_path to point to a local directory with .roi files.
     """
     # ====== CONFIGURE YOUR PATH HERE ======
-    folder_path = "test/inputs/Hypocotyl_RoiSet/"  
+    folder_path = "test/inputs/Pavement_RoiSet/"  
     mm_per_pixel = 0.00273
+    smooth_factor = 0.05
     # ======================================
     
     if folder_path == "path/to/rois" or not os.path.exists(folder_path):
@@ -31,7 +32,7 @@ def test_manual_roi_loading():
         return
 
     print(f"Loading Organ from ROIs in: {folder_path}")
-    organ = RoiOrgan(folder_path=folder_path, mm_per_pixel=mm_per_pixel)
+    organ = RoiOrgan(folder_path=folder_path, mm_per_pixel=mm_per_pixel, smooth_factor=smooth_factor)
     organ.plot_cells()
     
     # 1. Check generated GeoDataFrame

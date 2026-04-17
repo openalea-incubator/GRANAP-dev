@@ -477,6 +477,11 @@ class Organ(AbstractNetwork, ABC):
         """Write anatomy cross section as .xml file."""
         from granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_xml(path, **kwargs)
+
+    def write_xml_geometry(self, path: str, **kwargs):
+        """Write anatomy cross section as .xml file for MECHA."""
+        from granap.anatomy_writer import AnatomyWriter
+        AnatomyWriter(self).write_xml_geometry(path, **kwargs)
         
     def write_to_obj(self, path: str, **kwargs):
         """Write anatomy cross section as .obj file."""
