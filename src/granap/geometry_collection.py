@@ -144,8 +144,13 @@ class GeometryProcessor:
         polygon_buffered = polygon.buffer(distance, resolution=16)
         
         if smooth_factor > 0:
-            x, y = np.array(polygon_buffered.exterior.coords.xy)
-            coords = np.column_stack((x, y))
+            if hasattr(polygon_buffered, 'exterior'):
+                x, y = np.array(polygon_buffered.exterior.coords.xy)
+                coords = np.column_stack((x, y))
+            elif hasattr(polygon_buffered, 'geoms'):
+                coords = np.array(polygon_buffered.geoms[0].exterior.coords.xy)
+            else:
+                coords = np.array(polygon_buffered.exterior.coords.xy)
             if coords.size == 0:
                 return polygon_buffered
             else:
