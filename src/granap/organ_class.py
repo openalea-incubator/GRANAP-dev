@@ -432,7 +432,8 @@ class Organ(AbstractNetwork, ABC):
         cells_gdf.plot(
             ax=ax,
             column='type',
-            cmap='viridis',
+            categorical=True,
+            cmap='tab20',
             edgecolor='black',
             linewidth=0.5,
             alpha=0.5,

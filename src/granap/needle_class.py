@@ -202,34 +202,44 @@ class NeedleAnatomy(Organ):
         central_layers = []
         space_increment = self.central_cylinder_params["cell_diameter"] / 2
         transfusion_layers_remaining = self.transfusion_params["n_layers"]
-        
+
         tt_diameter = self.transfusion_params["tracheids_diameter"]
         tp_diameter = self.transfusion_params["parenchyma_diameter"]
         parenchyma_diameter = self.central_cylinder_params["cell_diameter"]
-        
+        transfusion_type = self.transfusion_params.get("transfusion_type", False)
+        tt_ratio = self.transfusion_params.get("transfusion_tracheids_ratio", 0.5)
+        p_tt = tt_ratio / (1.0 + tt_ratio) if tt_ratio > 0 else 0.0
+
         i_layer = len(params)
-        
+
         while current_polygon.area > (parenchyma_diameter / 2)**2 * np.pi:
             if transfusion_layers_remaining > 0:
-                # Transfusion tissue
-                avg_diameter = (tp_diameter + tt_diameter) / 2 
+                avg_diameter = (tp_diameter + tt_diameter) / 2
                 transfusion_layers_remaining -= 1
-                
+
                 current_polygon = GeometryProcessor.buffer_polygon(
                     current_polygon,
                     -space_increment - avg_diameter / 2,
                     smooth_factor=0.6
                 )
-                
+
                 space_increment = avg_diameter / 2
-                
-                central_layers.append({
+
+                layer_dict = {
                     "name": "transfusion",
                     "polygon": current_polygon,
                     "cell_diameter": avg_diameter,
                     "id_layer": i_layer + 1,
                     "cell_width": 0
-                })
+                }
+                if transfusion_type:
+                    layer_dict.update({
+                        "transfusion_type": True,
+                        "tt_diameter": tt_diameter,
+                        "tp_diameter": tp_diameter,
+                        "p_tt": p_tt,
+                    })
+                central_layers.append(layer_dict)
             else:
                 # Parenchyma
                 current_polygon = GeometryProcessor.buffer_polygon(
@@ -537,7 +547,7 @@ class NeedleAnatomy(Organ):
                         id_cell=id_cell,
                         id_layer=layer_for_duct,
                         id_group=id_group,
-                        type="resin_duct",
+                        type="resin duct",
                         x=cell_coord[0],
                         y=cell_coord[1],
                         diameter=resin_duct_params[0]["cell_diameter"],
