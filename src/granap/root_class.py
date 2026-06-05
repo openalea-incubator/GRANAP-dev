@@ -59,7 +59,7 @@ class RootAnatomy(Organ):
             "thickness":                stele["thickness"],
             "cell_diameter":            stele["cell_diameter"],
             # 5PL gradient — fall back to flat (no gradient) when the field is absent (e.g. XML input)
-            "cell_diameter_max":        stele.get("cell_diameter_max",        stele["cell_diameter"]),
+            "cell_diameter_center":        stele.get("cell_diameter_center",        stele["cell_diameter"]),
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
@@ -151,13 +151,13 @@ class RootAnatomy(Organ):
         -----
         Mapping to vascular_params:
 
-        * ``a`` = ``cell_diameter_max``  — upper asymptote (value at r = 0, centre)
+        * ``a`` = ``cell_diameter_center``  — upper asymptote (value at r = 0, centre)
         * ``d`` = ``cell_diameter``      — lower asymptote (value at r → infinity, edge)
         * ``c`` = ``size_gradient_inflection`` — inflection position on [0, 1]
         * ``b`` = ``size_gradient_steepness``  — Hill coefficient (transition sharpness)
         * ``m`` = ``size_gradient_asymmetry``  — skew parameter
         """
-        a = self.vascular_params["cell_diameter_max"]
+        a = self.vascular_params["cell_diameter_center"]
         d = self.vascular_params["cell_diameter"]
         if a == d:
             return d  # gradient disabled — fast path
@@ -176,7 +176,7 @@ class RootAnatomy(Organ):
 
         Cell diameter follows the 5PL gradient defined in :meth:`_stele_cell_diameter_5pl`:
         rings near the periphery receive ``cell_diameter`` (lower asymptote) and rings
-        near the centre receive ``cell_diameter_max`` (upper asymptote).  When both
+        near the centre receive ``cell_diameter_center`` (upper asymptote).  When both
         values are equal the gradient is flat and behaviour is identical to the uniform distribution.
 
         Args:
@@ -321,7 +321,7 @@ class RootAnatomy(Organ):
         inner_r = min(p["inner_radius_xylem"], outer_r * 0.90)
 
         # Build star at the origin, smooth, translate to stele centre, clip
-        star = GeometryProcessor.star_polygon(
+        raw_star = GeometryProcessor.star_polygon(
             n_branches=p["n_vascular_peak"],
             r_min=inner_r,
             r_max=outer_r,
@@ -329,6 +329,12 @@ class RootAnatomy(Organ):
             arc_top=p["arc_top_xylem"],
         )
 
+        star_coord = GeometryProcessor.smoothing_polygon(
+            np.column_stack(raw_star.exterior.xy),
+            smooth_factor=0.6,
+            iterations=3,
+        ) 
+        star = Polygon(star_coord)
         # Translate star to stele centre, clip to stele boundary
         star = translate(star, cx, cy).intersection(stele_polygon)
         if star.is_empty:

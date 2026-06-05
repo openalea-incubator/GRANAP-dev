@@ -55,6 +55,10 @@ scenarios = [
         "kwargs": {**BASE_KWARGS, "xylem_diameter_max": 0.08, "xylem_diameter_min": 0.05},
     },
     {
+        "label": "Narrow peaks",
+        "kwargs": {**BASE_KWARGS, "arc_bottom_xylem": 0.05, "arc_top_xylem": 0.05, "xylem_diameter_max": 0.07, "xylem_diameter_min": 0.04, "inner_radius_xylem": 0.04},
+    },
+    {
         "label": "Narrow star\n(inner=0.10, outer=0.15)",
         "kwargs": {**BASE_KWARGS, "inner_radius_xylem": 0.10, "outer_radius_xylem": 0.15},
     },
@@ -102,18 +106,20 @@ for s in scenarios:
 # ── Visualisation ─────────────────────────────────────────────────────────
 
 n = len(scenarios)
-fig, axs = plt.subplots(2, n, figsize=(6 * n, 14))
+n_cols = 4
+n_rows = (n + n_cols - 1) // n_cols
+fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+axs_flat = axs.flatten()
 
-for col, (root, s) in enumerate(zip(roots, scenarios)):
-    root.plot_cells(show=False, ax=axs[0, col], title=s["label"])
-    axs[0, col].get_legend().remove()
+for i, (root, s) in enumerate(zip(roots, scenarios)):
+    root.plot_cells(show=False, ax=axs_flat[i], title=s["label"])
+    legend = axs_flat[i].get_legend()
+    if legend:
+        legend.remove()
 
-    mat = root.export_to_adjencymatrix()
-    root.plot_network(show=False, ax=axs[1, col], title=s["label"])
+for j in range(n, len(axs_flat)):
+    axs_flat[j].set_visible(False)
 
-axs[0, 0].set_ylabel("Cell anatomy", fontsize=12)
-axs[1, 0].set_ylabel("Cell network", fontsize=12)
-
-plt.suptitle("Dicot root — star-shaped xylem with Dirichlet packing", fontsize=14)
+plt.suptitle("Dicot root — star-shaped xylem with Apollonian packing", fontsize=14)
 plt.tight_layout()
 plt.show()

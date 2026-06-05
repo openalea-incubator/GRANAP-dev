@@ -105,8 +105,8 @@ class PericycleParams(BaseParams):
 class SteleParams(BaseParams):
     name               : str   = "stele"
     thickness          : float = Field(default=0.27,  ge=0.00001, title="Thickness")
-    cell_diameter      : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_max  : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
+    cell_diameter     : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
+    cell_diameter_center : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
     xylem_diameter         : float = Field(default=0.06,  ge=0.00001, title="Xylem Diameter")
     xylem_diameter_sd      : float = Field(default=0.005,   ge=0.0,     title="Xylem Diameter SD",      description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
     protoxylem_diameter    : float = Field(default=0.01,  ge=0.00001, title="Protoxylem Diameter")
@@ -127,7 +127,7 @@ class SteleDicotParams(BaseParams):
     name               : str   = "stele"
     thickness          : float = Field(default=0.5,  ge=0.00001, title="Thickness")
     cell_diameter      : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_max  : float = Field(default=0.025,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
+    cell_diameter_center : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
     xylem_diameter_max         : float = Field(default=0.06, ge=0.00001, title="Xylem Diameter Max", description="xylem diameter maximum — xylem diameter at the stele center.")
     xylem_diameter_min         : float = Field(default=0.03, ge=0.00001, title="Xylem Diameter Min", description="xylem diameter minimum — xylem diameter at the stele periphery.")
     xylem_diameter_sd      : float = Field(default=0.002,  ge=0.0,     title="Xylem Diameter SD",      description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
@@ -138,8 +138,8 @@ class SteleDicotParams(BaseParams):
     n_vascular_peak : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of peaks of xylem vessels")
     inner_radius_xylem : float = Field(default=0.10, ge=0.00001, title="Inner Radius of Xylem Peak", description="Inner radius of the peaks of xylem vessels, measured from the center of the stele")
     outer_radius_xylem : float = Field(default=0.22, ge=0.00001, title="Outer Radius of Xylem Peak", description="Outer radius of the peaks of xylem vessels, measured from the center of the stele")
-    arc_top_xylem : float = Field(default=0.02, ge=0.00001, title="Arc Length at Top of Xylem Peak", description="Arc length of each branch at outer_radius_xylem (tip width).")
-    arc_bottom_xylem : float = Field(default=0.03, ge=0.00001, title="Arc Length at Bottom of Xylem Peak", description="Arc length of each branch at inner_radius_xylem (base width).")
+    arc_top_xylem : float = Field(default=0.04, ge=0.00001, title="Arc Length at Top of Xylem Peak", description="Arc length of each branch at outer_radius_xylem (tip width).")
+    arc_bottom_xylem : float = Field(default=0.05, ge=0.00001, title="Arc Length at Bottom of Xylem Peak", description="Arc length of each branch at inner_radius_xylem (base width).")
     cambium_diameter   : float = Field(default=0.01, ge=0.00001, title = "Cambium Diameter", description = "Diameter of the cambium cells")
     ratio_proto_meta   : float = Field(default=2.2,   ge=0.0,     title="Ratio of Protoxylem to Metaxylem")
     # 5PL size-gradient shape parameters
