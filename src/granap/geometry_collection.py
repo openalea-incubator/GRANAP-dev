@@ -7,6 +7,9 @@ import shapely as sp
 from typing import Tuple, List, Optional
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from cv2 import fitEllipse
+from scipy.optimize import minimize
+from scipy.spatial import Delaunay, ConvexHull
+from shapely.ops import unary_union
 
 
 class GeometryProcessor:
@@ -52,6 +55,51 @@ class GeometryProcessor:
         y = radius * np.sin(theta)
         return sp.Polygon(np.column_stack((x, y)))
     
+    @staticmethod
+    def star_polygon(
+        n_branches: int,
+        r_min: float,
+        r_max: float,
+        arc_base: float,
+        arc_top: float,
+        n_arc: int = 200,
+    ) -> Polygon:
+        """
+        Generate a star-shaped polygon using geometric trapezoid branches.
+
+        Each branch is a trapezoid: inner arc at r_min (half-angle arc_base/r_min)
+        connected by straight sides to outer arc at r_max (half-angle arc_top/r_max).
+        A central disk at r_min fills the space between branches.
+        arc_base and arc_top are fully independent — no solver, never crashes.
+
+        Args:
+            n_branches: Number of branches (>= 2)
+            r_min:      Inner radius at the base of the branches
+            r_max:      Outer radius at the tip of the branches (> r_min)
+            arc_base:   Arc length at r_min (base width)
+            arc_top:    Arc length at r_max (tip width)
+            n_arc:      Number of points per arc edge
+
+        Returns:
+            Shapely Polygon representing the star
+        """
+        w_base = arc_base / r_min
+        w_top  = arc_top  / r_max
+
+        branches = []
+        for k in range(n_branches):
+            tk = 2 * np.pi * k / n_branches
+            inner = np.linspace(tk - w_base, tk + w_base, n_arc)
+            outer = np.linspace(tk - w_top,  tk + w_top,  n_arc)
+            pts = np.vstack([
+                np.column_stack([r_min * np.cos(inner), r_min * np.sin(inner)]),
+                np.column_stack([r_max * np.cos(outer[::-1]), r_max * np.sin(outer[::-1])]),
+            ])
+            branches.append(sp.Polygon(pts))
+
+        return unary_union([sp.Point(0, 0).buffer(r_min, resolution=64)] + branches)
+
+
     @staticmethod
     def resample_coords(coords: np.ndarray, target_n_points: int = 200, 
                         shift_distance: float = 0) -> np.ndarray:
@@ -259,6 +307,91 @@ class GeometryProcessor:
             return deepest.centroid.x, deepest.centroid.y, lb
         except Exception:
             return polygon.centroid.x, polygon.centroid.y, 0.0
+
+    @staticmethod
+    def _chebyshev_center(polygon, grid_n: int = 15) -> Tuple[float, float, float]:
+        """
+        Pole of inaccessibility via grid search + Nelder-Mead refinement.
+        Returns (cx, cy, radius) of the largest inscribed circle.
+        """
+        minx, miny, maxx, maxy = polygon.bounds
+        best_r, best_xy = 0.0, (polygon.centroid.x, polygon.centroid.y)
+
+        for x in np.linspace(minx, maxx, grid_n):
+            for y in np.linspace(miny, maxy, grid_n):
+                p = sp.Point(x, y)
+                if polygon.contains(p):
+                    r = p.distance(polygon.boundary)
+                    if r > best_r:
+                        best_r, best_xy = r, (x, y)
+
+        def neg_r(xy):
+            p = sp.Point(xy)
+            return -p.distance(polygon.boundary) if polygon.contains(p) else 0.0
+
+        res = minimize(neg_r, best_xy, method='Nelder-Mead',
+                       options={'xatol': 1e-5, 'fatol': 1e-5, 'maxiter': 300})
+        cx, cy = res.x
+        p = sp.Point(cx, cy)
+        if polygon.contains(p):
+            r = p.distance(polygon.boundary)
+            if r >= best_r:
+                return cx, cy, r
+        return best_xy[0], best_xy[1], best_r
+
+    @staticmethod
+    def apollonian_pack(
+        polygon,
+        diam_max: float,
+        diam_min: float,
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Iterative Apollonian packing with a centre-to-edge size gradient.
+
+        Circles near the polygon centroid get up to diam_max; circles near the
+        boundary get down to diam_min. Target diameter is interpolated linearly
+        with normalised distance from the centroid.
+
+        Args:
+            polygon:  Shapely polygon to fill
+            diam_max: Maximum circle diameter (at centroid)
+            diam_min: Minimum circle diameter (at boundary)
+
+        Returns:
+            List of (cx, cy, radius) tuples for each placed circle
+        """
+        placed = []
+        stack = [polygon]
+
+        poly_cx, poly_cy = polygon.centroid.x, polygon.centroid.y
+        minx, miny, maxx, maxy = polygon.bounds
+        max_dist = max(maxx - poly_cx, poly_cx - minx, maxy - poly_cy, poly_cy - miny)
+
+        while stack:
+            region = stack.pop()
+
+            if region.area < np.pi * (diam_min / 2) ** 2:
+                continue
+
+            cx, cy, r_ins = GeometryProcessor._chebyshev_center(region)
+
+            t = min(np.hypot(cx - poly_cx, cy - poly_cy) / max_dist, 1.0)
+            target_diam = diam_max + (diam_min - diam_max) * t
+            r = min(r_ins, target_diam / 2)
+
+            if r * 2 < diam_min:
+                continue
+
+            placed.append((cx, cy, r))
+
+            remaining = region.difference(sp.Point(cx, cy).buffer(r, resolution=32))
+            if remaining.is_empty:
+                continue
+
+            geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
+            stack.extend(g for g in geoms if not g.is_empty)
+
+        return placed
 
     @staticmethod
     def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):

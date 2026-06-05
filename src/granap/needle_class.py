@@ -16,7 +16,7 @@ from granap.geometry_collection import GeometryProcessor
 from granap.shapes import PolygonInterpolator
 from granap.input_data import OrganInputData
 import matplotlib.pyplot as plt
-
+from collections import defaultdict
 
 class NeedleAnatomy(Organ):
     """
@@ -789,7 +789,6 @@ class NeedleAnatomy(Organ):
 
     def merge_intercellular_aerenchyma(self):
         """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""
-        from collections import defaultdict
 
         n_files = getattr(self, '_aerenchyma_n_files', 1)
         start_angle = getattr(self, '_aerenchyma_start_angle', 0.0)

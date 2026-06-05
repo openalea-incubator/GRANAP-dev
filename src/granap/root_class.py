@@ -5,7 +5,7 @@ Root anatomy implementation.
 import numpy as np
 from typing import List, Dict, Any
 
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from shapely.affinity import translate, scale as affine_scale, rotate
 
@@ -16,7 +16,7 @@ from granap.cell_manager import CellManager
 from granap.geometry_collection import GeometryProcessor
 from granap.generate_cell import CellGenerator
 from granap.input_data import OrganInputData
-
+from collections import defaultdict
 
 class RootAnatomy(Organ):
     """
@@ -41,6 +41,11 @@ class RootAnatomy(Organ):
         self._initialize_params()
         self._initialize_default_layers()
         
+    @property
+    def planttype(self) -> int:
+        """Plant type: 1 = monocot, 2 = dicot."""
+        return int(self.global_params.get("value", 1))
+
     def _initialize_params(self) -> None:
         """Parse the structured input and set local attributes."""
         # 1. Global params
@@ -49,25 +54,46 @@ class RootAnatomy(Organ):
         # 2. Vascular / Stele params — all vascular info lives in the "stele" dict
         stele = next((p for p in self.params if p["name"] == "stele"), {})
 
+        # Shared fields present in both SteleParams and SteleDicotParams
         self.vascular_params = {
-            "thickness":           stele["thickness"],
-            "cell_diameter":       stele["cell_diameter"],
+            "thickness":                stele["thickness"],
+            "cell_diameter":            stele["cell_diameter"],
             # 5PL gradient — fall back to flat (no gradient) when the field is absent (e.g. XML input)
             "cell_diameter_max":        stele.get("cell_diameter_max",        stele["cell_diameter"]),
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
-            "xylem_diameter":          stele["xylem_diameter"],
-            "xylem_diameter_sd":       float(stele.get("xylem_diameter_sd", 0.0)),
-            "protoxylem_diameter":     stele["protoxylem_diameter"],
-            "protoxylem_diameter_sd":  float(stele.get("protoxylem_diameter_sd", 0.0)),
-            "phloem_diameter":         stele["phloem_diameter"],
-            "phloem_diameter_sd":      float(stele.get("phloem_diameter_sd", 0.0)),
-            "n_phloem_per_bundle":      int(stele.get("n_phloem_per_bundle", 1)),
-            "n_protoxylem_per_bundle":  int(stele.get("n_protoxylem_per_bundle", 1)),
-            "n_vascular_bundles":   int(stele["n_vascular_bundles"]),
-            "ratio_proto_meta":    stele["ratio_proto_meta"],
+            "ratio_proto_meta":         stele["ratio_proto_meta"],
         }
+
+        # Type-specific fields
+        if self.planttype == 1:
+            self.vascular_params.update({
+                "xylem_diameter":           stele["xylem_diameter"],
+                "xylem_diameter_sd":        float(stele.get("xylem_diameter_sd",       0.0)),
+                "protoxylem_diameter":      stele["protoxylem_diameter"],
+                "protoxylem_diameter_sd":   float(stele.get("protoxylem_diameter_sd",  0.0)),
+                "phloem_diameter":          stele["phloem_diameter"],
+                "phloem_diameter_sd":       float(stele.get("phloem_diameter_sd",      0.0)),
+                "n_phloem_per_bundle":      int(stele.get("n_phloem_per_bundle",   1)),
+                "n_protoxylem_per_bundle":  int(stele.get("n_protoxylem_per_bundle", 1)),
+                "n_vascular_bundles":       int(stele["n_vascular_bundles"]),
+            })
+        elif self.planttype == 2:
+            self.vascular_params.update({
+                "xylem_diameter_max":   float(stele["xylem_diameter_max"]),
+                "xylem_diameter_min":   float(stele["xylem_diameter_min"]),
+                "xylem_diameter_sd":    float(stele.get("xylem_diameter_sd",  0.0)),
+                "phloem_diameter":      float(stele["phloem_diameter"]),
+                "phloem_diameter_sd":   float(stele.get("phloem_diameter_sd", 0.0)),
+                "n_phloem_per_bundle":  int(stele.get("n_phloem_per_bundle",  5)),
+                "n_vascular_peak":      int(stele["n_vascular_peak"]),
+                "inner_radius_xylem":   float(stele["inner_radius_xylem"]),
+                "outer_radius_xylem":   float(stele["outer_radius_xylem"]),
+                "arc_top_xylem":        float(stele["arc_top_xylem"]),
+                "arc_bottom_xylem":     float(stele["arc_bottom_xylem"]),
+                "cambium_diameter":     float(stele.get("cambium_diameter",   0.01)),
+            })
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
@@ -105,7 +131,7 @@ class RootAnatomy(Organ):
         return radius
     
     def _stele_cell_diameter_5pl(self, r_norm: float) -> float:
-        """Return the stele cell diameter at normalized radius *r_norm* ∈ [0, 1].
+        """Return the stele cell diameter at normalized radius *r_norm* between [0, 1].
 
         Uses the 5-parameter logistic (5PL) model::
 
@@ -126,7 +152,7 @@ class RootAnatomy(Organ):
         Mapping to vascular_params:
 
         * ``a`` = ``cell_diameter_max``  — upper asymptote (value at r = 0, centre)
-        * ``d`` = ``cell_diameter``      — lower asymptote (value at r → ∞, edge)
+        * ``d`` = ``cell_diameter``      — lower asymptote (value at r → infinity, edge)
         * ``c`` = ``size_gradient_inflection`` — inflection position on [0, 1]
         * ``b`` = ``size_gradient_steepness``  — Hill coefficient (transition sharpness)
         * ``m`` = ``size_gradient_asymmetry``  — skew parameter
@@ -238,28 +264,134 @@ class RootAnatomy(Organ):
         # Left as a placeholder for future enhancement
         pass
 
-    def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug = False):
-        """
-        Create vascular tissue (xylem and phloem).
-        """
-        if self.vascular_params["n_vascular_bundles"] == 0:
-            return
-        
+    def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug: bool = False):
+        """Dispatch vascular tissue construction based on plant type."""
+        if self.planttype == 1:
+            if self.vascular_params["n_vascular_bundles"] == 0:
+                return
+            self._create_vascular_tissue_monocot(polygon_for_vascular, debug)
+        elif self.planttype == 2:
+            if self.vascular_params["n_vascular_peak"] == 0:
+                return
+            self._create_vascular_tissue_dicot(polygon_for_vascular, debug)
+        else:
+            raise ValueError(f"Unknown planttype: {self.planttype}")
+
+    def _create_vascular_tissue_monocot(self, polygon_for_vascular: Polygon, debug: bool = False):
+        """Monocot stele: ring of metaxylem vessels with alternating phloem/protoxylem."""
         self.fit_metaxylem_elements(polygon_for_vascular)
         self.fit_metaxylem_sheath(polygon_for_vascular)
-
         self.fit_phloem_protoxylem_elements(polygon_for_vascular)
-        # remove the cells in the vascular elements
+
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
-
-        # add vascular cells to all_cells
         self.all_cells.extend_cells(self.vascular_cells.cells)
         self.all_cells.recalculate_cell_properties()
         if debug:
             self.all_cells.plot_cells()
 
-        
+    def _create_vascular_tissue_dicot(self, polygon_for_vascular: Polygon, debug: bool = False):
+        """Dicot stele: to be implemented."""
+        self.fit_star_shapped_xylem(polygon_for_vascular)
+        # self.fit_phloem_elements(polygon_for_vascular)
+
+        # cambium to be implemented
+
+        vascular_polygons = unary_union(self.vascular_polygons)
+        self.all_cells.remove_cells_in_polygon(vascular_polygons)
+        self.all_cells.extend_cells(self.vascular_cells.cells)
+        self.all_cells.recalculate_cell_properties()
+        if debug:
+            self.all_cells.plot_cells()
+
+    def fit_star_shapped_xylem(self, stele_polygon: Polygon):
+        """Pack metaxylem vessels inside the star-shaped xylem region (dicot).
+
+        Builds the trapezoid star from vascular params, smooths it, clips it to
+        the stele, then fills it with an Apollonian packing that grades from
+        xylem_diameter_max at the centre to xylem_diameter_min at the boundary.
+        Circles whose diameter is below xylem_diameter_min are labelled 'stele'.
+        """
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+
+        # Clamp radii so the star never exceeds the stele
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+        outer_r = min(p["outer_radius_xylem"], stele_r * 0.95)
+        inner_r = min(p["inner_radius_xylem"], outer_r * 0.90)
+
+        # Build star at the origin, smooth, translate to stele centre, clip
+        star = GeometryProcessor.star_polygon(
+            n_branches=p["n_vascular_peak"],
+            r_min=inner_r,
+            r_max=outer_r,
+            arc_base=p["arc_bottom_xylem"],
+            arc_top=p["arc_top_xylem"],
+        )
+
+        # Translate star to stele centre, clip to stele boundary
+        star = translate(star, cx, cy).intersection(stele_polygon)
+        if star.is_empty:
+            return
+
+        # Apollonian packing: returns (cx, cy, r) already in stele-centre coordinates
+        packed = GeometryProcessor.apollonian_pack(
+            star,
+            diam_max=p["xylem_diameter_max"],
+            diam_min=p["xylem_diameter_min"],
+        )
+
+        self.vascular_cells = CellManager()
+        self.vascular_polygons = []   # only placed circles clear parenchyma, not the star
+
+        min_diam = p["xylem_diameter_min"]
+        sd = p["xylem_diameter_sd"]
+
+        for i_cell, (pcx, pcy, r) in enumerate(packed):
+            # could be optional, but add some noise to the diameter of each cell to avoid perfect uniformity
+            actual_diam = float(np.clip(
+                np.random.normal(r * 2, sd),
+                min_diam * 0.1,
+                np.inf,
+            ))
+            actual_r = actual_diam / 2
+
+            placed = Point(pcx, pcy).buffer(actual_r, resolution=32)
+            cell_type = "metaxylem" if actual_diam >= min_diam else "stele"
+
+            placed_buff = placed.buffer(-actual_r * 0.15)
+            if placed_buff.is_empty:
+                continue
+
+            bx, by = placed_buff.exterior.coords.xy
+            border_coords = GeometryProcessor.resample_coords(
+                np.column_stack((bx, by)), target_n_points=25
+            )
+            center = placed.centroid
+
+            for border_pt in border_coords[1:]:
+                new_cell = Cell(
+                    type=cell_type,
+                    x=border_pt[0],
+                    y=border_pt[1],
+                    diameter=actual_diam,
+                    id_cell=i_cell,
+                    id_layer=0,
+                    id_group=i_cell,
+                    angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
+                    radius=np.sqrt(
+                        (border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2
+                    ),
+                    area=np.pi * actual_r ** 2,
+                )
+                self.vascular_cells.add_cell(new_cell)
+
+            if cell_type == "metaxylem":
+                self.vascular_polygons.append(placed)
+
+    def fit_phloem_elements(self, stele_polygon: Polygon):
+        """Dicot phloem placement — to be implemented."""
+        pass
 
     def fit_phloem_protoxylem_elements(self, polygon):
 
@@ -770,7 +902,6 @@ class RootAnatomy(Organ):
 
     def merge_intercellular_aerenchyma(self):
         """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""
-        from collections import defaultdict
 
         n_files = getattr(self, '_aerenchyma_n_files', 1)
         start_angle = getattr(self, '_aerenchyma_start_angle', 0.0)

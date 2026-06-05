@@ -8,8 +8,9 @@ import shapely as sp
 import geopandas as gpd
 from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
-from shapely.geometry import Polygon, Point, MultiPolygon
+from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 from scipy.spatial import cKDTree
 
 from granap.geometry_collection import GeometryProcessor
@@ -193,8 +194,6 @@ class CellGenerator:
         Cells from a lower-priority group whose position falls inside a
         higher-priority footprint are removed.
         """
-        from shapely.geometry import MultiPoint
-        from shapely.strtree import STRtree
 
         if not all_cells.cells:
             return all_cells

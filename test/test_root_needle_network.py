@@ -22,8 +22,9 @@ mat_needle = needle.export_to_adjencymatrix()  # builds graph + matrix (1s for c
 
 # Plot Root and Needle cells on top row
 root.plot_cells(show=False, ax=axs[0, 0], title="Root Cells")
+axs[0,0].get_legend().remove()
 needle.plot_cells(show=False, ax=axs[0, 1], title="Needle Cells")
-
+axs[0,1].get_legend().remove()
 # Plot Root and Needle networks on bottom row
 root.plot_network(ax=axs[1, 0], title="Root Network")
 needle.plot_network(ax=axs[1, 1], title="Needle Network")

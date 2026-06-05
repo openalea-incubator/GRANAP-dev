@@ -29,6 +29,7 @@ fig, axs = plt.subplots(1, 2, figsize=(20, 10), sharex=False, sharey=False)
 # Plot the root cells
 t_start = time.time()
 root.plot_cells(show=False, title=f"Root Cells", ax=axs[0])
+axs[0].get_legend().remove()
 t_end = time.time()
 print("Time to plot cells:", t_end - t_start)
 
