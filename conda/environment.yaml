@@ -15,6 +15,7 @@ dependencies:
   - scikit-learn # not sure if it is still needed
   - scipy
   - shapely
+  - pydantic
   - roifile
   - opencv
   - pip:
