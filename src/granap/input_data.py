@@ -154,8 +154,9 @@ class TransfusionTissueParams(BaseParams):
     name                        : str   = "transfusion_tissue"
     tracheids_diameter          : float = Field(default=0.05, ge=0.00001, title = "Tracheids Diameter", description = "Diameter of the tracheids")
     parenchyma_diameter         : float = Field(default=0.03, ge=0.00001, title = "Parenchyma Diameter", description = "Diameter of the parenchyma cells")
-    transfusion_tracheids_ratio : float = Field(default=0.5,  ge=0.0,  le=1.0, title = "Transfusion Tracheids Ratio", description = "Ratio of transfusion tracheids to parenchyma cells")
+    transfusion_tracheids_ratio : float = Field(default=0.5,  ge=0.0, title = "Transfusion Tracheids Ratio", description = "Ratio of transfusion tracheids to parenchyma cells")
     n_layers                    : int   = Field(default=2,    ge=1, title = "Number of Layers", description = "Number of transfusion tissue layers")
+    transfusion_type            : bool  = Field(default=False, title = "Transfusion Type", description = "If True, differentiate into tracheids and parenchyma during tessellation using type-specific cell radii")
 
 
 class XylemParams(BaseParams):

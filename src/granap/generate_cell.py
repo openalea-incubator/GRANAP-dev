@@ -117,12 +117,68 @@ class CellGenerator:
         
         for i_layer, layer in enumerate(layers_polygons):
             cells_coords = CellGenerator.cells_on_layer(
-                layer["polygon"], 
-                layer["cell_diameter"], 
+                layer["polygon"],
+                layer["cell_diameter"],
                 layer["cell_width"],
                 layer.get("shift", 0)
             )
-            
+
+            if layer.get("transfusion_type"):
+                # Per-seed type assignment: each seed gets its own type and radius.
+                # Orientation is computed from the global seed sequence so border
+                # ellipses align with the ring, same as the standard path.
+                # Border points are clipped to the layer polygon so that no
+                # transfusion Voronoi seed escapes into the endodermis ring,
+                # which would otherwise distort the endodermis shape.
+                next_c = np.roll(cells_coords, -1, axis=0)
+                prev_c = np.roll(cells_coords,  1, axis=0)
+                seed_axes = np.arctan2(
+                    next_c[:, 1] - prev_c[:, 1],
+                    next_c[:, 0] - prev_c[:, 0],
+                )
+                tt_d = layer["tt_diameter"]
+                tp_d = layer["tp_diameter"]
+                p_tt = layer["p_tt"]
+                layer_poly = layer["polygon"]
+
+                for i, cell_coord in enumerate(cells_coords[1:]):
+                    seed_type = (
+                        "transfusion tracheid"
+                        if np.random.random() < p_tt
+                        else "transfusion parenchyma"
+                    )
+                    d = tt_d if seed_type == "transfusion tracheid" else tp_d
+                    axis = seed_axes[i + 1]
+                    border_pts = GeometryProcessor.draw_ellipse(
+                        cell_coord, axis, d * 0.7 / 2, d * 0.7 / 2, n_points=10
+                    )
+                    cell_angle = np.arctan2(
+                        cell_coord[1] - center.y, cell_coord[0] - center.x
+                    )
+                    cell_radius = np.sqrt(
+                        (cell_coord[0] - center.x) ** 2
+                        + (cell_coord[1] - center.y) ** 2
+                    )
+                    for border_point in border_pts[1:]:
+                        if not layer_poly.covers(Point(border_point[0], border_point[1])):
+                            continue
+                        new_cell = Cell(
+                            type=seed_type,
+                            x=border_point[0],
+                            y=border_point[1],
+                            diameter=d,
+                            id_cell=id_cell,
+                            id_layer=i_layer,
+                            id_group=id_group,
+                            angle=cell_angle,
+                            radius=cell_radius,
+                            area=np.pi * (d / 2) ** 2,
+                        )
+                        all_cells.add_cell(new_cell)
+                        id_cell += 1
+                    id_group += 1
+                continue  # skip standard border generation for this layer
+
             if layer["cell_width"] != 0:
                 layer_cell_borders = CellGenerator.cell_border(
                     cells_coords,
@@ -135,7 +191,7 @@ class CellGenerator:
                     layer["cell_diameter"] * 0.7,
                     layer["cell_width"] * 0.7,
                 )
-            
+
             for i, cell_coord in enumerate(cells_coords[1:]):
                 if layer["name"] == "parenchyma":
                     new_cell = Cell(
@@ -146,9 +202,9 @@ class CellGenerator:
                         id_cell=id_cell,
                         id_layer=i_layer,
                         id_group=id_group,
-                        angle=np.arctan2(cell_coord[1] - center.y, 
+                        angle=np.arctan2(cell_coord[1] - center.y,
                                           cell_coord[0] - center.x),
-                        radius=np.sqrt((cell_coord[0] - center.x)**2 + 
+                        radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                         (cell_coord[1] - center.y)**2),
                         area=np.pi * (layer["cell_diameter"] / 2)**2,
                     )
@@ -166,9 +222,9 @@ class CellGenerator:
                             id_cell=id_cell,
                             id_layer=i_layer,
                             id_group=id_group,
-                            angle=np.arctan2(cell_coord[1] - center.y, 
+                            angle=np.arctan2(cell_coord[1] - center.y,
                                               cell_coord[0] - center.x),
-                            radius=np.sqrt((cell_coord[0] - center.x)**2 + 
+                            radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                             (cell_coord[1] - center.y)**2),
                             area=np.pi * (layer["cell_diameter"] / 2)**2,
                         )
