@@ -103,8 +103,9 @@ class RootAnatomy(Organ):
                 "phloem_height":             float(phloem.get("height",             0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
-                "cambium_minimal_distance":  float(cambium.get("minimal_distance",  0.16)),
-                "cambium_maximal_distance":  float(cambium.get("maximal_distance",  0.18)),
+                "cambium_primary_inner_distance":  float(cambium.get("primary_inner_distance",  0.16)),
+                "cambium_primary_outer_distance":  float(cambium.get("primary_outer_distance",  0.18)),
+                "cambium_primary_visible_distance": float(cambium.get("primary_visible_distance", 0.17)),
             })
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
@@ -306,6 +307,9 @@ class RootAnatomy(Organ):
         """Dicot stele: to be implemented."""
         self.fit_star_shapped_xylem(polygon_for_vascular)
         self._remove_stele_seeds_near_xylem()
+        secondary_growth = False  # TODO: make this optional and implement the secondary growth case
+        if not secondary_growth:
+            self.fit_primary_cambium_elements(polygon_for_vascular)
         # self.fit_phloem_elements(polygon_for_vascular)
 
         vascular_polygons = unary_union(self.vascular_polygons)
@@ -440,6 +444,45 @@ class RootAnatomy(Organ):
                 and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.7
             )
         ]
+
+    def fit_primary_cambium_elements(self, stele_polygon: Polygon):
+        """Dicot cambium placement — to be implemented."""
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+
+        tan_alpha_top = p["arc_top_xylem"]/ p["outer_radius_xylem"]
+        tan_alpha_bottom = p["arc_bottom_xylem"]/ p["inner_radius_xylem"]
+        outer_radius_cambium = p["cambium_primary_outer_distance"]
+        inner_radius_cambium = p["cambium_primary_inner_distance"]
+        # the star shaped will have a trapezoid branch with angles defined by the xylem arcs, so we can use those angles to calculate the cambium arcs that will nicely fit around the star
+        arc_top_cambium = tan_alpha_top * p["cambium_primary_inner_distance"]
+        arc_bottom_cambium = tan_alpha_bottom * p["cambium_primary_inner_distance"]
+
+        # Clamp radii so the star never exceeds the stele
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+        outer_r = min(p["outer_radius_cambium"], stele_r * 0.95)
+        inner_r = min(p["inner_radius_cambium"], outer_r * 0.90)
+
+        # Build star at the origin, smooth, translate to stele centre, clip
+        raw_star = GeometryProcessor.star_polygon(
+            n_branches=p["n_vascular_peak"],
+            r_min=inner_r,
+            r_max=outer_r,
+            arc_base=p["arc_bottom_cambium"],
+            arc_top=p["arc_top_cambium"],
+        )
+
+        star_coord = GeometryProcessor.smoothing_polygon(
+            np.column_stack(raw_star.exterior.xy),
+            smooth_factor=0.6,
+            iterations=3,
+        )
+        star = Polygon(star_coord)
+        # Translate star to stele centre, clip to stele boundary
+        star = translate(star, cx, cy).intersection(stele_polygon)
+        if star.is_empty:
+            return
+        self.cambium_star = star
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Dicot phloem placement — to be implemented."""

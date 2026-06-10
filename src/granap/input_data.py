@@ -169,8 +169,13 @@ class DicotCambiumParams(BaseParams):
     cell_diameter    : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
     cell_width       : float = Field(default=0.03,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     n_layers         : int   = Field(default=1,      ge=1,       title="Number of Layers", description="Number of cambium layers.")
-    minimal_distance : float = Field(default=0.16,   ge=0.00001, title="Minimal Distance", description="Inner radius of the cambium ring from the stele centre.")
-    maximal_distance : float = Field(default=0.18,   ge=0.00001, title="Maximal Distance", description="Outer clip radius of the cambium ring from the stele centre.")
+    # for primary growth
+    primary_visible_distance : float = Field(default=0.17,  ge=0.00001, title="Primary Visible Distance", description="Distance from the stele centre at which the cambium becomes visible during primary growth. Set equal to primary_end_distance to have a circle cambium.")
+    primary_inner_distance : float = Field(default=0.16,   ge=0.00001, title="Primary Start Distance", description="Inner radius of the cambium ring from the stele centre at primary growth.")
+    primary_outer_distance : float = Field(default=0.18,   ge=0.00001, title="Primary End Distance", description="Outer clip radius of the cambium ring from the stele centre at primary growth.")
+    # for secondary growth
+    secondary_inner_distance : float = Field(default=0.25,  ge=0.00001, title="Secondary Start Distance", description="Secondary growth only: Inner radius of the actual cambium ring from the stele centre. Set equal to maximal_end_distance to have a circle cambium.")
+    secondary_outer_distance : float = Field(default=0.27,  ge=0.00001, title="Secondary End Distance",   description="Secondary growth only: Outer radius of the actual cambium ring from the stele centre. Set equal to minimal_end_distance to have a circle cambium.")
 
 # ===========================================================================
 # Needle anatomy defaults
