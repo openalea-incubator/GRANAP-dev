@@ -101,6 +101,7 @@ class RootAnatomy(Organ):
                 "n_phloem_per_bundle":       int(phloem.get("n_per_bundle",         5)),
                 "phloem_width":              float(phloem.get("width",              0.15)),
                 "phloem_height":             float(phloem.get("height",             0.2)),
+                "relative_cambium":          float(phloem.get("relative_cambium",   0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
                 "cambium_n_layers":          int(cambium.get("n_layers",            1)),
@@ -313,7 +314,7 @@ class RootAnatomy(Organ):
         secondary_growth = False  # TODO: make this optional and implement the secondary growth cased
         if not secondary_growth:
            self.fit_primary_cambium_elements(polygon_for_vascular)
-        # self.fit_phloem_elements(polygon_for_vascular)
+        self.fit_phloem_elements(polygon_for_vascular)
 
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
@@ -475,7 +476,7 @@ class RootAnatomy(Organ):
         star_coord = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy),
             smooth_factor=0.9,
-            iterations=20,
+            iterations=5,
         )
         star = Polygon(star_coord).buffer(0)
         # Translate star to stele centre, clip to stele boundary
@@ -570,8 +571,80 @@ class RootAnatomy(Organ):
                         ))
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
-        """Dicot phloem placement — to be implemented."""
-        pass
+        """Place one phloem ellipse per valley between xylem peaks, filled with Apollonian packing."""
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        n_peaks = p["n_vascular_peak"]
+
+        width     = p["phloem_width"]
+        height    = p["phloem_height"]
+        cell_diam = p["phloem_diameter"]
+        cell_sd   = p["phloem_diameter_sd"]
+        relative_distance = p["relative_cambium"]
+
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+        cambium_inner = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
+
+        r_center = cambium_inner + p["cambium_cell_diameter"] * p["cambium_n_layers"] + (height/2) + (stele_r - p["cambium_cell_diameter"] - (height) - cambium_inner) * relative_distance 
+
+        xylem_star = getattr(self, "xylem_star", None)
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+
+        for k in range(n_peaks):
+            theta = 2 * np.pi * (k + 0.5) / n_peaks
+
+            # Build ellipse at origin (height=radial, width=tangential), then orient and place
+            raw = Point(0, 0).buffer(1, resolution=64)
+            raw = affine_scale(raw, width / 2, height / 2)
+            raw = rotate(raw, np.degrees(theta) - 90, origin=(0, 0))
+            raw = translate(raw, cx + r_center * np.cos(theta), cy + r_center * np.sin(theta))
+
+            ellipse = raw.intersection(stele_polygon)
+            if xylem_star is not None and not xylem_star.is_empty:
+                ellipse = ellipse.difference(xylem_star)
+            if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2:
+                continue
+
+            # Remove stele seeds inside this phloem region
+            self.all_cells.cells = [
+                c for c in self.all_cells.cells
+                if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
+            ]
+
+            packed = GeometryProcessor.apollonian_pack(
+                ellipse,
+                diam_max=cell_diam,
+                diam_min=cell_diam,
+            )
+
+            for pcx, pcy, r in packed:
+                actual_diam = float(np.clip(np.random.normal(r * 2, cell_sd), cell_diam * 0.1, np.inf))
+                actual_r = actual_diam / 2
+
+                placed = Point(pcx, pcy).buffer(actual_r, resolution=32)
+                placed_buff = placed.buffer(-actual_r * 0.15)
+                if placed_buff.is_empty:
+                    continue
+
+                bx, by = placed_buff.exterior.coords.xy
+                border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=25)
+
+                id_group = next_id_group
+                next_id_group += 1
+                for border_pt in border_coords[1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type="phloem",
+                        x=border_pt[0],
+                        y=border_pt[1],
+                        diameter=actual_diam,
+                        id_cell=id_group,
+                        id_layer=0,
+                        id_group=id_group,
+                        angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                        radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                        area=np.pi * actual_r ** 2,
+                    ))
+                self.vascular_polygons.append(placed)
 
     def fit_phloem_protoxylem_elements(self, polygon):
 

@@ -158,10 +158,11 @@ class DicotXylemParams(BaseParams):
 
 class DicotPhloemParams(BaseParams):
     name             : str   = "phloem"
-    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
+    cell_diameter    : float = Field(default=0.012,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
     cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
-    width            : float = Field(default=0.15,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
-    height           : float = Field(default=0.2,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
+    width            : float = Field(default=0.1,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
+    height           : float = Field(default=0.05,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
+    relative_cambium : float = Field(default=0.2,    ge=0.0, le = 1.0, title="Relative Distance Cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
 
 
 class DicotCambiumParams(BaseParams):
@@ -170,7 +171,7 @@ class DicotCambiumParams(BaseParams):
     cell_width       : float = Field(default=0.01,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     n_layers         : int   = Field(default=2,      ge=1,       title="Number of Layers", description="Number of cambium layers.")
     # for primary growth
-    primary_visible_distance : float = Field(default=0.27,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward primary_outer_distance for a more mature (complete ring) cambium.")
+    primary_visible_distance : float = Field(default=0.16,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward primary_outer_distance for a more mature (complete ring) cambium.")
     primary_inner_distance : float = Field(default=0.11,   ge=0.00001, title="Primary Start Distance", description="Inner radius of the cambium ring from the stele centre at primary growth.")
     primary_outer_distance : float = Field(default=0.25,   ge=0.00001, title="Primary End Distance", description="Outer clip radius of the cambium ring from the stele centre at primary growth.")
     primary_arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
