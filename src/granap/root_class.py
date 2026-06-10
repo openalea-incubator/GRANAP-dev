@@ -51,48 +51,60 @@ class RootAnatomy(Organ):
         # 1. Global params
         self.global_params = next((p for p in self.params if p["name"] == "planttype"), {})
 
-        # 2. Vascular / Stele params — all vascular info lives in the "stele" dict
+        # 2. Stele parenchyma params (shared by both plant types)
         stele = next((p for p in self.params if p["name"] == "stele"), {})
 
-        # Shared fields present in both SteleParams and SteleDicotParams
         self.vascular_params = {
             "thickness":                stele["thickness"],
             "cell_diameter":            stele["cell_diameter"],
-            # 5PL gradient — fall back to flat (no gradient) when the field is absent (e.g. XML input)
-            "cell_diameter_center":        stele.get("cell_diameter_center",        stele["cell_diameter"]),
+            "cell_diameter_center":     stele.get("cell_diameter_center", stele["cell_diameter"]),
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
-            "ratio_proto_meta":         stele["ratio_proto_meta"],
         }
 
-        # Type-specific fields
+        # 3. Type-specific vascular params — read from dedicated xylem / phloem / cambium dicts
         if self.planttype == 1:
+            xylem  = next((p for p in self.params if p["name"] == "xylem"),  {})
+            phloem = next((p for p in self.params if p["name"] == "phloem"), {})
             self.vascular_params.update({
-                "xylem_diameter":           stele["xylem_diameter"],
-                "xylem_diameter_sd":        float(stele.get("xylem_diameter_sd",       0.0)),
-                "protoxylem_diameter":      stele["protoxylem_diameter"],
-                "protoxylem_diameter_sd":   float(stele.get("protoxylem_diameter_sd",  0.0)),
-                "phloem_diameter":          stele["phloem_diameter"],
-                "phloem_diameter_sd":       float(stele.get("phloem_diameter_sd",      0.0)),
-                "n_phloem_per_bundle":      int(stele.get("n_phloem_per_bundle",   1)),
-                "n_protoxylem_per_bundle":  int(stele.get("n_protoxylem_per_bundle", 1)),
-                "n_vascular_bundles":       int(stele["n_vascular_bundles"]),
+                "xylem_diameter":          float(xylem.get("cell_diameter",          0.06)),
+                "xylem_diameter_sd":       float(xylem.get("cell_diameter_sd",       0.005)),
+                "protoxylem_diameter":     float(xylem.get("protoxylem_diameter",    0.01)),
+                "protoxylem_diameter_sd":  float(xylem.get("protoxylem_diameter_sd", 0.002)),
+                "n_vascular_bundles":      int(xylem.get("n_vascular_bundles",       5)),
+                "n_protoxylem_per_bundle": int(xylem.get("n_protoxylem_per_bundle",  2)),
+                "ratio_proto_meta":        float(xylem.get("ratio_proto_meta",       2.2)),
+                "phloem_diameter":         float(phloem.get("cell_diameter",         0.005)),
+                "phloem_diameter_sd":      float(phloem.get("cell_diameter_sd",      0.001)),
+                "n_phloem_per_bundle":     int(phloem.get("n_per_bundle",            5)),
             })
         elif self.planttype == 2:
+            xylem   = next((p for p in self.params if p["name"] == "xylem"),   {})
+            phloem  = next((p for p in self.params if p["name"] == "phloem"),  {})
+            cambium = next((p for p in self.params if p["name"] == "cambium"), {})
             self.vascular_params.update({
-                "xylem_diameter_max":   float(stele["xylem_diameter_max"]),
-                "xylem_diameter_min":   float(stele["xylem_diameter_min"]),
-                "xylem_diameter_sd":    float(stele.get("xylem_diameter_sd",  0.0)),
-                "phloem_diameter":      float(stele["phloem_diameter"]),
-                "phloem_diameter_sd":   float(stele.get("phloem_diameter_sd", 0.0)),
-                "n_phloem_per_bundle":  int(stele.get("n_phloem_per_bundle",  5)),
-                "n_vascular_peak":      int(stele["n_vascular_peak"]),
-                "inner_radius_xylem":   float(stele["inner_radius_xylem"]),
-                "outer_radius_xylem":   float(stele["outer_radius_xylem"]),
-                "arc_top_xylem":        float(stele["arc_top_xylem"]),
-                "arc_bottom_xylem":     float(stele["arc_bottom_xylem"]),
-                "cambium_diameter":     float(stele.get("cambium_diameter",   0.01)),
+                "xylem_diameter_max":        float(xylem.get("cell_diameter",       0.09)),
+                "xylem_diameter_min":        float(xylem.get("cell_diameter_min",   0.01)),
+                "xylem_diameter_sd":         float(xylem.get("cell_diameter_sd",    0.002)),
+                "n_vascular_peak":           int(xylem.get("n_vascular_peak",       3)),
+                "inner_radius_xylem":        float(xylem.get("inner_radius",        0.05)),
+                "outer_radius_xylem":        float(xylem.get("outer_radius",        0.22)),
+                "arc_top_xylem":             float(xylem.get("arc_top",             0.03)),
+                "arc_bottom_xylem":          float(xylem.get("arc_bottom",          0.03)),
+                "xylem_gradient_inflection": float(xylem.get("gradient_inflection", 0.7)),
+                "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",  5.0)),
+                "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",  1.0)),
+                "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",  0.7)),
+                "phloem_diameter":           float(phloem.get("cell_diameter",      0.005)),
+                "phloem_diameter_sd":        float(phloem.get("cell_diameter_sd",   0.001)),
+                "n_phloem_per_bundle":       int(phloem.get("n_per_bundle",         5)),
+                "phloem_width":              float(phloem.get("width",              0.15)),
+                "phloem_height":             float(phloem.get("height",             0.2)),
+                "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
+                "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
+                "cambium_minimal_distance":  float(cambium.get("minimal_distance",  0.16)),
+                "cambium_maximal_distance":  float(cambium.get("maximal_distance",  0.18)),
             })
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
@@ -293,9 +305,8 @@ class RootAnatomy(Organ):
     def _create_vascular_tissue_dicot(self, polygon_for_vascular: Polygon, debug: bool = False):
         """Dicot stele: to be implemented."""
         self.fit_star_shapped_xylem(polygon_for_vascular)
+        self._remove_stele_seeds_near_xylem()
         # self.fit_phloem_elements(polygon_for_vascular)
-
-        # cambium to be implemented
 
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
@@ -339,12 +350,17 @@ class RootAnatomy(Organ):
         star = translate(star, cx, cy).intersection(stele_polygon)
         if star.is_empty:
             return
+        self.xylem_star = star
 
         # Apollonian packing: returns (cx, cy, r) already in stele-centre coordinates
         packed = GeometryProcessor.apollonian_pack(
             star,
             diam_max=p["xylem_diameter_max"],
             diam_min=p["xylem_diameter_min"],
+            gradient_inflection=p["xylem_gradient_inflection"],
+            gradient_steepness=p["xylem_gradient_steepness"],
+            gradient_asymmetry=p["xylem_gradient_asymmetry"],
+            first_vessel_shift=p["xylem_first_vessel_shift"],
         )
 
         self.vascular_cells = CellManager()
@@ -394,6 +410,36 @@ class RootAnatomy(Organ):
 
             if cell_type == "metaxylem":
                 self.vascular_polygons.append(placed)
+
+    def _remove_stele_seeds_near_xylem(self) -> None:
+        """Remove stele parenchyma seeds from all_cells that are inside the xylem
+        star and engulfed by xylem vessels.
+
+        The stele seeds generated by _create_central_layers span the whole stele
+        polygon, including the xylem-star region.  Those that fall inside the star
+        and have more than 70 % of a probe circle (diameter = xylem_diameter_max)
+        covered by xylem vessel polygons are removed so they don't generate
+        spurious parenchyma cells between vessels.
+        """
+        if not hasattr(self, 'xylem_star') or self.xylem_star is None:
+            return
+        if not self.vascular_polygons:
+            return
+
+        diam_max = self.vascular_params["xylem_diameter_max"]
+        probe_r = diam_max / 2
+        probe_area = np.pi * probe_r ** 2
+
+        xylem_union = unary_union(self.vascular_polygons)
+
+        self.all_cells.cells = [
+            c for c in self.all_cells.cells
+            if not (
+                c.type == "stele"
+                and self.xylem_star.contains(Point(c.x, c.y))
+                and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.7
+            )
+        ]
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Dicot phloem placement — to be implemented."""

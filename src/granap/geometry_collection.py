@@ -86,13 +86,17 @@ class GeometryProcessor:
         w_base = arc_base / r_min
         w_top  = arc_top  / r_max
 
+        # Branches extend slightly inside the disk so they genuinely overlap it.
+        # Exact tangency (inner arc == disk edge) triggers a GEOS TopologyException.
+        r_inner = r_min * (1.0 - 1e-4)
+
         branches = []
         for k in range(n_branches):
             tk = 2 * np.pi * k / n_branches
             inner = np.linspace(tk - w_base, tk + w_base, n_arc)
             outer = np.linspace(tk - w_top,  tk + w_top,  n_arc)
             pts = np.vstack([
-                np.column_stack([r_min * np.cos(inner), r_min * np.sin(inner)]),
+                np.column_stack([r_inner * np.cos(inner), r_inner * np.sin(inner)]),
                 np.column_stack([r_max * np.cos(outer[::-1]), r_max * np.sin(outer[::-1])]),
             ])
             branches.append(sp.Polygon(pts))
@@ -344,18 +348,32 @@ class GeometryProcessor:
         polygon,
         diam_max: float,
         diam_min: float,
+        gradient_inflection: float = 0.5,
+        gradient_steepness: float = 3.0,
+        gradient_asymmetry: float = 1.0,
+        first_vessel_shift: float = 0.0,
     ) -> List[Tuple[float, float, float]]:
         """
         Iterative Apollonian packing with a centre-to-edge size gradient.
 
         Circles near the polygon centroid get up to diam_max; circles near the
-        boundary get down to diam_min. Target diameter is interpolated linearly
-        with normalised distance from the centroid.
+        boundary get down to diam_min. Target diameter follows a 5-parameter
+        logistic (5PL) curve of normalised distance t from the centroid:
+
+            f(t) = diam_min + (diam_max - diam_min) / (1 + (t / c)^b)^m
+
+        where c = gradient_inflection, b = gradient_steepness, m = gradient_asymmetry.
 
         Args:
-            polygon:  Shapely polygon to fill
-            diam_max: Maximum circle diameter (at centroid)
-            diam_min: Minimum circle diameter (at boundary)
+            polygon:              Shapely polygon to fill
+            diam_max:             Maximum circle diameter (at centroid, t=0)
+            diam_min:             Minimum circle diameter (at boundary, t=1)
+            gradient_inflection:  5PL inflection point on [0, 1] (c parameter)
+            gradient_steepness:   5PL Hill coefficient — sharpness of transition (b)
+            gradient_asymmetry:   5PL asymmetry exponent (m)
+            first_vessel_shift:   Maximum random shift of the first vessel centre,
+                                  expressed as a fraction of the local inscribed radius.
+                                  0.0 = deterministic (always at the Chebyshev centre).
 
         Returns:
             List of (cx, cy, radius) tuples for each placed circle
@@ -375,8 +393,30 @@ class GeometryProcessor:
 
             cx, cy, r_ins = GeometryProcessor._chebyshev_center(region)
 
+            # Random shift for the first vessel only, bounded so the centre
+            # stays inside the polygon and the inscribed radius is recomputed.
+            # The shifted position is accepted only when r_ins at the new location
+            # is still >= diam_min/2; otherwise fall back to the Chebyshev centre
+            # to avoid skipping the entire region.
+            if not placed and first_vessel_shift > 0.0:
+                angle = np.random.uniform(0.0, 2.0 * np.pi)
+                magnitude = np.random.uniform(0.0, first_vessel_shift * r_ins)
+                new_cx = cx + magnitude * np.cos(angle)
+                new_cy = cy + magnitude * np.sin(angle)
+                if polygon.contains(Point(new_cx, new_cy)):
+                    new_r_ins = polygon.exterior.distance(Point(new_cx, new_cy))
+                    if new_r_ins >= diam_min / 2:
+                        cx, cy = new_cx, new_cy
+                        r_ins = new_r_ins
+
             t = min(np.hypot(cx - poly_cx, cy - poly_cy) / max_dist, 1.0)
-            target_diam = diam_max + (diam_min - diam_max) * t
+            if t <= 0.0:
+                target_diam = float(diam_max)
+            else:
+                target_diam = float(
+                    diam_min + (diam_max - diam_min)
+                    / (1.0 + (t / gradient_inflection) ** gradient_steepness) ** gradient_asymmetry
+                )
             r = min(r_ins, target_diam / 2)
 
             if r * 2 < diam_min:

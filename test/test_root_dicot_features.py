@@ -11,11 +11,11 @@ from granap.root_class import RootAnatomy
 from granap.input_data import OrganInputData
 
 
-def make_dicot_root(**stele_kwargs) -> RootAnatomy:
-    """Construct a dicot RootAnatomy with custom stele parameters."""
+def make_dicot_root(**xylem_kwargs) -> RootAnatomy:
+    """Construct a dicot RootAnatomy with custom xylem parameters."""
     data = OrganInputData.for_dicot_root()
-    for field, value in stele_kwargs.items():
-        data.set_value("stele", field, value)
+    for field, value in xylem_kwargs.items():
+        data.set_value("xylem", field, value)
     return RootAnatomy(data)
 
 
@@ -28,19 +28,23 @@ def cell_type_counts(root: RootAnatomy) -> dict:
 
 # ── Scenarios ─────────────────────────────────────────────────────────────
 
-# arc_top / arc_bottom ≈ 0.667 keeps L_top/L_base ≈ 0.575, which matches the
-# solver's hard-coded initial guess of alpha=3.  The default SteleDicotParams
-# values (0.034 / 0.04) produce a required alpha of ~1.74; the solver overshoots
-# below alpha=1 (U-shaped Beta → brentq fails) and stalls.
 BASE_KWARGS = {
-    "arc_top_xylem": 0.04,
-    "arc_bottom_xylem": 0.06,
+    "arc_top":    0.04,
+    "arc_bottom": 0.06,
 }
 
 scenarios = [
     {
+        "label": "Diarch (2 peaks)\ndefault",
+        "kwargs": {**BASE_KWARGS, "n_vascular_peak": 2},
+    },
+    {
         "label": "Triarch (3 peaks)\ndefault",
-        "kwargs": {**BASE_KWARGS},
+        "kwargs": {**BASE_KWARGS, "n_vascular_peak": 3},
+    },
+    {
+        "label": "Tétrarch (4 peaks)\ndefault",
+        "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4},
     },
     {
         "label": "Pentarch (5 peaks)",
@@ -52,19 +56,19 @@ scenarios = [
     },
     {
         "label": "Large vessels\n(diam_max=0.08)",
-        "kwargs": {**BASE_KWARGS, "xylem_diameter_max": 0.08, "xylem_diameter_min": 0.05},
+        "kwargs": {**BASE_KWARGS, "cell_diameter": 0.08, "cell_diameter_min": 0.05},
     },
     {
         "label": "Narrow peaks",
-        "kwargs": {**BASE_KWARGS, "arc_bottom_xylem": 0.05, "arc_top_xylem": 0.05, "xylem_diameter_max": 0.07, "xylem_diameter_min": 0.04, "inner_radius_xylem": 0.04},
+        "kwargs": {**BASE_KWARGS, "arc_bottom": 0.05, "arc_top": 0.05, "cell_diameter": 0.07, "cell_diameter_min": 0.04, "inner_radius": 0.04},
     },
     {
         "label": "Narrow star\n(inner=0.10, outer=0.15)",
-        "kwargs": {**BASE_KWARGS, "inner_radius_xylem": 0.10, "outer_radius_xylem": 0.15},
+        "kwargs": {**BASE_KWARGS, "inner_radius": 0.10, "outer_radius": 0.15},
     },
     {
         "label": "Wide star\n(inner=0.15, outer=0.20)",
-        "kwargs": {**BASE_KWARGS, "inner_radius_xylem": 0.15, "outer_radius_xylem": 0.20},
+        "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.20},
     },
 ]
 
@@ -87,18 +91,18 @@ for s in scenarios:
     assert meta > 0, f"Expected at least one metaxylem cell in scenario '{s['label']}'"
     print(f"  metaxylem / stele-in-star: {meta} / {stele}")
 
-    # Verify the size-based classification: check there are cells with actual
-    # diameter below xylem_diameter_min that were classified as stele
+    # Verify the size-based classification: no metaxylem cell should have a
+    # diameter below cell_diameter_min (they must have been labelled 'stele').
     data_defaults = OrganInputData.for_dicot_root()
     for f, v in s["kwargs"].items():
-        data_defaults.set_value("stele", f, v)
-    dmin = data_defaults.get("stele").xylem_diameter_min
+        data_defaults.set_value("xylem", f, v)
+    dmin = data_defaults.get("xylem").cell_diameter_min
     small_meta = [
         c for c in root.all_cells.cells
         if c.type == "metaxylem" and c.diameter < dmin
     ]
     assert len(small_meta) == 0, (
-        f"Found {len(small_meta)} metaxylem cell(s) with diameter < xylem_diameter_min ({dmin})"
+        f"Found {len(small_meta)} metaxylem cell(s) with diameter < cell_diameter_min ({dmin})"
     )
 
     roots.append(root)

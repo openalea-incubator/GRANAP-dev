@@ -103,50 +103,74 @@ class PericycleParams(BaseParams):
 
 # Monocotyledon-specific layers
 class SteleParams(BaseParams):
-    name               : str   = "stele"
-    thickness          : float = Field(default=0.27,  ge=0.00001, title="Thickness")
-    cell_diameter     : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_center : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
-    xylem_diameter         : float = Field(default=0.06,  ge=0.00001, title="Xylem Diameter")
-    xylem_diameter_sd      : float = Field(default=0.005,   ge=0.0,     title="Xylem Diameter SD",      description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
-    protoxylem_diameter    : float = Field(default=0.01,  ge=0.00001, title="Protoxylem Diameter")
-    protoxylem_diameter_sd : float = Field(default=0.002,   ge=0.0,     title="Protoxylem Diameter SD", description="Standard deviation of protoxylem bundle diameter (sampled per bundle).")
-    phloem_diameter        : float = Field(default=0.005, ge=0.00001, title="Phloem Diameter")
-    phloem_diameter_sd     : float = Field(default=0.001,   ge=0.0,     title="Phloem Diameter SD",     description="Standard deviation of phloem bundle diameter (sampled per bundle).")
-    n_phloem_per_bundle     : int   = Field(default=5,  ge=1, title="Number of Phloem Cells per Bundle",     description="Number of sieve elements packed inside each phloem bundle using a front-chain layout.")
-    n_protoxylem_per_bundle : int   = Field(default=2,  ge=1, title="Number of Protoxylem Cells per Bundle", description="Number of protoxylem elements packed inside each protoxylem bundle using a front-chain layout.")
-    n_vascular_bundles : int   = Field(default=5,     ge=1,       title="Number of Vascular Bundles")
-    ratio_proto_meta   : float = Field(default=2.2,   ge=0.0,     title="Ratio of Protoxylem to Metaxylem")
-    # 5PL size-gradient shape parameters
-    size_gradient_inflection : float = Field(default=0.3, ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point (0 = center, 1 = edge). Values > 1 push the inflection outside the stele.")
-    size_gradient_steepness  : float = Field(default=3.0, ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL. Higher values produce a sharper size transition.")
-    size_gradient_asymmetry  : float = Field(default=1.0, ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry parameter m of the 5PL. Values > 1 compress the gradient toward smaller radii.")
+    name                     : str   = "stele"
+    thickness                : float = Field(default=0.27,  ge=0.00001, title="Thickness")
+    cell_diameter            : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (edge)",   description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
+    cell_diameter_center     : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
+    size_gradient_inflection : float = Field(default=0.3,   ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point (0 = center, 1 = edge).")
+    size_gradient_steepness  : float = Field(default=3.0,   ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL. Higher values produce a sharper size transition.")
+    size_gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry exponent m of the 5PL.")
+
+
+class RootXylemParams(BaseParams):
+    name                    : str   = "xylem"
+    cell_diameter           : float = Field(default=0.06,   ge=0.00001, title="Cell Diameter",              description="Metaxylem vessel diameter.")
+    cell_diameter_sd        : float = Field(default=0.005,  ge=0.0,     title="Cell Diameter SD",           description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
+    protoxylem_diameter     : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
+    protoxylem_diameter_sd  : float = Field(default=0.002,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
+    n_vascular_bundles      : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
+    n_protoxylem_per_bundle : int   = Field(default=2,      ge=1,       title="Protoxylem per Bundle",      description="Number of protoxylem elements per bundle.")
+    ratio_proto_meta        : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
+
+
+class RootPhloemParams(BaseParams):
+    name             : str   = "phloem"
+    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
+    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
+    n_per_bundle     : int   = Field(default=5,      ge=1,       title="Cells per Bundle", description="Number of sieve elements packed inside each phloem bundle.")
 
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
-    name               : str   = "stele"
-    thickness          : float = Field(default=0.5,  ge=0.00001, title="Thickness")
-    cell_diameter      : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter (edge)", description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_center : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
-    xylem_diameter_max         : float = Field(default=0.06, ge=0.00001, title="Xylem Diameter Max", description="xylem diameter maximum — xylem diameter at the stele center.")
-    xylem_diameter_min         : float = Field(default=0.03, ge=0.00001, title="Xylem Diameter Min", description="xylem diameter minimum — xylem diameter at the stele periphery.")
-    xylem_diameter_sd      : float = Field(default=0.002,  ge=0.0,     title="Xylem Diameter SD",      description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
-    phloem_diameter        : float = Field(default=0.005, ge=0.00001, title="Phloem Diameter")
-    phloem_diameter_sd     : float = Field(default=0.001,   ge=0.0,     title="Phloem Diameter SD",     description="Standard deviation of phloem bundle diameter (sampled per bundle).")
-    n_phloem_per_bundle     : int   = Field(default=5,  ge=1, title="Number of Phloem Cells per Bundle",     description="Number of sieve elements packed inside each phloem bundle using a front-chain layout.")
-    # star shaped
-    n_vascular_peak : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of peaks of xylem vessels")
-    inner_radius_xylem : float = Field(default=0.10, ge=0.00001, title="Inner Radius of Xylem Peak", description="Inner radius of the peaks of xylem vessels, measured from the center of the stele")
-    outer_radius_xylem : float = Field(default=0.22, ge=0.00001, title="Outer Radius of Xylem Peak", description="Outer radius of the peaks of xylem vessels, measured from the center of the stele")
-    arc_top_xylem : float = Field(default=0.04, ge=0.00001, title="Arc Length at Top of Xylem Peak", description="Arc length of each branch at outer_radius_xylem (tip width).")
-    arc_bottom_xylem : float = Field(default=0.05, ge=0.00001, title="Arc Length at Bottom of Xylem Peak", description="Arc length of each branch at inner_radius_xylem (base width).")
-    cambium_diameter   : float = Field(default=0.01, ge=0.00001, title = "Cambium Diameter", description = "Diameter of the cambium cells")
-    ratio_proto_meta   : float = Field(default=2.2,   ge=0.0,     title="Ratio of Protoxylem to Metaxylem")
-    # 5PL size-gradient shape parameters
-    size_gradient_inflection : float = Field(default=0.3, ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point (0 = center, 1 = edge). Values > 1 push the inflection outside the stele.")
-    size_gradient_steepness  : float = Field(default=3.0, ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL. Higher values produce a sharper size transition.")
-    size_gradient_asymmetry  : float = Field(default=1.0, ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry parameter m of the 5PL. Values > 1 compress the gradient toward smaller radii.")
+    name                     : str   = "stele"
+    thickness                : float = Field(default=0.5,   ge=0.00001, title="Thickness")
+    cell_diameter            : float = Field(default=0.015, ge=0.00001, title="Cell Diameter (edge)",   description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
+    cell_diameter_center     : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
+    size_gradient_inflection : float = Field(default=0.3,   ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point for stele parenchyma cell size (0 = center, 1 = edge).")
+    size_gradient_steepness  : float = Field(default=3.0,   ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL for stele parenchyma cell size.")
+    size_gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry exponent m of the 5PL for stele parenchyma cell size.")
 
+
+class DicotXylemParams(BaseParams):
+    name                : str   = "xylem"
+    n_vascular_peak     : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of xylem arms in the star pattern.")
+    inner_radius        : float = Field(default=0.05,  ge=0.00001, title="Inner Radius",             description="Inner radius of the xylem star arms from the stele centre.")
+    outer_radius        : float = Field(default=0.22,  ge=0.00001, title="Outer Radius",             description="Outer radius of the xylem star arms from the stele centre.")
+    arc_top             : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
+    arc_bottom          : float = Field(default=0.035,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
+    cell_diameter       : float = Field(default=0.09,  ge=0.00001, title="Cell Diameter (max)",      description="Maximum vessel diameter at the star centre (5PL upper asymptote).")
+    cell_diameter_min   : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (5PL lower asymptote).")
+    cell_diameter_sd    : float = Field(default=0.002, ge=0.0,     title="Cell Diameter SD",         description="Standard deviation added to each vessel diameter.")
+    gradient_inflection : float = Field(default=0.7,   ge=0.001, le=1.0, title="Gradient Inflection", description="Normalized distance at which the 5PL inflects for vessel size (0 = centre, 1 = tip).")
+    gradient_steepness  : float = Field(default=5.0,   ge=0.1,          title="Gradient Steepness",  description="Hill coefficient b of the 5PL for vessel size.")
+    gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Gradient Asymmetry",  description="Asymmetry exponent m of the 5PL for vessel size.")
+    first_vessel_shift  : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
+
+
+class DicotPhloemParams(BaseParams):
+    name             : str   = "phloem"
+    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
+    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
+    width            : float = Field(default=0.15,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
+    height           : float = Field(default=0.2,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
+
+
+class DicotCambiumParams(BaseParams):
+    name             : str   = "cambium"
+    cell_diameter    : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
+    cell_width       : float = Field(default=0.03,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
+    n_layers         : int   = Field(default=1,      ge=1,       title="Number of Layers", description="Number of cambium layers.")
+    minimal_distance : float = Field(default=0.16,   ge=0.00001, title="Minimal Distance", description="Inner radius of the cambium ring from the stele centre.")
+    maximal_distance : float = Field(default=0.18,   ge=0.00001, title="Maximal Distance", description="Outer clip radius of the cambium ring from the stele centre.")
 
 # ===========================================================================
 # Needle anatomy defaults
@@ -354,6 +378,8 @@ class OrganInputData(BaseModel):
         _DEFAULTS_BY_NAME: Dict[str, BaseParams] = {
             "planttype":             PlantTypeParams(),
             "stele":                 SteleParams(),
+            "xylem":                 RootXylemParams(),
+            "phloem":                RootPhloemParams(),
             "inter_cellular_spaces": InterCellularSpacesParams(),
             "aerenchyma":            AerenchymaParams(),
             "epidermis":             EpidermisParams(),
@@ -396,6 +422,8 @@ class OrganInputData(BaseModel):
         return cls(params=[
             PlantTypeParams(),
             SteleParams(),
+            RootXylemParams(),
+            RootPhloemParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),
             EpidermisParams(),
@@ -411,6 +439,9 @@ class OrganInputData(BaseModel):
         return cls(params=[
             PlantTypeParams(value=2),
             SteleDicotParams(),
+            DicotXylemParams(),
+            DicotPhloemParams(),
+            DicotCambiumParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),
             EpidermisParams(),
