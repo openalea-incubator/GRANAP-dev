@@ -307,9 +307,9 @@ class RootAnatomy(Organ):
         """Dicot stele: to be implemented."""
         self.fit_star_shapped_xylem(polygon_for_vascular)
         self._remove_stele_seeds_near_xylem()
-        secondary_growth = False  # TODO: make this optional and implement the secondary growth case
-        if not secondary_growth:
-            self.fit_primary_cambium_elements(polygon_for_vascular)
+        secondary_growth = False  # TODO: make this optional and implement the secondary growth cased
+        # if not secondary_growth:
+        #    self.fit_primary_cambium_elements(polygon_for_vascular)
         # self.fit_phloem_elements(polygon_for_vascular)
 
         vascular_polygons = unary_union(self.vascular_polygons)
@@ -460,16 +460,16 @@ class RootAnatomy(Organ):
 
         # Clamp radii so the star never exceeds the stele
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        outer_r = min(p["outer_radius_cambium"], stele_r * 0.95)
-        inner_r = min(p["inner_radius_cambium"], outer_r * 0.90)
+        outer_r = min(outer_radius_cambium, stele_r * 0.95)
+        inner_r = min(inner_radius_cambium, outer_r * 0.90)
 
         # Build star at the origin, smooth, translate to stele centre, clip
         raw_star = GeometryProcessor.star_polygon(
             n_branches=p["n_vascular_peak"],
             r_min=inner_r,
             r_max=outer_r,
-            arc_base=p["arc_bottom_cambium"],
-            arc_top=p["arc_top_cambium"],
+            arc_base=arc_bottom_cambium,
+            arc_top=arc_top_cambium,
         )
 
         star_coord = GeometryProcessor.smoothing_polygon(
