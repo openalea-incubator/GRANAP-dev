@@ -65,43 +65,34 @@ class GeometryProcessor:
         n_arc: int = 200,
     ) -> Polygon:
         """
-        Generate a star-shaped polygon using geometric trapezoid branches.
+        Generate a star-shaped polygon as a single continuous boundary.
 
-        Each branch is a trapezoid: inner arc at r_min (half-angle arc_base/r_min)
-        connected by straight sides to outer arc at r_max (half-angle arc_top/r_max).
-        A central disk at r_min fills the space between branches.
-        arc_base and arc_top are fully independent — no solver, never crashes.
+        Alternates outer arcs at r_max (peaks) with inner arcs at r_min (valleys),
+        connected by straight sides. No boolean operations.
 
         Args:
             n_branches: Number of branches (>= 2)
-            r_min:      Inner radius at the base of the branches
-            r_max:      Outer radius at the tip of the branches (> r_min)
-            arc_base:   Arc length at r_min (base width)
-            arc_top:    Arc length at r_max (tip width)
-            n_arc:      Number of points per arc edge
-
-        Returns:
-            Shapely Polygon representing the star
+            r_min:      Inner radius between branches
+            r_max:      Outer radius at branch tips (> r_min)
+            arc_base:   Half arc length at r_min (base width of each branch)
+            arc_top:    Half arc length at r_max (tip width of each branch)
+            n_arc:      Number of points per arc segment
         """
         w_base = arc_base / r_min
         w_top  = arc_top  / r_max
 
-        # Branches extend slightly inside the disk so they genuinely overlap it.
-        # Exact tangency (inner arc == disk edge) triggers a GEOS TopologyException.
-        r_inner = r_min * (1.0 - 1e-4)
-
-        branches = []
+        segments = []
         for k in range(n_branches):
-            tk = 2 * np.pi * k / n_branches
-            inner = np.linspace(tk - w_base, tk + w_base, n_arc)
-            outer = np.linspace(tk - w_top,  tk + w_top,  n_arc)
-            pts = np.vstack([
-                np.column_stack([r_inner * np.cos(inner), r_inner * np.sin(inner)]),
-                np.column_stack([r_max * np.cos(outer[::-1]), r_max * np.sin(outer[::-1])]),
-            ])
-            branches.append(sp.Polygon(pts))
+            tk     = 2 * np.pi * k / n_branches
+            t_next = 2 * np.pi * (k + 1) / n_branches
+            outer  = np.linspace(tk - w_top,  tk + w_top,      n_arc)
+            valley = np.linspace(tk + w_base, t_next - w_base, n_arc)
+            segments.append([[r_min * np.cos(tk - w_base), r_min * np.sin(tk - w_base)]])
+            segments.append(np.column_stack([r_max * np.cos(outer),  r_max * np.sin(outer)]))
+            segments.append([[r_min * np.cos(tk + w_base), r_min * np.sin(tk + w_base)]])
+            segments.append(np.column_stack([r_min * np.cos(valley), r_min * np.sin(valley)]))
 
-        return unary_union([sp.Point(0, 0).buffer(r_min, resolution=64)] + branches)
+        return sp.Polygon(np.vstack(segments))
 
 
     @staticmethod

@@ -70,6 +70,10 @@ scenarios = [
         "label": "Wide star\n(inner=0.15, outer=0.20)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.20},
     },
+    {
+        "label": "Circle\n(inner=0.15, outer=0.15)",
+        "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.15},
+    },
 ]
 
 roots = []

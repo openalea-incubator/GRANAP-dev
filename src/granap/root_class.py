@@ -103,9 +103,10 @@ class RootAnatomy(Organ):
                 "phloem_height":             float(phloem.get("height",             0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
-                "cambium_primary_inner_distance":  float(cambium.get("primary_inner_distance",  0.16)),
-                "cambium_primary_outer_distance":  float(cambium.get("primary_outer_distance",  0.18)),
-                "cambium_primary_visible_distance": float(cambium.get("primary_visible_distance", 0.17)),
+                "cambium_n_layers":          int(cambium.get("n_layers",            1)),
+                "cambium_primary_inner_distance":  float(cambium.get("primary_inner_distance",  0.10)),
+                "cambium_primary_outer_distance":  float(cambium.get("primary_outer_distance",  0.25)),
+                "cambium_primary_visible_distance": float(cambium.get("primary_visible_distance", 0.15)),
             })
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
@@ -308,8 +309,8 @@ class RootAnatomy(Organ):
         self.fit_star_shapped_xylem(polygon_for_vascular)
         self._remove_stele_seeds_near_xylem()
         secondary_growth = False  # TODO: make this optional and implement the secondary growth cased
-        # if not secondary_growth:
-        #    self.fit_primary_cambium_elements(polygon_for_vascular)
+        if not secondary_growth:
+           self.fit_primary_cambium_elements(polygon_for_vascular)
         # self.fit_phloem_elements(polygon_for_vascular)
 
         vascular_polygons = unary_union(self.vascular_polygons)
@@ -333,7 +334,7 @@ class RootAnatomy(Organ):
         # Clamp radii so the star never exceeds the stele
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
         outer_r = min(p["outer_radius_xylem"], stele_r * 0.95)
-        inner_r = min(p["inner_radius_xylem"], outer_r * 0.90)
+        inner_r = min(p["inner_radius_xylem"], stele_r * 0.90)
 
         # Build star at the origin, smooth, translate to stele centre, clip
         raw_star = GeometryProcessor.star_polygon(
@@ -348,8 +349,8 @@ class RootAnatomy(Organ):
             np.column_stack(raw_star.exterior.xy),
             smooth_factor=0.6,
             iterations=3,
-        ) 
-        star = Polygon(star_coord)
+        )
+        star = Polygon(star_coord).buffer(0)
         # Translate star to stele centre, clip to stele boundary
         star = translate(star, cx, cy).intersection(stele_polygon)
         if star.is_empty:
@@ -455,13 +456,13 @@ class RootAnatomy(Organ):
         outer_radius_cambium = p["cambium_primary_outer_distance"]
         inner_radius_cambium = p["cambium_primary_inner_distance"]
         # the star shaped will have a trapezoid branch with angles defined by the xylem arcs, so we can use those angles to calculate the cambium arcs that will nicely fit around the star
-        arc_top_cambium = tan_alpha_top * p["cambium_primary_inner_distance"]
+        arc_top_cambium = tan_alpha_top * p["cambium_primary_outer_distance"]
         arc_bottom_cambium = tan_alpha_bottom * p["cambium_primary_inner_distance"]
 
         # Clamp radii so the star never exceeds the stele
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
         outer_r = min(outer_radius_cambium, stele_r * 0.95)
-        inner_r = min(inner_radius_cambium, outer_r * 0.90)
+        inner_r = min(inner_radius_cambium, stele_r * 0.90)
 
         # Build star at the origin, smooth, translate to stele centre, clip
         raw_star = GeometryProcessor.star_polygon(
@@ -482,7 +483,88 @@ class RootAnatomy(Organ):
         star = translate(star, cx, cy).intersection(stele_polygon)
         if star.is_empty:
             return
-        self.cambium_star = star
+
+        # The cambium star is treated as a BOUNDARY LINE.
+        # primary_visible_distance is the maximum radius from the stele centre
+        # at which cambium is differentiated. 
+        clip_circle = Point(cx, cy).buffer(p["cambium_primary_visible_distance"])
+        visible_boundary = star.exterior.intersection(clip_circle)
+        if visible_boundary.is_empty:
+            return
+
+        self.cambium_star = visible_boundary  # MultiLineString, one arch per peak
+
+        cell_diam  = p["cambium_cell_diameter"]
+        cell_width = p["cambium_cell_width"]
+        n_layers   = p["cambium_n_layers"]
+
+        # Remove stele parenchyma seeds inside the thin cambium band.
+        # Xylem seeds are left untouched.
+        thin_ring = visible_boundary.buffer(cell_diam * n_layers)
+        self.all_cells.cells = [
+            c for c in self.all_cells.cells
+            if c.type != "stele" or not thin_ring.contains(Point(c.x, c.y))
+        ]
+
+        # For each layer, buffer the boundary line outward and place cell seeds
+        # along the exterior of the resulting polygon.
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        center = stele_polygon.centroid
+
+        line_segs = list(visible_boundary.geoms) if hasattr(visible_boundary, "geoms") else [visible_boundary]
+
+        for i_layer in range(n_layers):
+            for line_seg in line_segs:
+                # For layer 0 sample along the line itself; for additional layers
+                # offset the line outward using parallel_offset.
+                if i_layer == 0:
+                    raw_coords = np.array(line_seg.coords)
+                    seg_length = line_seg.length
+                else:
+                    try:
+                        offset_line = line_seg.parallel_offset(cell_diam * i_layer, side="left")
+                        if hasattr(offset_line, "geoms"):
+                            offset_line = max(offset_line.geoms, key=lambda g: g.length)
+                        raw_coords = np.array(offset_line.coords)
+                        seg_length = offset_line.length
+                    except Exception:
+                        raw_coords = np.array(line_seg.coords)
+                        seg_length = line_seg.length
+
+                n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
+                cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
+
+                if len(cells_coords) < 2:
+                    continue
+
+                layer_cell_borders = CellGenerator.cell_border(
+                    cells_coords,
+                    cell_width * 0.7 if cell_width else cell_diam * 0.7,
+                    cell_diam  * 0.7 if cell_width else 0,
+                )
+
+                for i, _coord in enumerate(cells_coords[1:]):
+                    id_group = next_id_group
+                    next_id_group += 1
+                    for border_pt in layer_cell_borders[i][1:]:
+                        self.vascular_cells.add_cell(Cell(
+                            type="cambium",
+                            x=border_pt[0],
+                            y=border_pt[1],
+                            diameter=cell_diam,
+                            id_cell=id_group,
+                            id_layer=0,
+                            id_group=id_group,
+                            angle=np.arctan2(
+                                border_pt[1] - center.y,
+                                border_pt[0] - center.x,
+                            ),
+                            radius=np.sqrt(
+                                (border_pt[0] - center.x) ** 2
+                                + (border_pt[1] - center.y) ** 2
+                            ),
+                            area=np.pi * (cell_diam / 2) ** 2,
+                        ))
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Dicot phloem placement — to be implemented."""
