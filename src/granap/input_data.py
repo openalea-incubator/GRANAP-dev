@@ -132,7 +132,7 @@ class RootPhloemParams(BaseParams):
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
     name                     : str   = "stele"
-    thickness                : float = Field(default=0.5,   ge=0.00001, title="Thickness")
+    thickness                : float = Field(default=0.6,   ge=0.00001, title="Thickness")
     cell_diameter            : float = Field(default=0.015, ge=0.00001, title="Cell Diameter (edge)",   description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
     cell_diameter_center     : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
     size_gradient_inflection : float = Field(default=0.3,   ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point for stele parenchyma cell size (0 = center, 1 = edge).")
@@ -148,7 +148,7 @@ class DicotXylemParams(BaseParams):
     arc_top             : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
     arc_bottom          : float = Field(default=0.035,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
     cell_diameter       : float = Field(default=0.08,  ge=0.00001, title="Cell Diameter (max)",      description="Maximum vessel diameter at the star centre (5PL upper asymptote).")
-    cell_diameter_min   : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (5PL lower asymptote).")
+    cell_diameter_min   : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (5PL lower asymptote).")
     cell_diameter_sd    : float = Field(default=0.002, ge=0.0,     title="Cell Diameter SD",         description="Standard deviation added to each vessel diameter.")
     gradient_inflection : float = Field(default=0.7,   ge=0.001, le=1.0, title="Gradient Inflection", description="Normalized distance at which the 5PL inflects for vessel size (0 = centre, 1 = tip).")
     gradient_steepness  : float = Field(default=5.0,   ge=0.1,          title="Gradient Steepness",  description="Hill coefficient b of the 5PL for vessel size.")
@@ -170,9 +170,11 @@ class DicotCambiumParams(BaseParams):
     cell_width       : float = Field(default=0.01,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     n_layers         : int   = Field(default=2,      ge=1,       title="Number of Layers", description="Number of cambium layers.")
     # for primary growth
-    primary_visible_distance : float = Field(default=0.14,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward primary_outer_distance for a more mature (complete ring) cambium.")
-    primary_inner_distance : float = Field(default=0.10,   ge=0.00001, title="Primary Start Distance", description="Inner radius of the cambium ring from the stele centre at primary growth.")
+    primary_visible_distance : float = Field(default=0.27,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward primary_outer_distance for a more mature (complete ring) cambium.")
+    primary_inner_distance : float = Field(default=0.11,   ge=0.00001, title="Primary Start Distance", description="Inner radius of the cambium ring from the stele centre at primary growth.")
     primary_outer_distance : float = Field(default=0.25,   ge=0.00001, title="Primary End Distance", description="Outer clip radius of the cambium ring from the stele centre at primary growth.")
+    primary_arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
+    primary_arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
     # for secondary growth
     secondary_inner_distance : float = Field(default=0.25,  ge=0.00001, title="Secondary Start Distance", description="Secondary growth only: Inner radius of the actual cambium ring from the stele centre. Set equal to maximal_end_distance to have a circle cambium.")
     secondary_outer_distance : float = Field(default=0.27,  ge=0.00001, title="Secondary End Distance",   description="Secondary growth only: Outer radius of the actual cambium ring from the stele centre. Set equal to minimal_end_distance to have a circle cambium.")
