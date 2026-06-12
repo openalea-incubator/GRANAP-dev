@@ -1,6 +1,6 @@
 
 from typing import List, Optional
-from granap.cell_class import Cell
+from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon, Point, MultiPoint
 from scipy.spatial import Delaunay
 from shapely.affinity import translate

@@ -3,7 +3,7 @@ Layer manager module for handling collections of tissue layers.
 """
 
 from typing import List, Optional, Dict, Any
-from granap.layer_class import Layer
+from openalea.granap.layer_class import Layer
 
 
 class LayerManager:

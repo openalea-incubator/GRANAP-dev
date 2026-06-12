@@ -5,9 +5,9 @@ Provides the Layer class representing individual tissue layers.
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
-from granap.cell_class import Cell
+from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon
-from granap.input_data import LayerDefaultParams
+from openalea.granap.input_data import LayerDefaultParams
 
 
 @dataclass

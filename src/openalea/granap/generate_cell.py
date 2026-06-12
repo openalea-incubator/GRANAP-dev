@@ -12,9 +12,9 @@ from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.ops import unary_union
 from scipy.spatial import cKDTree
 
-from granap.geometry_collection import GeometryProcessor
-from granap.cell_class import Cell
-from granap.cell_manager import CellManager
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.cell_class import Cell
+from openalea.granap.cell_manager import CellManager
 
 
 class CellGenerator:

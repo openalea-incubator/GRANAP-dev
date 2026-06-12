@@ -1,6 +1,6 @@
 import numpy as np
 from shapely.geometry import Polygon, Point
-from granap.geometry_collection import GeometryProcessor
+from openalea.granap.geometry_collection import GeometryProcessor
 
 class Cell:
 

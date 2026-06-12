@@ -7,14 +7,14 @@ from typing import List, Dict, Any
 from shapely.geometry import Polygon, Point, MultiPolygon
 from shapely.ops import unary_union
 
-from granap.organ_class import Organ
-from granap.cell_class import Cell
-from granap.cell_manager import CellManager
-from granap.generate_cell import CellGenerator
-from granap.layer_class import Layer
-from granap.geometry_collection import GeometryProcessor
-from granap.shapes import PolygonInterpolator
-from granap.input_data import OrganInputData
+from openalea.granap.organ_class import Organ
+from openalea.granap.cell_class import Cell
+from openalea.granap.cell_manager import CellManager
+from openalea.granap.generate_cell import CellGenerator
+from openalea.granap.layer_class import Layer
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.shapes import PolygonInterpolator
+from openalea.granap.input_data import OrganInputData
 import matplotlib.pyplot as plt
 
 

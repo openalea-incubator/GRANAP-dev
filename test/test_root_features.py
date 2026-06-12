@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
 
-from granap.root_class import RootAnatomy
+from openalea.granap.root_class import RootAnatomy
 
 def test_root_features(show=False):
     t_start = time.time()

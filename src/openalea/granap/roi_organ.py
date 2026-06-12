@@ -7,9 +7,9 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 import roifile
 
-from granap.organ_class import Organ
-from granap.cell_class import Cell
-from granap.geometry_collection import GeometryProcessor
+from openalea.granap.organ_class import Organ
+from openalea.granap.cell_class import Cell
+from openalea.granap.geometry_collection import GeometryProcessor
 
 class RoiOrgan(Organ):
     """

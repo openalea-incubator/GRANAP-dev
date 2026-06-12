@@ -9,9 +9,9 @@ from shapely.affinity import scale
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex
 
-from granap.organ_class import Organ
-from granap.network_base import AbstractNetwork
-from granap.geometry_collection import GeometryProcessor
+from openalea.granap.organ_class import Organ
+from openalea.granap.network_base import AbstractNetwork
+from openalea.granap.geometry_collection import GeometryProcessor
 
 
 DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
@@ -57,7 +57,7 @@ class AnatomyWriter:
         using the same GeoDataFrame index as ``NetworkExporter.export``, so that
         XML cell id attributes map 1-to-1 to the GRANAP graph cell node ids.
         """
-        from granap.generate_cell import CellGenerator
+        from openalea.granap.generate_cell import CellGenerator
 
         cellgroups = {
             "exodermis": 1, "epidermis": 2, "endodermis": 3, "passage_cell": 3, "cortex": 4,
@@ -636,7 +636,7 @@ class NetworkExporter:
            define **walls** (one wall per cell-pair interface).
         3. Assign MECHA-compatible node indices and build the graph.
         """
-        from granap.generate_cell import CellGenerator
+        from openalea.granap.generate_cell import CellGenerator
         cells_gdf = self.organ.generate_cells()
 
         # Filter to cells with valid (non-null, non-empty) geometry — must match

@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
 
-from granap.needle_class import NeedleAnatomy
-from granap.root_class import RootAnatomy
-from granap.visualization import plot_layers_simple, plot_section
-from granap.input_data import OrganInputData
-from granap.organ_class import Organ
+from openalea.granap.needle_class import NeedleAnatomy
+from openalea.granap.root_class import RootAnatomy
+from openalea.granap.visualization import plot_layers_simple, plot_section
+from openalea.granap.input_data import OrganInputData
+from openalea.granap.organ_class import Organ
 
 def test_root_and_needle_networks(show=False):
     # Create a needle anatomy

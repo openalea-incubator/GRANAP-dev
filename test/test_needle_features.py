@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
 
-from granap.needle_class import NeedleAnatomy
-from granap.visualization import plot_layers_simple, plot_section
+from openalea.granap.needle_class import NeedleAnatomy
+from openalea.granap.visualization import plot_layers_simple, plot_section
 
 def test_needle(show=False):
 # Create a needle anatomy

@@ -10,14 +10,14 @@ import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 from scipy.sparse import lil_matrix
 import time
-from granap.layer_class import Layer
-from granap.layer_manager import LayerManager
-from granap.geometry_collection import GeometryProcessor
-from granap.generate_cell import CellGenerator
-from granap.cell_class import Cell
-from granap.cell_manager import CellManager
-from granap.network_base import AbstractNetwork
-from granap.input_data import OrganInputData
+from openalea.granap.layer_class import Layer
+from openalea.granap.layer_manager import LayerManager
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.generate_cell import CellGenerator
+from openalea.granap.cell_class import Cell
+from openalea.granap.cell_manager import CellManager
+from openalea.granap.network_base import AbstractNetwork
+from openalea.granap.input_data import OrganInputData
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -71,10 +71,10 @@ class Organ(AbstractNetwork, ABC):
                 organ_type = "needle"
 
         if organ_type == "needle":
-            from granap.needle_class import NeedleAnatomy
+            from openalea.granap.needle_class import NeedleAnatomy
             return NeedleAnatomy(input_data)
         else:
-            from granap.root_class import RootAnatomy
+            from openalea.granap.root_class import RootAnatomy
             return RootAnatomy(input_data)
     
     def add_layer(self, layer: Layer, position: Optional[int] = None) -> None:
@@ -476,27 +476,27 @@ class Organ(AbstractNetwork, ABC):
 
     def write_to_xml(self, path: str, **kwargs):
         """Write anatomy cross section as .xml file."""
-        from granap.anatomy_writer import AnatomyWriter
+        from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_xml(path, **kwargs)
 
     def write_xml_geometry(self, path: str, **kwargs):
         """Write anatomy cross section as .xml file for MECHA."""
-        from granap.anatomy_writer import AnatomyWriter
+        from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_xml_geometry(path, **kwargs)
         
     def write_to_obj(self, path: str, **kwargs):
         """Write anatomy cross section as .obj file."""
-        from granap.anatomy_writer import AnatomyWriter
+        from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_obj(path, **kwargs)
 
     def write_to_svg(self, path: str, **kwargs):
         """Write anatomy cross section as .svg file."""
-        from granap.anatomy_writer import AnatomyWriter
+        from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_svg(path, **kwargs)
         
     def write_to_geo(self, path: str, **kwargs):
         """Write anatomy cross section as .geo file for GMSH."""
-        from granap.anatomy_writer import AnatomyWriter
+        from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_geo(path, **kwargs)
 
 
@@ -522,7 +522,7 @@ class Organ(AbstractNetwork, ABC):
         Populate ``self.graph`` from the cell GeoDataFrame.
         Delegated to AnatomyWriter's NetworkExporter.
         """
-        from granap.anatomy_writer import NetworkExporter
+        from openalea.granap.anatomy_writer import NetworkExporter
         NetworkExporter(self).export(self)
 
     

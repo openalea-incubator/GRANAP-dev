@@ -1,8 +1,8 @@
 import os
 import sys
 
-from granap.roi_organ import RoiOrgan
-from granap.anatomy_writer import AnatomyWriter
+from openalea.granap.roi_organ import RoiOrgan
+from openalea.granap.anatomy_writer import AnatomyWriter
 
 try:
     from cramic.organ_to_domain import OrganDomain
@@ -16,7 +16,7 @@ wall_details = {
     "outerwall": 4,     # um
 }
 
-def test_manual_roi_loading():
+def test_manual_roi_loading(show=False):
     """
     Manual testing script for RoiOrgan behavior.
     Update the folder_path to point to a local directory with .roi files.
@@ -33,7 +33,7 @@ def test_manual_roi_loading():
 
     print(f"Loading Organ from ROIs in: {folder_path}")
     organ = RoiOrgan(folder_path=folder_path, mm_per_pixel=mm_per_pixel, smooth_factor=smooth_factor)
-    organ.plot_cells()
+    organ.plot_cells(show=show)
     
     # 1. Check generated GeoDataFrame
     gdf = organ.generate_cells()
@@ -91,4 +91,4 @@ def test_manual_roi_loading():
 
 
 if __name__ == "__main__":
-    test_manual_roi_loading()
+    test_manual_roi_loading(show=True)
