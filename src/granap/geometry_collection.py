@@ -11,6 +11,8 @@ from scipy.optimize import minimize
 from scipy.spatial import Delaunay, ConvexHull
 from shapely.ops import unary_union
 
+from granap.math_functions import GRADIENT_FUNCTIONS, rescale
+
 
 class GeometryProcessor:
     """
@@ -339,6 +341,7 @@ class GeometryProcessor:
         polygon,
         diam_max: float,
         diam_min: float,
+        gradient_function: str = "five_pl",
         gradient_inflection: float = 0.5,
         gradient_steepness: float = 3.0,
         gradient_asymmetry: float = 1.0,
@@ -348,20 +351,17 @@ class GeometryProcessor:
         Iterative Apollonian packing with a centre-to-edge size gradient.
 
         Circles near the polygon centroid get up to diam_max; circles near the
-        boundary get down to diam_min. Target diameter follows a 5-parameter
-        logistic (5PL) curve of normalised distance t from the centroid:
-
-            f(t) = diam_min + (diam_max - diam_min) / (1 + (t / c)^b)^m
-
-        where c = gradient_inflection, b = gradient_steepness, m = gradient_asymmetry.
+        boundary get down to diam_min. Target diameter is computed via
+        ``rescale(five_pl, lo=diam_min, hi=diam_max, c, b, m)``.
 
         Args:
             polygon:              Shapely polygon to fill
             diam_max:             Maximum circle diameter (at centroid, t=0)
             diam_min:             Minimum circle diameter (at boundary, t=1)
-            gradient_inflection:  5PL inflection point on [0, 1] (c parameter)
-            gradient_steepness:   5PL Hill coefficient — sharpness of transition (b)
-            gradient_asymmetry:   5PL asymmetry exponent (m)
+            gradient_function:    Name of the shape function from GRADIENT_FUNCTIONS (e.g. "five_pl", "linear")
+            gradient_inflection:  Inflection point on [0, 1] — passed as ``c`` to the shape function
+            gradient_steepness:   Hill coefficient — sharpness of transition — passed as ``b``
+            gradient_asymmetry:   Asymmetry exponent — passed as ``m``
             first_vessel_shift:   Maximum random shift of the first vessel centre,
                                   expressed as a fraction of the local inscribed radius.
                                   0.0 = deterministic (always at the Chebyshev centre).
@@ -369,6 +369,15 @@ class GeometryProcessor:
         Returns:
             List of (cx, cy, radius) tuples for each placed circle
         """
+        target_diam_fn = rescale(
+            GRADIENT_FUNCTIONS[gradient_function],
+            lo=diam_min,
+            hi=diam_max,
+            c=gradient_inflection,
+            b=gradient_steepness,
+            m=gradient_asymmetry,
+        )
+
         placed = []
         stack = [polygon]
 
@@ -401,13 +410,7 @@ class GeometryProcessor:
                         r_ins = new_r_ins
 
             t = min(np.hypot(cx - poly_cx, cy - poly_cy) / max_dist, 1.0)
-            if t <= 0.0:
-                target_diam = float(diam_max)
-            else:
-                target_diam = float(
-                    diam_min + (diam_max - diam_min)
-                    / (1.0 + (t / gradient_inflection) ** gradient_steepness) ** gradient_asymmetry
-                )
+            target_diam = target_diam_fn(t)
             r = min(r_ins, target_diam / 2)
 
             if r * 2 < diam_min:

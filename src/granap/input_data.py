@@ -1,7 +1,7 @@
 import xml.etree.ElementTree as ET
 import copy
 import warnings
-from typing import List, Dict, Any, Tuple, Optional, Union
+from typing import List, Dict, Any, Tuple, Optional, Union, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -103,13 +103,14 @@ class PericycleParams(BaseParams):
 
 # Monocotyledon-specific layers
 class SteleParams(BaseParams):
-    name                     : str   = "stele"
-    thickness                : float = Field(default=0.27,  ge=0.00001, title="Thickness")
-    cell_diameter            : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter (edge)",   description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_center     : float = Field(default=0.02,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
-    size_gradient_inflection : float = Field(default=0.3,   ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point (0 = center, 1 = edge).")
-    size_gradient_steepness  : float = Field(default=3.0,   ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL. Higher values produce a sharper size transition.")
-    size_gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry exponent m of the 5PL.")
+    name                     : str                        = "stele"
+    thickness                : float                      = Field(default=0.27,       ge=0.00001,        title="Thickness")
+    cell_diameter            : float                      = Field(default=0.01,       ge=0.00001,        title="Cell Diameter (edge)",        description="Cell diameter at the stele periphery (lower bound of the size gradient).")
+    cell_diameter_center     : float                      = Field(default=0.02,       ge=0.00001,        title="Cell Diameter (center)",      description="Cell diameter at the stele center (upper bound). Set equal to cell_diameter to disable the gradient.")
+    size_gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",                  title="Size Gradient Function",      description="Shape function used for the radial cell-size gradient.")
+    size_gradient_inflection : float                      = Field(default=0.3,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
+    size_gradient_steepness  : float                      = Field(default=3.0,        ge=0.1,            title="Size Gradient Steepness",     description="Hill coefficient — sharpness of the size transition. Used by five_pl.")
+    size_gradient_asymmetry  : float                      = Field(default=1.0,        ge=0.1,            title="Size Gradient Asymmetry",     description="Asymmetry exponent of the size gradient. Used by five_pl.")
 
 
 class RootXylemParams(BaseParams):
@@ -131,28 +132,30 @@ class RootPhloemParams(BaseParams):
 
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
-    name                     : str   = "stele"
-    thickness                : float = Field(default=0.6,   ge=0.00001, title="Thickness")
-    cell_diameter            : float = Field(default=0.015, ge=0.00001, title="Cell Diameter (edge)",   description="Lower asymptote of the 5PL gradient — cell diameter at the stele periphery.")
-    cell_diameter_center     : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (center)", description="Upper asymptote of the 5PL gradient — cell diameter at the stele center. Set equal to cell_diameter to disable the gradient.")
-    size_gradient_inflection : float = Field(default=0.3,   ge=0.001, le=1.0, title="Size Gradient Inflection", description="Normalized radial position of the 5PL inflection point for stele parenchyma cell size (0 = center, 1 = edge).")
-    size_gradient_steepness  : float = Field(default=3.0,   ge=0.1,          title="Size Gradient Steepness",   description="Hill coefficient b of the 5PL for stele parenchyma cell size.")
-    size_gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Size Gradient Asymmetry",   description="Asymmetry exponent m of the 5PL for stele parenchyma cell size.")
+    name                     : str                        = "stele"
+    thickness                : float                      = Field(default=0.5,        ge=0.00001,        title="Thickness")
+    cell_diameter            : float                      = Field(default=0.015,      ge=0.00001,        title="Cell Diameter (edge)",        description="Cell diameter at the stele periphery (lower bound of the size gradient).")
+    cell_diameter_center     : float                      = Field(default=0.03,       ge=0.00001,        title="Cell Diameter (center)",      description="Cell diameter at the stele center (upper bound). Set equal to cell_diameter to disable the gradient.")
+    size_gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",                  title="Size Gradient Function",      description="Shape function used for the radial cell-size gradient.")
+    size_gradient_inflection : float                      = Field(default=0.3,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
+    size_gradient_steepness  : float                      = Field(default=3.0,        ge=0.1,            title="Size Gradient Steepness",     description="Hill coefficient — sharpness of the size transition. Used by five_pl.")
+    size_gradient_asymmetry  : float                      = Field(default=1.0,        ge=0.1,            title="Size Gradient Asymmetry",     description="Asymmetry exponent of the size gradient. Used by five_pl.")
 
 
 class DicotXylemParams(BaseParams):
     name                : str   = "xylem"
     n_vascular_peak     : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of xylem arms in the star pattern.")
-    inner_radius        : float = Field(default=0.05,  ge=0.00001, title="Inner Radius",             description="Inner radius of the xylem star arms from the stele centre.")
+    inner_radius        : float = Field(default=0.1,  ge=0.00001, title="Inner Radius",             description="Inner radius of the xylem star arms from the stele centre.")
     outer_radius        : float = Field(default=0.22,  ge=0.00001, title="Outer Radius",             description="Outer radius of the xylem star arms from the stele centre.")
     arc_top             : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
-    arc_bottom          : float = Field(default=0.035,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
-    cell_diameter       : float = Field(default=0.08,  ge=0.00001, title="Cell Diameter (max)",      description="Maximum vessel diameter at the star centre (5PL upper asymptote).")
-    cell_diameter_min   : float = Field(default=0.03,  ge=0.00001, title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (5PL lower asymptote).")
-    cell_diameter_sd    : float = Field(default=0.002, ge=0.0,     title="Cell Diameter SD",         description="Standard deviation added to each vessel diameter.")
-    gradient_inflection : float = Field(default=0.7,   ge=0.001, le=1.0, title="Gradient Inflection", description="Normalized distance at which the 5PL inflects for vessel size (0 = centre, 1 = tip).")
-    gradient_steepness  : float = Field(default=5.0,   ge=0.1,          title="Gradient Steepness",  description="Hill coefficient b of the 5PL for vessel size.")
-    gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,          title="Gradient Asymmetry",  description="Asymmetry exponent m of the 5PL for vessel size.")
+    arc_bottom          : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
+    cell_diameter       : float                        = Field(default=0.08,  ge=0.00001,        title="Cell Diameter (max)",      description="Maximum vessel diameter at the star centre (upper bound of the size gradient).")
+    cell_diameter_min   : float                        = Field(default=0.02,  ge=0.00001,        title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (lower bound of the size gradient).")
+    cell_diameter_sd    : float                        = Field(default=0.002, ge=0.0,            title="Cell Diameter SD",         description="Standard deviation added to each vessel diameter.")
+    gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",               title="Gradient Function",        description="Shape function used for the centre-to-tip vessel size gradient.")
+    gradient_inflection : float                        = Field(default=0.7,   ge=0.001, le=1.0,  title="Gradient Inflection",     description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
+    gradient_steepness  : float                        = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
+    gradient_asymmetry  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",      description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     first_vessel_shift  : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
 
 
@@ -162,18 +165,17 @@ class DicotPhloemParams(BaseParams):
     cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
     width            : float = Field(default=0.1,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
     height           : float = Field(default=0.05,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
-    relative_cambium : float = Field(default=0.2,    ge=0.0, le = 1.0, title="Relative Distance Cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
+    relative_cambium : float = Field(default=0.8,    ge=0.0, le = 1.0, title="Relative Distance Cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
 
 
 class DicotCambiumParams(BaseParams):
     name             : str   = "cambium"
-    cell_diameter    : float = Field(default=0.006,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
-    cell_width       : float = Field(default=0.01,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
-    n_layers         : int   = Field(default=2,      ge=1,       title="Number of Layers", description="Number of cambium layers.")
+    cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
+    cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     # for primary growth
-    primary_visible_distance : float = Field(default=0.16,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward primary_outer_distance for a more mature (complete ring) cambium.")
-    primary_inner_distance : float = Field(default=0.11,   ge=0.00001, title="Primary Start Distance", description="Inner radius of the cambium ring from the stele centre at primary growth.")
-    primary_outer_distance : float = Field(default=0.25,   ge=0.00001, title="Primary End Distance", description="Outer clip radius of the cambium ring from the stele centre at primary growth.")
+    primary_visible_distance : float = Field(default=0.8,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
+    primary_inner_distance   : float = Field(default=0.11,  ge=0.00001, title="Primary Start Distance",   description="Inner radius of the cambium ring from the stele centre at primary growth.")
+    primary_outer_distance   : float = Field(default=0.28,  ge=0.00001, title="Primary Outer Distance",   description="Outer radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
     primary_arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
     primary_arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
     # for secondary growth

@@ -16,6 +16,7 @@ from granap.cell_manager import CellManager
 from granap.geometry_collection import GeometryProcessor
 from granap.generate_cell import CellGenerator
 from granap.input_data import OrganInputData
+from granap.math_functions import GRADIENT_FUNCTIONS, rescale
 from collections import defaultdict
 
 class RootAnatomy(Organ):
@@ -58,6 +59,7 @@ class RootAnatomy(Organ):
             "thickness":                stele["thickness"],
             "cell_diameter":            stele["cell_diameter"],
             "cell_diameter_center":     stele.get("cell_diameter_center", stele["cell_diameter"]),
+            "size_gradient_function":   stele.get("size_gradient_function", "five_pl"),
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
@@ -92,6 +94,7 @@ class RootAnatomy(Organ):
                 "outer_radius_xylem":        float(xylem.get("outer_radius",        0.22)),
                 "arc_top_xylem":             float(xylem.get("arc_top",             0.03)),
                 "arc_bottom_xylem":          float(xylem.get("arc_bottom",          0.03)),
+                "xylem_gradient_function":   str(xylem.get("gradient_function",   "five_pl")),
                 "xylem_gradient_inflection": float(xylem.get("gradient_inflection", 0.7)),
                 "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",  5.0)),
                 "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",  1.0)),
@@ -104,9 +107,8 @@ class RootAnatomy(Organ):
                 "relative_cambium":          float(phloem.get("relative_cambium",   0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
-                "cambium_n_layers":          int(cambium.get("n_layers",            1)),
-                "cambium_primary_inner_distance":  float(cambium.get("primary_inner_distance",  0.10)),
-                "cambium_primary_outer_distance":  float(cambium.get("primary_outer_distance",  0.25)),
+                "cambium_primary_inner_distance":   float(cambium.get("primary_inner_distance",   0.10)),
+                "cambium_primary_outer_distance":   float(cambium.get("primary_outer_distance",   0.28)),
                 "cambium_primary_visible_distance": float(cambium.get("primary_visible_distance", 0.15)),
                 "cambium_primary_arc_top": float(cambium.get("primary_arc_top", 0.1)),
                 "cambium_primary_arc_bottom": float(cambium.get("primary_arc_bottom", 0.07)),
@@ -147,54 +149,14 @@ class RootAnatomy(Organ):
         
         return radius
     
-    def _stele_cell_diameter_5pl(self, r_norm: float) -> float:
-        """Return the stele cell diameter at normalized radius *r_norm* between [0, 1].
-
-        Uses the 5-parameter logistic (5PL) model::
-
-            f(r) = d + (a - d) / (1 + (r / c)^b)^m
-
-        Parameters
-        ----------
-        r_norm : float
-            Normalized radial position: 0 = stele centre, 1 = stele edge.
-
-        Returns
-        -------
-        float
-            Cell diameter predicted by the 5PL at position *r_norm*.
-
-        Notes
-        -----
-        Mapping to vascular_params:
-
-        * ``a`` = ``cell_diameter_center``  — upper asymptote (value at r = 0, centre)
-        * ``d`` = ``cell_diameter``      — lower asymptote (value at r → infinity, edge)
-        * ``c`` = ``size_gradient_inflection`` — inflection position on [0, 1]
-        * ``b`` = ``size_gradient_steepness``  — Hill coefficient (transition sharpness)
-        * ``m`` = ``size_gradient_asymmetry``  — skew parameter
-        """
-        a = self.vascular_params["cell_diameter_center"]
-        d = self.vascular_params["cell_diameter"]
-        if a == d:
-            return d  # gradient disabled — fast path
-
-        c = self.vascular_params["size_gradient_inflection"]
-        b = self.vascular_params["size_gradient_steepness"]
-        m = self.vascular_params["size_gradient_asymmetry"]
-
-        if r_norm <= 0.0:
-            return float(a)
-        return float(d + (a - d) / (1.0 + (r_norm / c) ** b) ** m)
-
     def _create_central_layers(self, current_polygon: Polygon,
                                params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Create stele parenchyma rings from the stele edge toward the centre.
 
-        Cell diameter follows the 5PL gradient defined in :meth:`_stele_cell_diameter_5pl`:
-        rings near the periphery receive ``cell_diameter`` (lower asymptote) and rings
-        near the centre receive ``cell_diameter_center`` (upper asymptote).  When both
-        values are equal the gradient is flat and behaviour is identical to the uniform distribution.
+        Cell diameter follows a size gradient: rings near the periphery receive
+        ``cell_diameter`` (lower bound) and rings near the centre receive
+        ``cell_diameter_center`` (upper bound).  When both values are equal the
+        gradient is flat and behaviour is identical to the uniform distribution.
 
         Args:
             current_polygon: Innermost polygon after all outer layers have been built.
@@ -205,7 +167,16 @@ class RootAnatomy(Organ):
         """
         central_layers = []
 
-        # Stele radius at entry — used to normalise radial position for the 5PL.
+        diameter_fn = rescale(
+            GRADIENT_FUNCTIONS[self.vascular_params["size_gradient_function"]],
+            lo=self.vascular_params["cell_diameter"],
+            hi=self.vascular_params["cell_diameter_center"],
+            c=self.vascular_params["size_gradient_inflection"],
+            b=self.vascular_params["size_gradient_steepness"],
+            m=self.vascular_params["size_gradient_asymmetry"],
+        )
+
+        # Stele radius at entry — used to normalise radial position.
         stele_radius = np.sqrt(current_polygon.area / np.pi)
 
         # First space increment: half the cell diameter of the innermost non-stele layer.
@@ -217,7 +188,7 @@ class RootAnatomy(Organ):
         while not current_polygon.is_empty and current_polygon.area > 0:
             # Normalized radius of the current ring (outer edge of the ring to be placed).
             r_norm = np.clip(np.sqrt(current_polygon.area / np.pi) / stele_radius, 0.0, 1.0)
-            cell_diameter = self._stele_cell_diameter_5pl(r_norm)
+            cell_diameter = diameter_fn(r_norm)
 
             # Stop when the remaining area is too small to fit even one cell.
             if current_polygon.area <= (cell_diameter / 2) ** 2 * np.pi:
@@ -365,6 +336,7 @@ class RootAnatomy(Organ):
             star,
             diam_max=p["xylem_diameter_max"],
             diam_min=p["xylem_diameter_min"],
+            gradient_function=p["xylem_gradient_function"],
             gradient_inflection=p["xylem_gradient_inflection"],
             gradient_steepness=p["xylem_gradient_steepness"],
             gradient_asymmetry=p["xylem_gradient_asymmetry"],
@@ -445,7 +417,7 @@ class RootAnatomy(Organ):
             if not (
                 c.type == "stele"
                 and self.xylem_star.contains(Point(c.x, c.y))
-                and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.5
+                and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.6
             )
         ]
 
@@ -454,15 +426,14 @@ class RootAnatomy(Organ):
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
 
-        outer_radius_cambium = p["cambium_primary_outer_distance"]
         inner_radius_cambium = p["cambium_primary_inner_distance"]
-        primary_arc_top = p["cambium_primary_arc_top"]        
+        primary_arc_top = p["cambium_primary_arc_top"]
         primary_arc_bottom = p["cambium_primary_arc_bottom"]
-
-        # Clamp radii so the star never exceeds the stele
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        outer_r = min(outer_radius_cambium, stele_r * 0.95)
-        inner_r = min(inner_radius_cambium, stele_r * 0.90)
+
+        pericycle = self.layer_manager.get_layer("pericycle")
+        outer_r = min(p["cambium_primary_outer_distance"], stele_r + pericycle.cell_diameter if pericycle else 0)
+        inner_r = min(inner_radius_cambium, outer_r)
 
         # Build star at the origin, smooth, translate to stele centre, clip
         raw_star = GeometryProcessor.star_polygon(
@@ -479,8 +450,8 @@ class RootAnatomy(Organ):
             iterations=5,
         )
         star = Polygon(star_coord).buffer(0)
-        # Translate star to stele centre, clip to stele boundary
-        star = translate(star, cx, cy).intersection(stele_polygon)
+        # Translate star to stele centre
+        star = translate(star, cx, cy)
         if star.is_empty:
             return
 
@@ -496,79 +467,69 @@ class RootAnatomy(Organ):
 
         cell_diam  = p["cambium_cell_diameter"]
         cell_width = p["cambium_cell_width"]
-        n_layers   = p["cambium_n_layers"]
 
-        # Remove stele parenchyma seeds inside the thin cambium band.
-        # Xylem seeds are left untouched.
-        thin_ring = visible_boundary.buffer(cell_diam * n_layers)
+        # Remove stele parenchyma and pericycle seeds inside the thin cambium band.
+        thin_ring = visible_boundary.buffer(cell_diam/2)
+        groups_to_delete = {
+            c.id_group
+            for c in self.all_cells.cells
+            if c.type in ("stele", "pericycle") and thin_ring.intersects(Point(c.x, c.y))
+        }
         self.all_cells.cells = [
             c for c in self.all_cells.cells
-            if c.type != "stele" or not thin_ring.contains(Point(c.x, c.y))
+            if c.type not in ("stele", "pericycle") or c.id_group not in groups_to_delete
         ]
 
         # For each layer, buffer the boundary line outward and place cell seeds
-        # along the exterior of the resulting polygon.
         next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
         center = stele_polygon.centroid
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None
 
         line_segs = list(visible_boundary.geoms) if hasattr(visible_boundary, "geoms") else [visible_boundary]
 
-        for i_layer in range(n_layers):
-            for line_seg in line_segs:
-                # For layer 0 sample along the line itself; for additional layers
-                # offset the line outward using parallel_offset.
-                if i_layer == 0:
-                    raw_coords = np.array(line_seg.coords)
-                    seg_length = line_seg.length
-                else:
-                    try:
-                        offset_line = line_seg.parallel_offset(cell_diam * i_layer, side="left")
-                        if hasattr(offset_line, "geoms"):
-                            offset_line = max(offset_line.geoms, key=lambda g: g.length)
-                        raw_coords = np.array(offset_line.coords)
-                        seg_length = offset_line.length
-                    except Exception:
-                        raw_coords = np.array(line_seg.coords)
-                        seg_length = line_seg.length
+        for line_seg in line_segs:
+            # Place cells directly on the cambium boundary line, mirroring cells_on_layer
+            raw_coords = np.array(line_seg.coords)
+            seg_length = line_seg.length
 
-                n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
-                cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
+            n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
+            cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
 
-                if len(cells_coords) < 2:
-                    continue
+            if len(cells_coords) < 2:
+                continue
 
-                layer_cell_borders = CellGenerator.cell_border(
-                    cells_coords,
-                    cell_width * 0.7 if cell_width else cell_diam * 0.7,
-                    cell_diam  * 0.7 if cell_width else 0,
-                )
+            layer_cell_borders = CellGenerator.cell_border(
+                cells_coords,
+                cell_width * 0.7 if cell_width else cell_diam * 0.7,
+                cell_diam  * 0.7 if cell_width else 0,
+            )
 
-                for i, _coord in enumerate(cells_coords[1:]):
-                    if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
-                        next_id_group += 1
-                        continue
-                    id_group = next_id_group
+            for i, _coord in enumerate(cells_coords[1:]):
+                if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
                     next_id_group += 1
-                    for border_pt in layer_cell_borders[i][1:]:
-                        self.vascular_cells.add_cell(Cell(
-                            type="cambium",
-                            x=border_pt[0],
-                            y=border_pt[1],
-                            diameter=cell_diam,
-                            id_cell=id_group,
-                            id_layer=0,
-                            id_group=id_group,
-                            angle=np.arctan2(
-                                border_pt[1] - center.y,
-                                border_pt[0] - center.x,
-                            ),
-                            radius=np.sqrt(
-                                (border_pt[0] - center.x) ** 2
-                                + (border_pt[1] - center.y) ** 2
-                            ),
-                            area=np.pi * (cell_diam / 2) ** 2,
-                        ))
+                    continue
+                id_group = next_id_group
+                next_id_group += 1
+                for border_pt in layer_cell_borders[i][1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type="cambium",
+                        x=border_pt[0],
+                        y=border_pt[1],
+                        diameter=cell_diam,
+                        id_cell=id_group,
+                        id_layer=0,
+                        id_group=id_group,
+                        angle=np.arctan2(
+                            border_pt[1] - center.y,
+                            border_pt[0] - center.x,
+                        ),
+                        radius=np.sqrt(
+                            (border_pt[0] - center.x) ** 2
+                            + (border_pt[1] - center.y) ** 2
+                        ),
+                        area=np.pi * (cell_diam / 2) ** 2,
+                    ))
+            
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Place one phloem ellipse per valley between xylem peaks, filled with Apollonian packing."""
@@ -585,23 +546,25 @@ class RootAnatomy(Organ):
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
         cambium_inner = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
 
-        r_center = cambium_inner + p["cambium_cell_diameter"] * p["cambium_n_layers"] + (height/2) + (stele_r - p["cambium_cell_diameter"] - (height) - cambium_inner) * relative_distance 
+        # cambium_cell_diameter marks where the cambium boundary sits (inner edge + one cell thickness).
+        # relative_distance then interpolates the phloem bundle center between that position and the stele edge.
+        r_center = cambium_inner + p["cambium_cell_diameter"] + (height/2) + (stele_r - p["cambium_cell_diameter"] - (height) - cambium_inner) * relative_distance
 
-        xylem_star = getattr(self, "xylem_star", None)
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        xylem_star = getattr(self, "xylem_star", None) # get the star-shaped xylem region if it exists, to avoid placing phloem cells there
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0 # unique id_group for each phloem region
 
         for k in range(n_peaks):
-            theta = 2 * np.pi * (k + 0.5) / n_peaks
+            theta = 2 * np.pi * (k + 0.5) / n_peaks # place phloem in the middle of the valley between xylem peaks
 
             # Build ellipse at origin (height=radial, width=tangential), then orient and place
-            raw = Point(0, 0).buffer(1, resolution=64)
-            raw = affine_scale(raw, width / 2, height / 2)
-            raw = rotate(raw, np.degrees(theta) - 90, origin=(0, 0))
-            raw = translate(raw, cx + r_center * np.cos(theta), cy + r_center * np.sin(theta))
+            raw = Point(0, 0).buffer(1, resolution=64) # unit circle
+            raw = affine_scale(raw, width / 2, height / 2) # scale to ellipse dimensions
+            raw = rotate(raw, np.degrees(theta) - 90, origin=(0, 0)) # rotate so the height axis points radially
+            raw = translate(raw, cx + r_center * np.cos(theta), cy + r_center * np.sin(theta)) # translate to position
 
-            ellipse = raw.intersection(stele_polygon)
-            if xylem_star is not None and not xylem_star.is_empty:
-                ellipse = ellipse.difference(xylem_star)
+            ellipse = raw.intersection(stele_polygon) # clip to stele boundary
+            if xylem_star is not None and not xylem_star.is_empty: 
+                ellipse = ellipse.difference(xylem_star) # further remove the star-shaped xylem region from the phloem ellipse to avoid placing phloem cells there
             if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2:
                 continue
 
@@ -611,12 +574,14 @@ class RootAnatomy(Organ):
                 if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
             ]
 
+            # Apollonian packing: returns (cx, cy, r) already in stele-centre coordinates
             packed = GeometryProcessor.apollonian_pack(
                 ellipse,
                 diam_max=cell_diam,
                 diam_min=cell_diam,
             )
 
+            # For each packed circle, add some noise to the diameter, create a cell polygon, and place cell seeds along its border.
             for pcx, pcy, r in packed:
                 actual_diam = float(np.clip(np.random.normal(r * 2, cell_sd), cell_diam * 0.1, np.inf))
                 actual_r = actual_diam / 2
@@ -627,7 +592,7 @@ class RootAnatomy(Organ):
                     continue
 
                 bx, by = placed_buff.exterior.coords.xy
-                border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=25)
+                border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=25) # resample to get evenly spaced seed points along the border
 
                 id_group = next_id_group
                 next_id_group += 1
@@ -644,7 +609,7 @@ class RootAnatomy(Organ):
                         radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
                         area=np.pi * actual_r ** 2,
                     ))
-                self.vascular_polygons.append(placed)
+                # self.vascular_polygons.append(placed)  # TODO: adding phloem to vascular_polygons clears a larger area than seeds cover (placed vs placed_buff), creating a dead zone — investigate
 
     def fit_phloem_protoxylem_elements(self, polygon):
 

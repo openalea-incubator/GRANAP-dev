@@ -37,14 +37,12 @@ BASE_KWARGS = {
 }
 
 BASE_CAMBIUM = {
-    "cell_diameter":           0.006,
-    "cell_width":              0.01,
-    "n_layers":                1,
-    "primary_inner_distance":  0.11,
-    "primary_outer_distance":  0.25,
+    "cell_diameter":            0.006,
+    "cell_width":               0.01,
+    "primary_inner_distance":   0.11,
     "primary_visible_distance": 0.27,
-    "primary_arc_top":         0.05,
-    "primary_arc_bottom":      0.07,
+    "primary_arc_top":          0.05,
+    "primary_arc_bottom":       0.07,
 }
 
 scenarios = [
@@ -86,17 +84,17 @@ scenarios = [
     {
         "label": "Narrow star\n(inner=0.10, outer=0.15)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.10, "outer_radius": 0.15},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.14, "primary_outer_distance": 0.18, "primary_visible_distance": 0.16}
+        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.14, "primary_visible_distance": 0.16}
     },
     {
         "label": "Wide star\n(inner=0.15, outer=0.20)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.20},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.19, "primary_outer_distance": 0.26},
+        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.19, "primary_visible_distance": 0.40},
     },
     {
         "label": "Circle\n(inner=0.15, outer=0.15)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.15},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.17, "primary_outer_distance": 0.17, "primary_visible_distance": 0.17}
+        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.17, "primary_visible_distance": 0.17}
     },
 ]
 
