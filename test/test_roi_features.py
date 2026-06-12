@@ -1,8 +1,8 @@
 import os
 import sys
 
-from granap.roi_organ import RoiOrgan
-from granap.anatomy_writer import AnatomyWriter
+from openalea.granap.roi_organ import RoiOrgan
+from openalea.granap.anatomy_writer import AnatomyWriter
 
 try:
     from cramic.organ_to_domain import OrganDomain
@@ -16,14 +16,14 @@ wall_details = {
     "outerwall": 4,     # um
 }
 
-def test_manual_roi_loading():
+def test_manual_roi_loading(show=False):
     """
     Manual testing script for RoiOrgan behavior.
     Update the folder_path to point to a local directory with .roi files.
     """
     # ====== CONFIGURE YOUR PATH HERE ======
-    folder_path = "test/inputs/Pavement_RoiSet/"  
-    mm_per_pixel = 0.00273
+    folder_path = "inputs/Hypocotyl_RoiSet/"  
+    mm_per_pixel = 0.001
     smooth_factor = 0.05
     # ======================================
     
@@ -33,7 +33,7 @@ def test_manual_roi_loading():
 
     print(f"Loading Organ from ROIs in: {folder_path}")
     organ = RoiOrgan(folder_path=folder_path, mm_per_pixel=mm_per_pixel, smooth_factor=smooth_factor)
-    organ.plot_cells()
+    organ.plot_cells(show=show)
     
     # 1. Check generated GeoDataFrame
     gdf = organ.generate_cells()
@@ -42,9 +42,12 @@ def test_manual_roi_loading():
     
     print("\nCell distribution:")
     if 'type' in gdf.columns:
-        print(gdf['type'].value_counts().to_string())
+        cell_type = gdf['type'].value_counts().to_string()
+        print(f"{cell_type}")
+
+    base_shape_area = organ.generate_base_shape().area
         
-    print(f"Convex Hull area: {organ.generate_base_shape().area:.2f} um^2\n")
+    print(f"Area of base shape: {base_shape_area:.2f} mm^2\n")
 
     # 2. Test writing GEO layout 
     out_dir = os.path.join(folder_path, "output_tests")
@@ -53,6 +56,12 @@ def test_manual_roi_loading():
     geo_path = os.path.join(out_dir, "roi_tissue.geo")
     writer = AnatomyWriter(organ)
     writer.write_to_geo(geo_path, cell_wall_thickness=wall_details)
+
+    assert 'epidermis' in gdf['type'].unique(), "No epidermis cells found!"
+    assert base_shape_area < 1000, "Organ area is too big!"
+    assert base_shape_area > 0.01, "Organ area is too small!"
+    assert len(gdf) > 0, "No cells found!"
+    
     print(f"[*] Anatomy GEO successfully written to: {geo_path}")
     
     # 3. Test CRAMIC Integration
@@ -82,4 +91,4 @@ def test_manual_roi_loading():
 
 
 if __name__ == "__main__":
-    test_manual_roi_loading()
+    test_manual_roi_loading(show=True)
