@@ -8,15 +8,18 @@ sys.path.append(os.path.abspath('..'))
 from granap.needle_class import NeedleAnatomy
 from granap.visualization import plot_layers_simple, plot_section
 
+def test_needle(show=False):
 # Create a needle anatomy
-needle = NeedleAnatomy()
+    needle = NeedleAnatomy()
 
-needle.update_params("resin_duct", "n_files", 2)
-needle.update_params("stomata", "n_files", 10)
-needle.plot_layers(show=True, title=f"Needle Layers")
+    needle.update_params("resin_duct", "n_files", 2)
+    needle.update_params("stomata", "n_files", 10)
+    needle.plot_layers(show=show, title=f"Needle Layers")
 
-needle.plot_cells(show=True, title=f"Needle Cells")
+    needle.plot_cells(show=show, title=f"Needle Cells")
 
+    _ = needle.export_to_adjencymatrix()
+    needle.plot_network(show=show, title="Needle Network")
 
-_ = needle.export_to_adjencymatrix()
-needle.plot_network(show=True, title="Needle Network")
+if __name__ == "__main__":
+    test_needle(show=True)

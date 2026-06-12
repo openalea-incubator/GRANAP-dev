@@ -230,7 +230,7 @@ class AbstractNetwork(ABC):
             or (actual_a == want_b and actual_b == want_a)
         )
 
-    def plot_network(self, **kwargs):
+    def plot_network(self, show:bool = True, ax = None, **kwargs):
         position = kwargs.get('position', nx.get_node_attributes(self.graph, 'position'))
         node_types = kwargs.get('node_types', nx.get_node_attributes(self.graph, 'cell_type'))
     
@@ -254,7 +254,6 @@ class AbstractNetwork(ABC):
             edge_colors.append(edge_color_map.get(edge_type, 'purple'))
     
         # Draw the network
-        ax = kwargs.get('ax')
         fig = None
         if ax is None:
             fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
@@ -274,6 +273,6 @@ class AbstractNetwork(ABC):
         # ax.set_title(kwargs.get('title', 'Network Visualization'))
         ax.set_aspect('equal', adjustable='box')
         
-        if fig is not None:
+        if (fig is not None) and show:
             plt.tight_layout()
             plt.show()
