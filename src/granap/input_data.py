@@ -339,9 +339,27 @@ class OrganInputData(BaseModel):
             "pericycle":             PericycleParams(),
         }
 
+        # Translate legacy GRANAR XML attribute names → current field names.
+        # Format: { tag_name: { old_attr: new_attr, ... } }
+        _ATTR_RENAMES: Dict[str, Dict[str, str]] = {
+            "planttype": {
+                "param": "value",
+            },
+            "stele": {
+                "layer_diameter": "thickness",
+            },
+            "aerenchyma": {
+                "proportion": "aerenchyma_proportion",
+                "type":       "aerenchyma_type",
+            },
+        }
+
         tree = ET.parse(xml_path)
         root = tree.getroot()
-        params = []
+
+        # --- Pass 1: collect raw dicts with per-tag renames applied ----------
+        raw: Dict[str, Dict[str, Any]] = {}   # keyed by tag name (last wins)
+        ordered_tags: List[str] = []
         for child in root:
             param_dict: Dict[str, Any] = {"name": child.tag}
             for key, value in child.attrib.items():
@@ -349,21 +367,47 @@ class OrganInputData(BaseModel):
                     param_dict[key] = float(value)
                 except ValueError:
                     param_dict[key] = value
-            # Fill in any missing fields from the Pydantic defaults
-            if child.tag in _DEFAULTS_BY_NAME:
-                defaults = _DEFAULTS_BY_NAME[child.tag].model_dump()
+            # Rename legacy XML attribute names to current field names
+            renames = _ATTR_RENAMES.get(child.tag, {})
+            for old_key, new_key in renames.items():
+                if old_key in param_dict:
+                    param_dict[new_key] = param_dict.pop(old_key)
+            raw[child.tag] = param_dict
+            ordered_tags.append(child.tag)
+
+        # --- Cross-tag merges ------------------------------------------------
+        # Old GRANAR XML splits stele geometry (<stele>) and vascular element
+        # parameters (<xylem>) into separate tags.  The new SteleParams
+        # consolidates both.  Map <xylem> attributes into the stele dict.
+        _XYLEM_TO_STELE: Dict[str, str] = {
+            "max_size": "xylem_diameter",
+            "n_files":  "n_vascular_bundles",
+            "ratio":    "ratio_proto_meta",
+        }
+        if "stele" in raw and "xylem" in raw:
+            xylem_raw = raw["xylem"]
+            for xylem_key, stele_key in _XYLEM_TO_STELE.items():
+                if xylem_key in xylem_raw and stele_key not in raw["stele"]:
+                    raw["stele"][stele_key] = xylem_raw[xylem_key]
+
+        # --- Pass 2: apply Pydantic defaults and emit warnings ---------------
+        import warnings
+        params = []
+        for tag in ordered_tags:
+            param_dict = raw[tag]
+            if tag in _DEFAULTS_BY_NAME:
+                defaults = _DEFAULTS_BY_NAME[tag].model_dump()
                 missing = {k: v for k, v in defaults.items() if k not in param_dict}
                 if missing:
                     lines = "\n".join(f"    {k} = {v}" for k, v in missing.items())
-                    import warnings
-                    warnings.warn(
-                        f"[from_xml] '{child.tag}': the following fields were not found in the XML "
-                        f"and have been set to their defaults:\n{lines}",
-                        UserWarning, stacklevel=2,
+                    print(
+                        f"[from_xml] '{tag}': the following fields were not found in the XML "
+                        f"and have been set to their defaults:\n{lines}"
                     )
                 param_dict = {**defaults, **param_dict}
             params.append(param_dict)
         return cls(params=params)
+
 
     @classmethod
     def for_root(cls) -> "OrganInputData":

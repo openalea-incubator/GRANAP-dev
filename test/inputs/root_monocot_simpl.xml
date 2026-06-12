@@ -22,7 +22,7 @@
 	<!-- max_size = maximum cell diameter  [mm] -->
 	<!-- n_files = number of metaxylem elements -->
 	<!-- ratio = ratio of proto vs. metaxylem elements -->
-	<xylem max_size="0.06" cell_diameter = "0.01" n_files = "5" n_cells="12" order="1.5" ratio ="3.3" />
+	<xylem max_size="0.06" cell_diameter = "0.01" n_files = "3" n_cells="12" order="1.5" ratio ="3.3" />
 	
 	<!-- Other cell types -->
 	<aerenchyma proportion="0" n_files="2" type = "1" /> <!-- 1 = strip / 2 = patch -->

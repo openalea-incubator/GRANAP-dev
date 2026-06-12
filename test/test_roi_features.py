@@ -22,8 +22,8 @@ def test_manual_roi_loading():
     Update the folder_path to point to a local directory with .roi files.
     """
     # ====== CONFIGURE YOUR PATH HERE ======
-    folder_path = "test/inputs/Pavement_RoiSet/"  
-    mm_per_pixel = 0.00273
+    folder_path = "inputs/Hypocotyl_RoiSet/"  
+    mm_per_pixel = 0.001
     smooth_factor = 0.05
     # ======================================
     
@@ -42,9 +42,12 @@ def test_manual_roi_loading():
     
     print("\nCell distribution:")
     if 'type' in gdf.columns:
-        print(gdf['type'].value_counts().to_string())
+        cell_type = gdf['type'].value_counts().to_string()
+        print(f"{cell_type}")
+
+    base_shape_area = organ.generate_base_shape().area
         
-    print(f"Convex Hull area: {organ.generate_base_shape().area:.2f} um^2\n")
+    print(f"Area of base shape: {base_shape_area:.2f} mm^2\n")
 
     # 2. Test writing GEO layout 
     out_dir = os.path.join(folder_path, "output_tests")
@@ -53,6 +56,12 @@ def test_manual_roi_loading():
     geo_path = os.path.join(out_dir, "roi_tissue.geo")
     writer = AnatomyWriter(organ)
     writer.write_to_geo(geo_path, cell_wall_thickness=wall_details)
+
+    assert 'epidermis' in gdf['type'].unique(), "No epidermis cells found!"
+    assert base_shape_area < 1000, "Organ area is too big!"
+    assert base_shape_area > 0.01, "Organ area is too small!"
+    assert len(gdf) > 0, "No cells found!"
+    
     print(f"[*] Anatomy GEO successfully written to: {geo_path}")
     
     # 3. Test CRAMIC Integration
