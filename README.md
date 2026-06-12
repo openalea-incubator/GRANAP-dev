@@ -19,7 +19,5 @@ Warning :
 
 ## Code structure
 
-For an interactive browsing, use the following link: 
+For an interactive browsing, use the following link: TODO 
 
-Bellow is a preview
-![Call graph](doc/callgraph/preview.svg)
