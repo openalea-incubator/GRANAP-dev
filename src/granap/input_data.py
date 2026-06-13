@@ -149,9 +149,9 @@ class DicotXylemParams(BaseParams):
     outer_radius        : float = Field(default=0.22,  ge=0.00001, title="Outer Radius",             description="Outer radius of the xylem star arms from the stele centre.")
     arc_top             : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
     arc_bottom          : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
-    cell_diameter       : float                        = Field(default=0.08,  ge=0.00001,        title="Cell Diameter (max)",      description="Maximum vessel diameter at the star centre (upper bound of the size gradient).")
-    cell_diameter_min   : float                        = Field(default=0.02,  ge=0.00001,        title="Cell Diameter (min)",      description="Minimum vessel diameter at the star tips (lower bound of the size gradient).")
-    cell_diameter_sd    : float                        = Field(default=0.002, ge=0.0,            title="Cell Diameter SD",         description="Standard deviation added to each vessel diameter.")
+    vessel_diameter     : float                        = Field(default=0.08,  ge=0.00001,        title="Vessel Diameter (max)",    description="Maximum vessel diameter at the star centre (upper bound of the size gradient).")
+    vessel_diameter_min : float                        = Field(default=0.02,  ge=0.00001,        title="Vessel Diameter (min)",    description="Minimum vessel diameter at the star tips (lower bound of the size gradient).")
+    vessel_diameter_sd  : float                        = Field(default=0.002, ge=0.0,            title="Vessel Diameter SD",       description="Standard deviation added to each vessel diameter.")
     gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",               title="Gradient Function",        description="Shape function used for the centre-to-tip vessel size gradient.")
     gradient_inflection : float                        = Field(default=0.7,   ge=0.001, le=1.0,  title="Gradient Inflection",     description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
     gradient_steepness  : float                        = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
@@ -161,8 +161,8 @@ class DicotXylemParams(BaseParams):
 
 class DicotPhloemParams(BaseParams):
     name             : str   = "phloem"
-    cell_diameter    : float = Field(default=0.012,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
-    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
+    vessel_diameter    : float = Field(default=0.012,  ge=0.00001, title="Vessel Diameter",    description="Diameter of phloem sieve elements.")
+    vessel_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Vessel Diameter SD", description="Standard deviation of phloem sieve element diameter.")
     width            : float = Field(default=0.1,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
     height           : float = Field(default=0.05,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
     relative_cambium : float = Field(default=0.8,    ge=0.0, le = 1.0, title="Relative Distance Cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")

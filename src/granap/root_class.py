@@ -86,9 +86,9 @@ class RootAnatomy(Organ):
             phloem  = next((p for p in self.params if p["name"] == "phloem"),  {})
             cambium = next((p for p in self.params if p["name"] == "cambium"), {})
             self.vascular_params.update({
-                "xylem_diameter_max":        float(xylem.get("cell_diameter",       0.09)),
-                "xylem_diameter_min":        float(xylem.get("cell_diameter_min",   0.01)),
-                "xylem_diameter_sd":         float(xylem.get("cell_diameter_sd",    0.002)),
+                "xylem_diameter_max":        float(xylem.get("vessel_diameter",       0.09)),
+                "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",   0.01)),
+                "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",    0.002)),
                 "n_vascular_peak":           int(xylem.get("n_vascular_peak",       3)),
                 "inner_radius_xylem":        float(xylem.get("inner_radius",        0.05)),
                 "outer_radius_xylem":        float(xylem.get("outer_radius",        0.22)),
@@ -99,8 +99,8 @@ class RootAnatomy(Organ):
                 "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",  5.0)),
                 "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",  1.0)),
                 "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",  0.7)),
-                "phloem_diameter":           float(phloem.get("cell_diameter",      0.005)),
-                "phloem_diameter_sd":        float(phloem.get("cell_diameter_sd",   0.001)),
+                "phloem_diameter":           float(phloem.get("vessel_diameter",      0.005)),
+                "phloem_diameter_sd":        float(phloem.get("vessel_diameter_sd",   0.001)),
                 "n_phloem_per_bundle":       int(phloem.get("n_per_bundle",         5)),
                 "phloem_width":              float(phloem.get("width",              0.15)),
                 "phloem_height":             float(phloem.get("height",             0.2)),
@@ -431,8 +431,7 @@ class RootAnatomy(Organ):
         primary_arc_bottom = p["cambium_primary_arc_bottom"]
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
 
-        pericycle = self.layer_manager.get_layer("pericycle")
-        outer_r = min(p["cambium_primary_outer_distance"], stele_r + pericycle.cell_diameter if pericycle else 0)
+        outer_r = min(p["cambium_primary_outer_distance"], stele_r)
         inner_r = min(inner_radius_cambium, outer_r)
 
         # Build star at the origin, smooth, translate to stele centre, clip
