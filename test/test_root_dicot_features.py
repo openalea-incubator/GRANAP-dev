@@ -39,10 +39,10 @@ BASE_KWARGS = {
 BASE_CAMBIUM = {
     "cell_diameter":            0.006,
     "cell_width":               0.01,
-    "primary_inner_distance":   0.11,
-    "primary_visible_distance": 0.27,
-    "primary_arc_top":          0.05,
-    "primary_arc_bottom":       0.07,
+    "inner_distance":   0.11,
+    "visible_distance": 0.27,
+    "arc_top":          0.05,
+    "arc_bottom":       0.07,
 }
 
 scenarios = [
@@ -73,28 +73,28 @@ scenarios = [
     },
     {
         "label": "Large vessels\n(diam_max=0.08)",
-        "kwargs": {**BASE_KWARGS, "cell_diameter": 0.08, "cell_diameter_min": 0.05},
-        "cambium": {**BASE_CAMBIUM, "primary_visible_distance": 0.20,},
+        "kwargs": {**BASE_KWARGS, "vessel_diameter": 0.08, "vessel_diameter_min": 0.05},
+        "cambium": {**BASE_CAMBIUM, "visible_distance": 0.20,},
     },
     {
         "label": "Narrow peaks",
-        "kwargs": {**BASE_KWARGS, "arc_bottom": 0.05, "arc_top": 0.05, "cell_diameter": 0.07, "cell_diameter_min": 0.04, "inner_radius": 0.04},
+        "kwargs": {**BASE_KWARGS, "arc_bottom": 0.05, "arc_top": 0.05, "vessel_diameter": 0.07, "vessel_diameter_min": 0.04, "inner_radius": 0.04},
         "cambium": BASE_CAMBIUM,
     },
     {
         "label": "Narrow star\n(inner=0.10, outer=0.15)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.10, "outer_radius": 0.15},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.14, "primary_visible_distance": 0.16}
+        "cambium": {**BASE_CAMBIUM, "inner_distance": 0.14, "visible_distance": 0.16}
     },
     {
         "label": "Wide star\n(inner=0.15, outer=0.20)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.20},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.19, "primary_visible_distance": 0.40},
+        "cambium": {**BASE_CAMBIUM, "inner_distance": 0.19, "visible_distance": 0.40},
     },
     {
         "label": "Circle\n(inner=0.15, outer=0.15)",
         "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.15},
-        "cambium": {**BASE_CAMBIUM, "primary_inner_distance": 0.17, "primary_visible_distance": 0.17}
+        "cambium": {**BASE_CAMBIUM, "inner_distance": 0.17, "visible_distance": 0.17}
     },
 ]
 
@@ -118,20 +118,20 @@ for s in scenarios:
     print(f"  metaxylem / stele-in-star: {meta} / {stele}")
 
     # Verify the size-based classification: no metaxylem cell should have a
-    # diameter below cell_diameter_min (they must have been labelled 'stele').
+    # diameter below vessel_diameter_min (they must have been labelled 'stele').
     data_defaults = OrganInputData.for_dicot_root()
     for f, v in s["kwargs"].items():
         data_defaults.set_value("xylem", f, v)
     if s.get("cambium"):
         for f, v in s["cambium"].items():
             data_defaults.set_value("cambium", f, v)
-    dmin = data_defaults.get("xylem").cell_diameter_min
+    dmin = data_defaults.get("xylem").vessel_diameter_min
     small_meta = [
         c for c in root.all_cells.cells
         if c.type == "metaxylem" and c.diameter < dmin
     ]
     assert len(small_meta) == 0, (
-        f"Found {len(small_meta)} metaxylem cell(s) with diameter < cell_diameter_min ({dmin})"
+        f"Found {len(small_meta)} metaxylem cell(s) with diameter < vessel_diameter_min ({dmin})"
     )
 
     roots.append(root)

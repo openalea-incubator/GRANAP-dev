@@ -5,7 +5,7 @@ Root anatomy implementation.
 import numpy as np
 from typing import List, Dict, Any
 
-from shapely.geometry import Point, Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 from shapely.affinity import translate, scale as affine_scale, rotate
 
@@ -17,7 +17,6 @@ from granap.geometry_collection import GeometryProcessor
 from granap.generate_cell import CellGenerator
 from granap.input_data import OrganInputData
 from granap.math_functions import GRADIENT_FUNCTIONS, rescale
-from collections import defaultdict
 
 class RootAnatomy(Organ):
     """
@@ -49,6 +48,10 @@ class RootAnatomy(Organ):
 
     def _initialize_params(self) -> None:
         """Parse the structured input and set local attributes."""
+        # Initialise secondary-growth dicts so they always exist as attributes
+        self.secondary_xylem_params: dict = {}
+        self.secondary_cambium_params: dict = {}
+
         # 1. Global params
         self.global_params = next((p for p in self.params if p["name"] == "planttype"), {})
 
@@ -107,12 +110,45 @@ class RootAnatomy(Organ):
                 "relative_cambium":          float(phloem.get("relative_cambium",   0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
-                "cambium_primary_inner_distance":   float(cambium.get("primary_inner_distance",   0.10)),
-                "cambium_primary_outer_distance":   float(cambium.get("primary_outer_distance",   0.28)),
-                "cambium_primary_visible_distance": float(cambium.get("primary_visible_distance", 0.15)),
-                "cambium_primary_arc_top": float(cambium.get("primary_arc_top", 0.1)),
-                "cambium_primary_arc_bottom": float(cambium.get("primary_arc_bottom", 0.07)),
+                "cambium_primary_inner_distance":   float(cambium.get("inner_distance",   0.10)),
+                "cambium_primary_outer_distance":   float(cambium.get("outer_distance",   0.28)),
+                "cambium_primary_visible_distance": float(cambium.get("visible_distance", 0.15)),
+                "cambium_primary_arc_top":    float(cambium.get("arc_top",    0.1)),
+                "cambium_primary_arc_bottom": float(cambium.get("arc_bottom", 0.07)),
             })
+
+            # Secondary growth flag
+            sec_growth = next((p for p in self.params if p["name"] == "secondary_growth"), {})
+            self.vascular_params["secondary_growth"] = bool(sec_growth.get("value", False))
+
+            if self.vascular_params["secondary_growth"]:
+                sec_xylem = next((p for p in self.params if p["name"] == "secondary_xylem"), {})
+                sec_cam   = next((p for p in self.params if p["name"] == "secondary_cambium"), {})
+                self.secondary_xylem_params = {
+                    "prop_stele":             float(sec_xylem.get("prop_stele",             0.5)),
+                    "cell_diameter":          float(sec_xylem.get("cell_diameter",          0.01)),
+                    "cell_width":             float(sec_xylem.get("cell_width",             0.01)),
+                    "vessel_diameter":        float(sec_xylem.get("vessel_diameter",        0.06)),
+                    "vessel_diameter_sd":     float(sec_xylem.get("vessel_diameter_sd",     0.005)),
+                    "vessel_diameter_min":    float(sec_xylem.get("vessel_diameter_min",    0.02)),
+                    "gradient_function":      str(sec_xylem.get("gradient_function",        "five_pl")),
+                    "gradient_inflection":    float(sec_xylem.get("gradient_inflection",    0.7)),
+                    "gradient_steepness":     float(sec_xylem.get("gradient_steepness",     5.0)),
+                    "gradient_asymmetry":     float(sec_xylem.get("gradient_asymmetry",     1.0)),
+                    "prop_vessel_ring":       float(sec_xylem.get("prop_vessel_ring",       0.5)),
+                    "must_be_adjacent":       bool(sec_xylem.get("must_be_adjacent",        False)),
+                    "parenchyma_diameter":    float(sec_xylem.get("parenchyma_diameter",    0.03)),
+                    "parenchyma_diameter_sd": float(sec_xylem.get("parenchyma_diameter_sd", 0.002)),
+                    "parenchyma_width":       float(sec_xylem.get("parenchyma_width",       0.01)),
+                }
+                self.secondary_cambium_params = {
+                    "cell_diameter":  float(sec_cam.get("cell_diameter",  0.01)),
+                    "cell_width":     float(sec_cam.get("cell_width",     0.02)),
+                    "inner_distance": float(sec_cam.get("inner_distance", 0.30)),
+                    "outer_distance": float(sec_cam.get("outer_distance", 0.45)),
+                    "arc_top":        float(sec_cam.get("arc_top",        0.05)),
+                    "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
+                }
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
@@ -279,13 +315,14 @@ class RootAnatomy(Organ):
             self.all_cells.plot_cells()
 
     def _create_vascular_tissue_dicot(self, polygon_for_vascular: Polygon, debug: bool = False):
-        """Dicot stele: to be implemented."""
+        """Dicot stele: star-shaped xylem with cambium and phloem; optionally secondary growth."""
         self.fit_star_shapped_xylem(polygon_for_vascular)
         self._remove_stele_seeds_near_xylem()
-        secondary_growth = False  # TODO: make this optional and implement the secondary growth cased
-        if not secondary_growth:
-           self.fit_primary_cambium_elements(polygon_for_vascular)
-        self.fit_phloem_elements(polygon_for_vascular)
+        if self.vascular_params.get("secondary_growth", False):
+            self.fit_secondary_xylem(polygon_for_vascular)
+        else:
+            self.fit_primary_cambium_elements(polygon_for_vascular)
+            self.fit_phloem_elements(polygon_for_vascular)
 
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
@@ -527,8 +564,7 @@ class RootAnatomy(Organ):
                             + (border_pt[1] - center.y) ** 2
                         ),
                         area=np.pi * (cell_diam / 2) ** 2,
-                    ))
-            
+                    ))          
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Place one phloem ellipse per valley between xylem peaks, filled with Apollonian packing."""
@@ -900,305 +936,568 @@ class RootAnatomy(Organ):
         polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         return polygon_for_vascular
 
+    # ------------------------------------------------------------------
+    # Secondary growth — helper methods
+    # ------------------------------------------------------------------
+
+    def _build_primary_cambium_polygon(
+        self, stele_polygon: Polygon, cx: float, cy: float
+    ) -> Polygon:
+        """Return the primary cambium star as a filled polygon (inner boundary of annular zone)."""
+        p = self.vascular_params
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+
+        outer_r = min(p["cambium_primary_outer_distance"], stele_r)
+        inner_r = min(p["cambium_primary_inner_distance"], outer_r)
+
+        raw_star = GeometryProcessor.star_polygon(
+            n_branches=p["n_vascular_peak"],
+            r_min=inner_r,
+            r_max=outer_r,
+            arc_base=p["cambium_primary_arc_bottom"],
+            arc_top=p["cambium_primary_arc_top"],
+        )
+        star_coords = GeometryProcessor.smoothing_polygon(
+            np.column_stack(raw_star.exterior.xy),
+            smooth_factor=0.9,
+            iterations=5,
+        )
+        star = Polygon(star_coords).buffer(0)
+        return translate(star, cx, cy).intersection(stele_polygon)
+
+    def _build_secondary_cambium_polygon(
+        self, stele_polygon: Polygon, cx: float, cy: float
+    ) -> Polygon:
+        """Return the secondary cambium star as a filled polygon (outer boundary of annular zone)."""
+        sc = self.secondary_cambium_params
+        p  = self.vascular_params
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+
+        outer_r = min(sc["outer_distance"], stele_r)
+        inner_r = min(sc["inner_distance"], outer_r)
+
+        raw_star = GeometryProcessor.star_polygon(
+            n_branches=p["n_vascular_peak"],
+            r_min=inner_r,
+            r_max=outer_r,
+            arc_base=sc["arc_bottom"],
+            arc_top=sc["arc_top"],
+        )
+        star_coords = GeometryProcessor.smoothing_polygon(
+            np.column_stack(raw_star.exterior.xy),
+            smooth_factor=0.9,
+            iterations=5,
+        )
+        star = Polygon(star_coords).buffer(0)
+        return translate(star, cx, cy).intersection(stele_polygon)
+
+    def _render_secondary_cambium(
+        self, secondary_cambium_polygon: Polygon, cx: float, cy: float
+    ) -> None:
+        """Place secondary cambium cell seeds along the secondary cambium boundary."""
+        sc         = self.secondary_cambium_params
+        cell_diam  = sc["cell_diameter"]
+        cell_width = sc["cell_width"]
+
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+
+        raw_coords  = np.array(secondary_cambium_polygon.exterior.coords)
+        seg_length  = secondary_cambium_polygon.exterior.length
+        n_cells     = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
+        cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
+
+        cell_borders = CellGenerator.cell_border(
+            cells_coords,
+            cell_width * 0.7 if cell_width else cell_diam * 0.7,
+            cell_diam  * 0.7 if cell_width else 0,
+        )
+
+        for i in range(len(cells_coords) - 1):
+            id_group = next_id
+            next_id += 1
+            for border_pt in cell_borders[i][1:]:
+                self.vascular_cells.add_cell(Cell(
+                    type="secondary_cambium",
+                    x=border_pt[0],
+                    y=border_pt[1],
+                    diameter=cell_diam,
+                    id_cell=id_group,
+                    id_layer=0,
+                    id_group=id_group,
+                    angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                    radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                    area=np.pi * (cell_diam / 2) ** 2,
+                ))
+
+    def _pack_vessels_in_pizza_zone(
+        self, zone_polygon: Polygon, sx: dict
+    ) -> List:
+        """Apollonian-style vessel packing with prop_vessel_ring and must_be_adjacent checks.
+
+        Uses the same stack-based strategy as GeometryProcessor.apollonian_pack but adds:
+        - diameter sampling via gradient_function (five_pl / linear / uniform / gaussian)
+        - prop_vessel_ring stopping criterion
+        - must_be_adjacent tangency requirement
+
+        Args:
+            zone_polygon: Smoothed pizza-slice polygon to fill.
+            sx:           Secondary xylem parameter dict (self.secondary_xylem_params).
+
+        Returns:
+            List of (cx, cy, radius) tuples for each placed vessel circle.
+        """
+        diam_max         = sx["vessel_diameter"]
+        diam_min         = sx["vessel_diameter_min"]
+        diam_sd          = sx["vessel_diameter_sd"]
+        must_be_adjacent = sx["must_be_adjacent"]
+        prop_vessel_ring = sx["prop_vessel_ring"]
+        gradient_fn      = sx["gradient_function"]
+        zone_area        = zone_polygon.area
+
+        if gradient_fn in ("five_pl", "linear"):
+            target_diam_fn = rescale(
+                GRADIENT_FUNCTIONS[gradient_fn],
+                lo=diam_min,
+                hi=diam_max,
+                c=sx["gradient_inflection"],
+                b=sx["gradient_steepness"],
+                m=sx["gradient_asymmetry"],
+            )
+        else:
+            target_diam_fn = None
+
+        poly_cx, poly_cy = zone_polygon.centroid.x, zone_polygon.centroid.y
+        minx, miny, maxx, maxy = zone_polygon.bounds
+        max_dist = max(maxx - poly_cx, poly_cx - minx, maxy - poly_cy, poly_cy - miny)
+        if max_dist < 1e-12:
+            max_dist = 1.0
+
+        placed: List = []
+        total_vessel_area = 0.0
+        stack = [zone_polygon]
+
+        while stack:
+            if total_vessel_area / zone_area >= prop_vessel_ring:
+                break
+
+            region = stack.pop()
+            if region.is_empty or region.area < np.pi * (diam_min / 2) ** 2:
+                continue
+
+            pcx, pcy, r_ins = GeometryProcessor._chebyshev_center(region)
+
+            if gradient_fn in ("five_pl", "linear"):
+                t = min(np.hypot(pcx - poly_cx, pcy - poly_cy) / max_dist, 1.0)
+                target_diam = target_diam_fn(t)
+            elif gradient_fn == "uniform":
+                target_diam = np.random.uniform(diam_min, diam_max)
+            elif gradient_fn == "gaussian":
+                mean_diam = (diam_max + diam_min) / 2.0
+                target_diam = float(np.clip(
+                    np.random.normal(mean_diam, diam_sd), diam_min, diam_max
+                ))
+            else:
+                target_diam = diam_max
+
+            r = min(r_ins, target_diam / 2)
+            if r * 2 < diam_min:
+                continue
+
+            # must_be_adjacent: first circle is always placed freely
+            if must_be_adjacent and placed:
+                adj_tol = diam_min * 0.1
+                if not any(
+                    np.hypot(pcx - px, pcy - py) <= r + pr + adj_tol
+                    for px, py, pr in placed
+                ):
+                    continue
+
+            placed.append((pcx, pcy, r))
+            total_vessel_area += np.pi * r ** 2
+
+            circle = Point(pcx, pcy).buffer(r, resolution=32)
+            remaining = region.difference(circle)
+            if remaining.is_empty:
+                continue
+
+            sub_geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
+            stack.extend(g for g in sub_geoms if not g.is_empty)
+
+        return placed
+
+    def _fill_zone_with_cells(
+        self,
+        fill_zone,
+        cell_diameter: float,
+        cell_width: float,
+        cell_type: str,
+        cx: float,
+        cy: float,
+        start_id: int,
+    ) -> int:
+        """Fill a polygon zone with parenchyma seeds on concentric inward rings.
+
+        Reuses the layer-filling algorithm (cells_on_layer + iterative buffer) used
+        elsewhere in the project for ring-based cell placement.
+
+        Args:
+            fill_zone:     Polygon (or MultiPolygon) to fill.
+            cell_diameter: Target cell diameter.
+            cell_width:    Tangential cell width (0 = use diameter).
+            cell_type:     Cell type string written to each seed.
+            cx, cy:        Stele centre, used to compute angle/radius.
+            start_id:      id_group / id_cell for the first new cell.
+
+        Returns:
+            Next available id (start_id + number of seeds placed).
+        """
+        if fill_zone is None or fill_zone.is_empty:
+            return start_id
+        if fill_zone.area < np.pi * (cell_diameter / 2) ** 2:
+            return start_id
+
+        next_id = start_id
+        space   = cell_diameter / 2
+        current = fill_zone
+
+        while not current.is_empty and current.area > (cell_diameter / 2) ** 2 * np.pi:
+            current = current.buffer(-space - cell_diameter / 2, resolution=16)
+            if current.is_empty:
+                break
+            space = cell_diameter / 2
+
+            geoms = list(current.geoms) if hasattr(current, 'geoms') else [current]
+            for geom in geoms:
+                if geom.is_empty or geom.geom_type != "Polygon":
+                    continue
+                seed_coords = CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)
+                for pt in seed_coords[1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type=cell_type,
+                        x=pt[0],
+                        y=pt[1],
+                        diameter=cell_diameter,
+                        id_cell=next_id,
+                        id_layer=0,
+                        id_group=next_id,
+                        angle=np.arctan2(pt[1] - cy, pt[0] - cx),
+                        radius=np.sqrt((pt[0] - cx) ** 2 + (pt[1] - cy) ** 2),
+                        area=np.pi * (cell_diameter / 2) ** 2,
+                    ))
+                    next_id += 1
+
+        return next_id
+
+    def _fill_ray_parenchyma(
+        self,
+        vessel_zones: list,
+        annular_zone,
+        cx: float,
+        cy: float,
+        sx: dict,
+        r_outer: float,
+        n_peaks: int,
+        start_id: int,
+    ) -> int:
+        """Fill angular gaps between pizza slices with radially-oriented ray parenchyma.
+
+        Strategy: for each gap (one per xylem peak), place radial dividing lines spaced
+        parenchyma_width apart at the inner edge. As the radius increases the arc width
+        between two adjacent lines grows; when it exceeds parenchyma_width + 3*sd a new
+        line is inserted midway (binary split). Each cell is seeded with an elliptical
+        ring of border points (major axis = parenchyma_diameter in the radial direction,
+        minor axis = current lane arc width in the tangential direction) so that the
+        Voronoi tessellation produces radially elongated cell territories.
+
+        Args:
+            vessel_zones: List of smoothed pizza-slice polygons (may contain None).
+            annular_zone: Full annular zone between primary and secondary cambium.
+            cx, cy:       Stele centre coordinates.
+            sx:           Secondary xylem parameter dict.
+            r_outer:      Outer radius of the annular zone (secondary cambium side).
+            n_peaks:      Number of xylem peaks (= number of angular gaps).
+            start_id:     Starting id_group for new cells.
+
+        Returns:
+            Next available id.
+        """
+        valid_zones = [z for z in vessel_zones if z is not None and not z.is_empty]
+        if not valid_zones or annular_zone is None or annular_zone.is_empty:
+            return start_id
+        if r_outer <= 0.0:
+            return start_id
+
+        d_cell          = sx["parenchyma_diameter"]
+        w_cell          = sx["parenchyma_width"]
+        sd_cell         = sx["parenchyma_diameter_sd"]
+        split_threshold = w_cell + 3.0 * sd_cell
+        prop_stele      = sx["prop_stele"]
+
+        full_angle = 2.0 * np.pi / n_peaks
+        half_slice = full_angle * prop_stele / 2.0
+        gap_half   = full_angle / 2.0 - half_slice
+        if gap_half <= 0.0:
+            return start_id
+
+        zones_union = unary_union(valid_zones)
+        ray_zone    = annular_zone.difference(zones_union)
+        if ray_zone.is_empty:
+            return start_id
+
+        # Pre-compute border seed angles (8 points on the unit ellipse)
+        n_border   = 8
+        phi        = np.linspace(0.0, 2.0 * np.pi, n_border, endpoint=False)
+        border_cos = np.cos(phi)
+        border_sin = np.sin(phi)
+        border_scale = 0.7
+
+        next_id = start_id
+
+        for k in range(n_peaks):
+            theta_c  = 2.0 * np.pi * k / n_peaks
+            theta_lo = theta_c - gap_half
+            theta_hi = theta_c + gap_half
+
+            # Ray-cast from centre at the gap angle to find the actual inner boundary.
+            # r_inner (area-equivalent) underestimates the star peak radius, causing
+            # the loop to start inside the primary cambium polygon where seeds fail the
+            # contains check and the split threshold is never calibrated correctly.
+            cos_c, sin_c = np.cos(theta_c), np.sin(theta_c)
+            ray_line = LineString([
+                (cx, cy),
+                (cx + r_outer * 2.0 * cos_c, cy + r_outer * 2.0 * sin_c),
+            ])
+            hits = ray_line.intersection(ray_zone.boundary)
+            if hits.is_empty:
+                continue
+            pts = list(hits.geoms) if hasattr(hits, "geoms") else [hits]
+            pts = [p for p in pts if p.geom_type == "Point"]
+            if not pts:
+                continue
+            dists   = [np.hypot(p.x - cx, p.y - cy) for p in pts]
+            r_start = min(dists)   # innermost crossing = inner edge of this gap
+
+            # Initial lanes: arc width ≈ w_cell at r_start
+            init_spacing = w_cell / r_start
+            n_init = max(1, int(np.ceil((theta_hi - theta_lo) / init_spacing)))
+            lines  = list(np.linspace(theta_lo, theta_hi, n_init + 1))
+
+            r = r_start + d_cell / 2.0
+            while r <= r_outer:
+                # Binary split: insert a midpoint line whenever a lane's arc width
+                # exceeds the threshold. The new line persists in all subsequent steps.
+                new_lines = [lines[0]]
+                for i in range(len(lines) - 1):
+                    a1, a2 = lines[i], lines[i + 1]
+                    if (a2 - a1) * r > split_threshold:
+                        new_lines.append((a1 + a2) / 2.0)
+                    new_lines.append(a2)
+                lines = sorted(new_lines)
+
+                for i in range(len(lines) - 1):
+                    theta_mid      = (lines[i] + lines[i + 1]) / 2.0
+                    lane_arc_width = (lines[i + 1] - lines[i]) * r
+                    px = cx + r * np.cos(theta_mid)
+                    py = cy + r * np.sin(theta_mid)
+
+                    if not ray_zone.contains(Point(px, py)):
+                        continue
+
+                    # Elliptical border seeds force the Voronoi to produce a
+                    # radially elongated territory: major axis = d_cell (radial),
+                    # minor axis = lane_arc_width (tangential).
+                    a_rad = d_cell * 0.5 * border_scale
+                    b_tan = lane_arc_width * 0.5 * border_scale
+                    cos_t, sin_t = np.cos(theta_mid), np.sin(theta_mid)
+
+                    id_group = next_id
+                    next_id += 1
+
+                    for j in range(n_border):
+                        er = a_rad * border_cos[j]
+                        et = b_tan * border_sin[j]
+                        self.vascular_cells.add_cell(Cell(
+                            type="ray_parenchyma",
+                            x=px + er * cos_t - et * sin_t,
+                            y=py + er * sin_t + et * cos_t,
+                            diameter=d_cell,
+                            id_cell=id_group,
+                            id_layer=0,
+                            id_group=id_group,
+                            angle=theta_mid,
+                            radius=r,
+                            area=np.pi * a_rad * b_tan,
+                        ))
+
+                r += d_cell
+
+        return next_id
+
+    def fit_secondary_xylem(self, stele_polygon: Polygon) -> None:
+        """Build secondary xylem between the primary and secondary cambium.
+
+        Steps:
+        1. Compute primary cambium polygon (inner boundary, no cells rendered).
+        2. Build secondary cambium polygon and render its cells.
+        3. Compute annular zone and remove stele seeds from it.
+        4. Construct pizza-slice vessel zones (one per xylem peak valley).
+        5. Pack secondary xylem vessels inside each zone; fill remaining space
+           with axial parenchyma cells.
+        6. Fill angular gaps between pizza slices with ray parenchyma cells.
+        7. Register all vessel polygons for stele seed clearing.
+
+        Args:
+            stele_polygon: The stele boundary polygon.
+        """
+        p   = self.vascular_params
+        sx  = self.secondary_xylem_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        n_peaks = p["n_vascular_peak"]
+
+        # Step 1: primary cambium polygon — inner boundary of annular zone
+        primary_cambium_polygon = self._build_primary_cambium_polygon(stele_polygon, cx, cy)
+        if primary_cambium_polygon is None or primary_cambium_polygon.is_empty:
+            return
+
+        # Step 2: secondary cambium polygon — outer boundary; render cambium cells
+        secondary_cambium_polygon = self._build_secondary_cambium_polygon(stele_polygon, cx, cy)
+        if secondary_cambium_polygon is None or secondary_cambium_polygon.is_empty:
+            return
+
+        self._render_secondary_cambium(secondary_cambium_polygon, cx, cy)
+
+        # Step 3: annular zone between the two cambium boundaries
+        annular_zone = secondary_cambium_polygon.difference(primary_cambium_polygon)
+        if annular_zone.is_empty:
+            return
+
+        # Remove stele parenchyma seeds from the annular zone (secondary growth replaces them)
+        self.all_cells.cells = [
+            c for c in self.all_cells.cells
+            if not (c.type == "stele" and annular_zone.contains(Point(c.x, c.y)))
+        ]
+
+        # Step 4: pizza-slice vessel zones — one per valley between xylem peaks
+        # Angular position: midpoint between adjacent peaks (same logic as fit_phloem_elements)
+        full_angle_per_slice = 2.0 * np.pi / n_peaks
+        half_width = full_angle_per_slice * sx["prop_stele"] / 2.0
+
+        minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
+        outer_r = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
+
+        vessel_zones: List = []
+        for k in range(n_peaks):
+            theta = 2.0 * np.pi * (k + 0.5) / n_peaks
+
+            if half_width < 1e-9:
+                vessel_zones.append(None)
+                continue
+
+            arc_angles = np.linspace(theta - half_width, theta + half_width, 50)
+            wedge_pts  = [(cx, cy)] + [
+                (cx + outer_r * np.cos(a), cy + outer_r * np.sin(a)) for a in arc_angles
+            ]
+            raw_wedge = Polygon(wedge_pts)
+
+            zone = raw_wedge.intersection(annular_zone)
+            if zone.is_empty or zone.area < np.pi * (sx["vessel_diameter_min"] / 2) ** 2:
+                vessel_zones.append(None)
+                continue
+
+            # Smooth only simple polygons to avoid losing multi-part geometry
+            if zone.geom_type == "Polygon":
+                zone_coords = GeometryProcessor.smoothing_polygon(
+                    np.column_stack(zone.exterior.xy),
+                    smooth_factor=0.3,
+                    iterations=3,
+                )
+                smoothed = Polygon(zone_coords).buffer(0)
+                if not smoothed.is_empty and smoothed.geom_type == "Polygon":
+                    zone = smoothed
+
+            vessel_zones.append(zone)
+
+        # Step 5: pack vessels and fill axial parenchyma within each zone
+        all_vessel_polys: List[Polygon] = []
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+
+        for zone in vessel_zones:
+            if zone is None or zone.is_empty:
+                continue
+
+            packed = self._pack_vessels_in_pizza_zone(zone, sx)
+            zone_vessel_polys: List[Polygon] = []
+
+            for pcx, pcy, r in packed:
+                actual_diam = float(np.clip(
+                    np.random.normal(r * 2, sx["vessel_diameter_sd"]),
+                    sx["vessel_diameter_min"] * 0.1,
+                    np.inf,
+                ))
+                actual_r = actual_diam / 2
+
+                placed      = Point(pcx, pcy).buffer(actual_r, resolution=32)
+                placed_buff = placed.buffer(-actual_r * 0.15)
+                if placed_buff.is_empty:
+                    continue
+
+                bx, by = placed_buff.exterior.coords.xy
+                border_coords = GeometryProcessor.resample_coords(
+                    np.column_stack((bx, by)), target_n_points=25
+                )
+                center   = placed.centroid
+                id_group = next_id
+                next_id += 1
+
+                for border_pt in border_coords[1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type="secondary_xylem",
+                        x=border_pt[0],
+                        y=border_pt[1],
+                        diameter=actual_diam,
+                        id_cell=id_group,
+                        id_layer=0,
+                        id_group=id_group,
+                        angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
+                        radius=np.sqrt(
+                            (border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2
+                        ),
+                        area=np.pi * actual_r ** 2,
+                    ))
+
+                zone_vessel_polys.append(placed)
+                all_vessel_polys.append(placed)
+
+            # Axial parenchyma: fills the non-vessel area inside the pizza-slice zone
+            if zone_vessel_polys:
+                vessel_union_in_zone = unary_union(zone_vessel_polys)
+                axial_zone = zone.difference(vessel_union_in_zone)
+            else:
+                axial_zone = zone
+
+            next_id = self._fill_zone_with_cells(
+                axial_zone,
+                sx["cell_diameter"],
+                sx["cell_width"],
+                "secondary_xylem",
+                cx, cy,
+                next_id,
+            )
+
+        # Step 6: ray parenchyma in angular gaps between pizza slices
+        r_outer = np.sqrt(secondary_cambium_polygon.area / np.pi)
+
+        next_id = self._fill_ray_parenchyma(
+            vessel_zones, annular_zone, cx, cy, sx, r_outer, n_peaks, next_id,
+        )
+
+        # Step 7: register vessel circles so stele seeds inside them are cleared
+        self.vascular_polygons.extend(all_vessel_polys)
+
     def _organ_specific_tissues(self):
         """
         Add organ specific tissues.
         """
         pass
-
-    def add_intercellular_spaces(self):
-        """Orchestrate intercellular space and aerenchyma generation."""
-        self.add_intercellular()
-        self.add_aerenchyma()
-        self.merge_intercellular_aerenchyma()
-
-    def add_intercellular(self):
-        """Compute air spaces for each inter_cellular_spaces entry.
-
-        Each entry may list one or more tissues. When multiple tissues are given,
-        cells from all of them are processed together so that intercellular spaces
-        are also generated at the boundary between adjacent tissues.
-        Smoothness can be a single float (applied to every tissue) or a list with
-        one value per tissue.
-        """
-        for ics in self.intercellular_spaces_params:
-            self._apply_intercellular(ics)
-
-    def _apply_intercellular(self, ics: dict) -> None:
-        """Apply one inter_cellular_spaces entry to the relevant tissue cells."""
-        tissues = ics.get("tissue", [])
-        if isinstance(tissues, str):
-            tissues = [tissues]
-        if not tissues:
-            return
-
-        smoothness = ics.get("smoothness", 0)
-        if isinstance(smoothness, (int, float)):
-            smoothness_per_tissue = [float(smoothness)] * len(tissues)
-        else:
-            smoothness_per_tissue = [float(s) for s in smoothness]
-
-        if not any(smoothness_per_tissue):
-            return
-
-        # Collect cells from all tissues, tracking the smoothness for each cell
-        all_tissue_cells = []
-        cell_smoothness: dict = {}
-        for tissue_name, s in zip(tissues, smoothness_per_tissue):
-            cells = self.all_cells.get_cells_by_type(tissue_name)
-            for c in cells:
-                cell_smoothness[id(c)] = s
-            all_tissue_cells.extend(cells)
-
-        tissue_polys = [c.polygon for c in all_tissue_cells if c.polygon is not None]
-        if len(tissue_polys) < 2:
-            return
-
-        full_union = GeometryProcessor.union_polygons(tissue_polys)
-        min_diameter = min(c.diameter for c in all_tissue_cells)
-        full_union_buffed = full_union.buffer(-min_diameter * 0.5)
-
-        smoothed = []
-        for cell in all_tissue_cells:
-            if cell.polygon is None:
-                continue
-            s = cell_smoothness[id(cell)]
-            shrunk = GeometryProcessor.buffer_polygon(cell.polygon, 0, smooth_factor=s)
-            if not shrunk.is_empty:
-                smoothed.append(shrunk)
-
-        if not smoothed:
-            return
-
-        smoothed_union = GeometryProcessor.union_polygons(smoothed)
-        air_region = full_union.difference(smoothed_union)
-
-        if isinstance(air_region, MultiPolygon):
-            raw_air_polys = list(air_region.geoms)
-        elif air_region.is_empty:
-            return
-        else:
-            raw_air_polys = [air_region]
-
-        r_values = [np.sqrt(p.area / np.pi) for p in tissue_polys]
-        tol = float(np.median(r_values)) * 0.05
-
-        air_space_polys = []
-        for poly in raw_air_polys:
-            if poly.intersects(full_union_buffed):
-                simplified = poly.simplify(tol, preserve_topology=True)
-                if not simplified.is_empty and simplified.area > 1E-6:
-                    air_space_polys.append(simplified)
-
-        if not air_space_polys:
-            return
-
-        air_union = GeometryProcessor.union_polygons(air_space_polys)
-
-        for cell in all_tissue_cells:
-            if cell.polygon is None:
-                continue
-            carved = cell.polygon.difference(air_union)
-            if not carved.is_empty and carved.area > 1E-6:
-                cell.polygon = carved
-            else:
-                cell.polygon = None
-
-        id_cell = len(self.all_cells.cells)
-        for air_space_polygon in air_space_polys:
-            id_cell += 1
-            self.all_cells.cells.append(Cell(
-                x=air_space_polygon.centroid.x,
-                y=air_space_polygon.centroid.y,
-                diameter=np.sqrt(air_space_polygon.area / np.pi) * 2,
-                id_cell=id_cell,
-                id_layer=0,
-                id_group=id_cell,
-                type="air space",
-                polygon=air_space_polygon,
-            ))
-
-        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
-
-    def add_aerenchyma(self):
-        """Generate aerenchyma in the tissue defined in aerenchyma_params."""
-        aerenchyma_prop = self.aerenchyma_params.get("aerenchyma_proportion", 0)
-        if not aerenchyma_prop:
-            return
-
-        tissue = self.aerenchyma_params.get("tissue")
-        n_files = int(self.aerenchyma_params.get("n_files", 1))
-        aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
-
-        self._aerenchyma_n_files = n_files
-        self._aerenchyma_start_angle = np.random.uniform(0, 2 * np.pi)
-        start_angle = self._aerenchyma_start_angle
-
-        def cell_quadrant(cell):
-            cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-            rel = (cell_angle - start_angle) % (2 * np.pi)
-            return int(rel / (2 * np.pi / n_files)) % n_files
-
-        if aerenchyma_prop > 1:
-            print("Aerenchyma proportion is greater than 1, setting it to 1")
-            aerenchyma_prop = 1
-
-        tissue_cells = self.all_cells.get_cells_by_type(tissue)
-        if not tissue_cells:
-            return
-
-        max_tissue_layer = max(c.id_layer for c in tissue_cells)
-        candidates = [c for c in tissue_cells if c.id_layer < max_tissue_layer]
-        candidates.extend(self.all_cells.get_cells_by_type("air space"))
-
-        if not candidates:
-            return
-
-        total_tissue_area = sum(c.polygon.area for c in tissue_cells if c.polygon is not None)
-        total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
-        max_possible_area = sum(c.polygon.area for c in candidates if c.polygon is not None)
-
-        target_aerenchyma_area = (total_tissue_area + total_air_area) * aerenchyma_prop
-
-        if target_aerenchyma_area > max_possible_area:
-            print(f"Warning: asked proportion ({aerenchyma_prop:.2f}) requires {target_aerenchyma_area:.2f} area, which is greater than available cells ({max_possible_area:.2f}). Lowering aerenchyma_proportion.")
-            aerenchyma_prop = max_possible_area / (total_tissue_area + total_air_area)
-            target_aerenchyma_area = max_possible_area
-
-        print(f"Targeted aerenchyma prop: {(target_aerenchyma_area / (total_tissue_area + total_air_area)):.3f}")
-
-        target_per_quadrant = (target_aerenchyma_area - total_air_area) / n_files # ((n_files) ** 1.12 + 1)
-
-        quadrant_buckets = [[] for _ in range(n_files)]
-        for c in candidates:
-            quadrant_buckets[cell_quadrant(c)].append(c)
-
-        if aerenchyma_type == 1:
-            for q, bucket in enumerate(quadrant_buckets):
-                central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
-                def _ang_dist(cell, ca=central_angle):
-                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-                    d = abs(a - ca)
-                    return min(d, 2 * np.pi - d)
-                bucket.sort(key=_ang_dist)
-        elif aerenchyma_type == 2:
-            for q, bucket in enumerate(quadrant_buckets):
-                if not bucket:
-                    continue
-                central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
-                def _ang_dist_seed(cell, ca=central_angle):
-                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-                    d = abs(a - ca)
-                    return min(d, 2 * np.pi - d)
-                seed = min(bucket, key=_ang_dist_seed)
-                bucket.sort(key=lambda c, s=seed: np.hypot(c.x - s.x, c.y - s.y))
-
-        quadrant_area = [0.0] * n_files
-        quadrant_idx = [0] * n_files
-
-        changed = True
-        while changed:
-            changed = False
-            for q in range(n_files):
-                if quadrant_area[q] >= target_per_quadrant:
-                    continue
-                bucket = quadrant_buckets[q]
-                while quadrant_idx[q] < len(bucket):
-                    cell = bucket[quadrant_idx[q]]
-                    quadrant_idx[q] += 1
-                    if cell.type != "air space" and cell.polygon is not None:
-                        cell.type = "air space"
-                        quadrant_area[q] += cell.polygon.area
-                        changed = True
-                        break
-
-        tissue = self.aerenchyma_params.get("tissue")
-        total_tissue_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type(tissue) if c.polygon is not None)
-        total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
-        print(f"Actual aerenchyma prop: {(total_air_area / (total_tissue_area + total_air_area)):.3f}")
-
-    def merge_intercellular_aerenchyma(self):
-        """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""
-
-        n_files = getattr(self, '_aerenchyma_n_files', 1)
-        start_angle = getattr(self, '_aerenchyma_start_angle', 0.0)
-
-        def cell_quadrant(cell):
-            cell_angle = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-            rel = (cell_angle - start_angle) % (2 * np.pi)
-            return int(rel / (2 * np.pi / n_files)) % n_files
-
-        seen_ids: set = set()
-        merge_pool = []
-        for c in list(self.all_cells.cells):
-            if c.type == "air space" and c.polygon is not None:
-                oid = id(c)
-                if oid not in seen_ids:
-                    seen_ids.add(oid)
-                    merge_pool.append(c)
-
-        if merge_pool:
-            n_pool = len(merge_pool)
-            parent = list(range(n_pool))
-            cell_quadrants = [cell_quadrant(c) for c in merge_pool]
-
-            def _find(i):
-                while parent[i] != i:
-                    parent[i] = parent[parent[i]]
-                    i = parent[i]
-                return i
-
-            def _union(i, j):
-                ri, rj = _find(i), _find(j)
-                if ri != rj:
-                    parent[ri] = rj
-
-            for i in range(n_pool):
-                for j in range(i + 1, n_pool):
-                    if cell_quadrants[i] != cell_quadrants[j]:
-                        continue
-                    if merge_pool[i].polygon.touches(merge_pool[j].polygon) or merge_pool[i].polygon.intersects(merge_pool[j].polygon):
-                        _union(i, j)
-
-            groups: dict = defaultdict(list)
-            for i, c in enumerate(merge_pool):
-                groups[_find(i)].append(c)
-
-            fused_cells = []
-            for group in groups.values():
-                if len(group) == 1:
-                    fused_cells.append(group[0])
-                    continue
-                fused_polygon = unary_union([c.polygon for c in group])
-                fused_cells.append(Cell(
-                    x=fused_polygon.centroid.x,
-                    y=fused_polygon.centroid.y,
-                    diameter=np.sqrt(fused_polygon.area / np.pi) * 2,
-                    id_cell=min(c.id_cell for c in group),
-                    id_layer=int(np.ceil(np.mean([c.id_layer for c in group]))),
-                    id_group=min(c.id_group for c in group),
-                    type="air space",
-                    polygon=fused_polygon,
-                ))
-
-            self.all_cells.remove_cells_by_ids([c.id_cell for c in merge_pool])
-            self.all_cells.cells.extend(fused_cells)
-
-        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
-
-        # Carve tissue cells that are trapped inside air spaces
-        tissue = self.aerenchyma_params.get("tissue")
-        air_spaces = self.all_cells.get_cells_by_type("air space")
-        tissue_cells = self.all_cells.get_cells_by_type(tissue)
-        tissue_cells.extend(a for a in air_spaces if a.id_layer == 0)
-
-        air_union = unary_union([a.polygon for a in air_spaces if a.polygon is not None and a.id_layer != 0])
-
-        for cell in tissue_cells:
-            carved = cell.polygon.difference(air_union)
-            if not carved.is_empty and carved.area > 1E-6:
-                cell.polygon = carved
-            else:
-                self.all_cells.remove_cells_by_ids([cell.id_cell])
 
 

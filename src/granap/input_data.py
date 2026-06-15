@@ -173,14 +173,57 @@ class DicotCambiumParams(BaseParams):
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
     cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     # for primary growth
-    primary_visible_distance : float = Field(default=0.8,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
-    primary_inner_distance   : float = Field(default=0.11,  ge=0.00001, title="Primary Start Distance",   description="Inner radius of the cambium ring from the stele centre at primary growth.")
-    primary_outer_distance   : float = Field(default=0.28,  ge=0.00001, title="Primary Outer Distance",   description="Outer radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
-    primary_arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
-    primary_arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
-    # for secondary growth
-    secondary_inner_distance : float = Field(default=0.25,  ge=0.00001, title="Secondary Start Distance", description="Secondary growth only: Inner radius of the actual cambium ring from the stele centre. Set equal to maximal_end_distance to have a circle cambium.")
-    secondary_outer_distance : float = Field(default=0.27,  ge=0.00001, title="Secondary End Distance",   description="Secondary growth only: Outer radius of the actual cambium ring from the stele centre. Set equal to minimal_end_distance to have a circle cambium.")
+    visible_distance : float = Field(default=0.8,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
+    inner_distance   : float = Field(default=0.11,  ge=0.00001, title="Primary Start Distance",   description="Inner radius of the cambium ring from the stele centre at primary growth.")
+    outer_distance   : float = Field(default=0.28,  ge=0.00001, title="Primary Outer Distance",   description="Outer radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
+    arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
+    arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
+
+class DicotSecondaryGrowthParams(BaseParams):
+    name         : str   = "secondary_growth"
+    value        : bool  = True
+
+class DicotSecondaryXylemParams(BaseParams):
+    name                : str   = "secondary_xylem"
+    prop_stele          : float = Field(default=0.7,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
+    cell_diameter       : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
+    cell_width          : float = Field(default=0.015,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
+    vessel_diameter     : float = Field(default=0.15,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
+    vessel_diameter_sd  : float = Field(default=0.005, ge=0.0,     title="Vessel Diameter SD",           description="Standard deviation added to each vessel diameter after gradient sampling.")
+    vessel_diameter_min : float = Field(default=0.10,  ge=0.00001, title="Vessel Diameter (min)",        description="Minimum secondary xylem vessel diameter (lower bound of the size gradient).")
+    gradient_function   : Literal["five_pl", "linear", "uniform", "gaussian"] = Field(default="five_pl", title="Gradient Function",        description="Vessel diameter distribution: five_pl/linear use a centre-to-edge gradient; uniform samples from [min, max]; gaussian samples from N((max+min)/2, sd).")
+    gradient_inflection : float = Field(default=0.7,   ge=0.001, le=1.0,  title="Gradient Inflection",  description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
+    gradient_steepness  : float = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
+    gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",   description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
+    n_ring              : int   = Field(default=1,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
+    prop_vessel_ring    : float = Field(default=0.5,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
+    must_be_adjacent    : bool  = Field(default=False, title="Must Be Adjacent",                         description="If True, each new vessel circle must be tangent to at least one already-placed circle (first circle is always placed freely).")
+    parenchyma_diameter    : float = Field(default=0.03,  ge=0.00001, title="Parenchyma Diameter",      description="Mean cell diameter for ray parenchyma zones (angular gaps between pizza slices).")
+    parenchyma_diameter_sd : float = Field(default=0.002, ge=0.0,     title="Parenchyma Diameter SD",   description="Standard deviation of ray parenchyma cell diameter.")
+    parenchyma_width_sd    : float = Field(default=0.002, ge=0.0,     title="Parenchyma Width SD",      description="Standard deviation of ray parenchyma cell width.")
+    parenchyma_width       : float = Field(default=0.01,  ge=0.00001, title="Parenchyma Width",         description="Buffer distance used to shape the transition zone near pizza-slice boundaries and as the tangential cell width near the outer cambium.")
+
+class DicotSecondaryPhloemParams(BaseParams):
+    name                : str   = "secondary_phloem"
+    pass
+
+
+class DicotSecondaryCambiumParams(BaseParams):
+    name             : str   = "secondary_cambium"
+    cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of secondary cambium cells.")
+    cell_width       : float = Field(default=0.02,  ge=0.00001, title="Cell Width",       description="Tangential width of secondary cambium cells.")
+    # for secondary growth — must be larger than the primary cambium outer_distance
+    inner_distance : float = Field(default=0.42,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
+    outer_distance : float = Field(default=0.45,  ge=0.00001, title="Secondary Outer Distance", description="Outer radius of the secondary cambium star from the stele centre. Must be ≤ the stele radius.")
+    arc_top        : float = Field(default=0.10,  ge=0.00001, title="Arc Length at Tip",   description="Arc length at outer_distance (tip width of each arm).")
+    arc_bottom     : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Base",  description="Arc length at inner_distance (base width of each arm).")
+    
+
+class DicotSecondaryPhellodermParams(BaseParams):
+    pass
+
+class DicotSecondaryPhellogenParams(BaseParams):
+    pass
 
 # ===========================================================================
 # Needle anatomy defaults
@@ -445,13 +488,22 @@ class OrganInputData(BaseModel):
     
     @classmethod
     def for_dicot_root(cls) -> "OrganInputData":
-        """Return OrganInputData pre-loaded with default dicot root anatomy parameters."""
+        """Return OrganInputData pre-loaded with default dicot root anatomy parameters.
+
+        Secondary growth is disabled by default (DicotSecondaryGrowthParams value=False).
+        To enable it, call ``data.set_value("secondary_growth", "value", True)`` and
+        increase the stele thickness (SteleDicotParams.thickness ≥ 1.0 is recommended
+        so that the secondary cambium fits within the stele boundary).
+        """
         return cls(params=[
             PlantTypeParams(value=2),
             SteleDicotParams(),
             DicotXylemParams(),
             DicotPhloemParams(),
             DicotCambiumParams(),
+            DicotSecondaryGrowthParams(value=False),
+            DicotSecondaryXylemParams(),
+            DicotSecondaryCambiumParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),
             EpidermisParams(),
