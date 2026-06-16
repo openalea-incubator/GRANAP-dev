@@ -9,10 +9,10 @@ from shapely.affinity import scale
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex
 
-from granap.organ_class import Organ
-from granap.network_base import AbstractNetwork
-from granap.geometry_collection import GeometryProcessor
-from granap.generate_cell import CellGenerator
+from openalea.granap.organ_class import Organ
+from openalea.granap.network_base import AbstractNetwork
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.generate_cell import CellGenerator
 
 
 DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {

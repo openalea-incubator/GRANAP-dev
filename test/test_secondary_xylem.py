@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath('..'))
 
-from granap.root_class import RootAnatomy
-from granap.input_data import OrganInputData
+from openalea.granap.root_class import RootAnatomy
+from openalea.granap.input_data import OrganInputData
 
 
 def make_secondary_root(**overrides) -> RootAnatomy:
@@ -38,39 +38,46 @@ scenarios = [
     {"label": "Small vessels\n(diam=0.10)",        "kwargs": {"vessel_diameter": 0.10, "vessel_diameter_min": 0.04}},
 ]
 
-roots = []
-for s in scenarios:
-    print(f"\n=== {s['label'].replace(chr(10), ' | ')} ===")
-    t0 = time.time()
-    root = make_secondary_root(**s["kwargs"])
-    root.generate_cells()
-    elapsed = time.time() - t0
-    print(f"  Time: {elapsed:.2f}s")
 
-    counts = cell_type_counts(root)
-    print("  Cell types:")
-    for t, n in sorted(counts.items()):
-        print(f"    {t:25s}: {n}")
+def test_secondary_xylem(show=False):
+    roots = []
+    for s in scenarios:
+        print(f"\n=== {s['label'].replace(chr(10), ' | ')} ===")
+        t0 = time.time()
+        root = make_secondary_root(**s["kwargs"])
+        root.generate_cells()
+        elapsed = time.time() - t0
+        print(f"  Time: {elapsed:.2f}s")
 
-    roots.append(root)
+        counts = cell_type_counts(root)
+        print("  Cell types:")
+        for t, n in sorted(counts.items()):
+            print(f"    {t:25s}: {n}")
 
-# ── Visualisation ─────────────────────────────────────────────────────────
+        roots.append(root)
 
-n = len(scenarios)
-n_cols = 4
-n_rows = (n + n_cols - 1) // n_cols
-fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
-axs_flat = axs.flatten()
+    # ── Visualisation ─────────────────────────────────────────────────────────
 
-for i, (root, s) in enumerate(zip(roots, scenarios)):
-    root.plot_cells(show=False, ax=axs_flat[i], title=s["label"])
-    legend = axs_flat[i].get_legend()
-    if legend:
-        legend.remove()
+    n = len(scenarios)
+    n_cols = 4
+    n_rows = (n + n_cols - 1) // n_cols
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+    axs_flat = axs.flatten()
 
-for j in range(n, len(axs_flat)):
-    axs_flat[j].set_visible(False)
+    for i, (root, s) in enumerate(zip(roots, scenarios)):
+        root.plot_cells(show=False, ax=axs_flat[i], title=s["label"])
+        legend = axs_flat[i].get_legend()
+        if legend:
+            legend.remove()
 
-plt.suptitle("Dicot root — secondary xylem with Apollonian packing", fontsize=14)
-plt.tight_layout()
-plt.show()
+    for j in range(n, len(axs_flat)):
+        axs_flat[j].set_visible(False)
+
+    plt.suptitle("Dicot root — secondary xylem with Apollonian packing", fontsize=14)
+    plt.tight_layout()
+    if show:
+        plt.show()
+
+
+if __name__ == "__main__":
+    test_secondary_xylem(show=True)

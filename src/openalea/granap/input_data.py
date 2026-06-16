@@ -504,17 +504,9 @@ class OrganInputData(BaseModel):
                 missing = {k: v for k, v in defaults.items() if k not in param_dict}
                 if missing:
                     lines = "\n".join(f"    {k} = {v}" for k, v in missing.items())
-<<<<<<< HEAD:src/granap/input_data.py
-                    
-                    warnings.warn(
-                        f"[from_xml] '{child.tag}': the following fields were not found in the XML "
-                        f"and have been set to their defaults:\n{lines}",
-                        UserWarning, stacklevel=2,
-=======
                     print(
                         f"[from_xml] '{tag}': the following fields were not found in the XML "
                         f"and have been set to their defaults:\n{lines}"
->>>>>>> origin/develop:src/openalea/granap/input_data.py
                     )
                 param_dict = {**defaults, **param_dict}
             params.append(param_dict)

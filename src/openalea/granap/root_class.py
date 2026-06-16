@@ -9,16 +9,6 @@ from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 from shapely.affinity import translate, scale as affine_scale, rotate
 
-<<<<<<< HEAD:src/granap/root_class.py
-from granap.organ_class import Organ
-from granap.layer_class import Layer
-from granap.cell_class import Cell
-from granap.cell_manager import CellManager
-from granap.geometry_collection import GeometryProcessor
-from granap.generate_cell import CellGenerator
-from granap.input_data import OrganInputData
-from granap.math_functions import GRADIENT_FUNCTIONS, rescale
-=======
 from openalea.granap.organ_class import Organ
 from openalea.granap.layer_class import Layer
 from openalea.granap.cell_class import Cell
@@ -26,8 +16,7 @@ from openalea.granap.cell_manager import CellManager
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.input_data import OrganInputData
-
->>>>>>> origin/develop:src/openalea/granap/root_class.py
+from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
 
 class RootAnatomy(Organ):
     """

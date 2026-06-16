@@ -23,16 +23,6 @@ def test_root_and_needle_networks(show=False):
     mat_root = root.export_to_adjencymatrix()  # builds graph + matrix (1s for connectivity)
     mat_needle = needle.export_to_adjencymatrix()  # builds graph + matrix (1s for connectivity)
 
-<<<<<<< HEAD
-# Plot Root and Needle cells on top row
-root.plot_cells(show=False, ax=axs[0, 0], title="Root Cells")
-axs[0,0].get_legend().remove()
-needle.plot_cells(show=False, ax=axs[0, 1], title="Needle Cells")
-axs[0,1].get_legend().remove()
-# Plot Root and Needle networks on bottom row
-root.plot_network(ax=axs[1, 0], title="Root Network")
-needle.plot_network(ax=axs[1, 1], title="Needle Network")
-=======
     # Plot Root and Needle cells on top row
     root.plot_cells(show=show, ax=axs[0, 0], title="Root Cells")
     needle.plot_cells(show=show, ax=axs[0, 1], title="Needle Cells")
@@ -44,7 +34,6 @@ needle.plot_network(ax=axs[1, 1], title="Needle Network")
     if show:
         plt.tight_layout()
         plt.show()
->>>>>>> origin/develop
 
     # From XML:
     input_data_root = OrganInputData.from_xml("inputs/root_monocot_simpl.xml")

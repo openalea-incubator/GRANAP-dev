@@ -11,7 +11,7 @@ from scipy.optimize import minimize
 from scipy.spatial import Delaunay, ConvexHull
 from shapely.ops import unary_union
 
-from granap.math_functions import GRADIENT_FUNCTIONS, rescale
+from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
 
 
 class GeometryProcessor:
