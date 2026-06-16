@@ -516,55 +516,8 @@ class RootAnatomy(Organ):
             if c.type not in ("stele", "pericycle") or c.id_group not in groups_to_delete
         ]
 
-        # For each layer, buffer the boundary line outward and place cell seeds
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
-        center = stele_polygon.centroid
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None
-
-        line_segs = list(visible_boundary.geoms) if hasattr(visible_boundary, "geoms") else [visible_boundary]
-
-        for line_seg in line_segs:
-            # Place cells directly on the cambium boundary line, mirroring cells_on_layer
-            raw_coords = np.array(line_seg.coords)
-            seg_length = line_seg.length
-
-            n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
-            cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
-
-            if len(cells_coords) < 2:
-                continue
-
-            layer_cell_borders = CellGenerator.cell_border(
-                cells_coords,
-                cell_width * 0.7 if cell_width else cell_diam * 0.7,
-                cell_diam  * 0.7 if cell_width else 0,
-            )
-
-            for i, _coord in enumerate(cells_coords[1:]):
-                if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
-                    next_id_group += 1
-                    continue
-                id_group = next_id_group
-                next_id_group += 1
-                for border_pt in layer_cell_borders[i][1:]:
-                    self.vascular_cells.add_cell(Cell(
-                        type="cambium",
-                        x=border_pt[0],
-                        y=border_pt[1],
-                        diameter=cell_diam,
-                        id_cell=id_group,
-                        id_layer=0,
-                        id_group=id_group,
-                        angle=np.arctan2(
-                            border_pt[1] - center.y,
-                            border_pt[0] - center.x,
-                        ),
-                        radius=np.sqrt(
-                            (border_pt[0] - center.x) ** 2
-                            + (border_pt[1] - center.y) ** 2
-                        ),
-                        area=np.pi * (cell_diam / 2) ** 2,
-                    ))          
+        self._render_layer(visible_boundary, "cambium", cell_diam, cell_width, cx, cy, xylem_union)
 
     def fit_phloem_elements(self, stele_polygon: Polygon):
         """Place one phloem ellipse per valley between xylem peaks, filled with Apollonian packing."""
@@ -991,43 +944,61 @@ class RootAnatomy(Organ):
         star = Polygon(star_coords).buffer(0)
         return translate(star, cx, cy).intersection(stele_polygon)
 
-    def _render_secondary_cambium(
-        self, secondary_cambium_polygon: Polygon, cx: float, cy: float
+    def _render_layer(
+        self,
+        geometry,
+        cell_type: str,
+        cell_diam: float,
+        cell_width: float,
+        cx: float,
+        cy: float,
+        xylem_union=None,
     ) -> None:
-        """Place secondary cambium cell seeds along the secondary cambium boundary."""
-        sc         = self.secondary_cambium_params
-        cell_diam  = sc["cell_diameter"]
-        cell_width = sc["cell_width"]
+        """Place cell seeds along a geometry (Polygon exterior or LineString/MultiLineString)."""
+        if isinstance(geometry, Polygon):
+            line_segs = [geometry.exterior]
+        elif hasattr(geometry, "geoms"):
+            line_segs = list(geometry.geoms)
+        else:
+            line_segs = [geometry]
 
-        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
 
-        raw_coords  = np.array(secondary_cambium_polygon.exterior.coords)
-        seg_length  = secondary_cambium_polygon.exterior.length
-        n_cells     = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
-        cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
+        for line_seg in line_segs:
+            raw_coords = np.array(line_seg.coords)
+            seg_length = line_seg.length
 
-        cell_borders = CellGenerator.cell_border(
-            cells_coords,
-            cell_width * 0.7 if cell_width else cell_diam * 0.7,
-            cell_diam  * 0.7 if cell_width else 0,
-        )
+            n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
+            cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
 
-        for i in range(len(cells_coords) - 1):
-            id_group = next_id
-            next_id += 1
-            for border_pt in cell_borders[i][1:]:
-                self.vascular_cells.add_cell(Cell(
-                    type="secondary_cambium",
-                    x=border_pt[0],
-                    y=border_pt[1],
-                    diameter=cell_diam,
-                    id_cell=id_group,
-                    id_layer=0,
-                    id_group=id_group,
-                    angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
-                    radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
-                    area=np.pi * (cell_diam / 2) ** 2,
-                ))
+            if len(cells_coords) < 2:
+                continue
+
+            cell_borders = CellGenerator.cell_border(
+                cells_coords,
+                cell_width * 0.7 if cell_width else cell_diam * 0.7,
+                cell_diam  * 0.7 if cell_width else 0,
+            )
+
+            for i, _coord in enumerate(cells_coords[1:]):
+                if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
+                    next_id_group += 1
+                    continue
+                id_group = next_id_group
+                next_id_group += 1
+                for border_pt in cell_borders[i][1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type=cell_type,
+                        x=border_pt[0],
+                        y=border_pt[1],
+                        diameter=cell_diam,
+                        id_cell=id_group,
+                        id_layer=0,
+                        id_group=id_group,
+                        angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                        radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                        area=np.pi * (cell_diam / 2) ** 2,
+                    ))
 
     def _pack_vessels_in_pizza_zone(
         self, zone_polygon: Polygon, sx: dict
@@ -1364,7 +1335,8 @@ class RootAnatomy(Organ):
         if secondary_cambium_polygon is None or secondary_cambium_polygon.is_empty:
             return
 
-        self._render_secondary_cambium(secondary_cambium_polygon, cx, cy)
+        sc = self.secondary_cambium_params
+        self._render_layer(secondary_cambium_polygon, "secondary_cambium", sc["cell_diameter"], sc["cell_width"], cx, cy)
 
         # Step 3: annular zone between the two cambium boundaries
         annular_zone = secondary_cambium_polygon.difference(primary_cambium_polygon)

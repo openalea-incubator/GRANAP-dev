@@ -35,7 +35,7 @@ scenarios = [
     {"label": "prop_stele=0.3\n(narrow zones)",    "kwargs": {"prop_stele": 0.3}},
     {"label": "prop_stele=1.0\n(full ring)",       "kwargs": {"prop_stele": 1.0}},
     {"label": "must_be_adjacent=True",             "kwargs": {"must_be_adjacent": True}},
-    {"label": "Large vessels\n(diam=0.10)",        "kwargs": {"vessel_diameter": 0.10, "vessel_diameter_min": 0.04}},
+    {"label": "Small vessels\n(diam=0.10)",        "kwargs": {"vessel_diameter": 0.10, "vessel_diameter_min": 0.04}},
 ]
 
 roots = []
