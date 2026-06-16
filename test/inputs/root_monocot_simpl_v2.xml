@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<granar>
+    <!-- General parameters -->
+    <!-- value: 1 = monocot / 2 = dicot -->
+    <planttype value="1" organ="root" />
+
+    <!-- Stele: defines the central cylinder and all vascular elements                    -->
+    <!-- thickness         = stele outer diameter [mm]                                    -->
+    <!-- cell_diameter     = parenchyma cell size at stele edge [mm]                      -->
+    <!-- cell_diameter_max = parenchyma cell size at stele center [mm]                    -->
+    <!-- xylem_diameter    = metaxylem vessel diameter [mm]                               -->
+    <!-- protoxylem_diameter = protoxylem bundle diameter [mm]                            -->
+    <!-- phloem_diameter   = phloem bundle diameter [mm]                                  -->
+    <!-- n_vascular_bundles = number of metaxylem/phloem bundle pairs                    -->
+    <!-- ratio_proto_meta  = number of protoxylem bundles per metaxylem vessel            -->
+    <!-- n_protoxylem_per_bundle / n_phloem_per_bundle = cells packed inside each bundle  -->
+    <stele thickness              = "0.25"
+           cell_diameter          = "0.01"
+           cell_diameter_max      = "0.02"
+           xylem_diameter         = "0.06"
+           xylem_diameter_sd      = "0.005"
+           protoxylem_diameter    = "0.01"
+           protoxylem_diameter_sd = "0.002"
+           phloem_diameter        = "0.01"
+           phloem_diameter_sd     = "0.001"
+           n_phloem_per_bundle    = "5"
+           n_protoxylem_per_bundle= "2"
+           n_vascular_bundles     = "5"
+           ratio_proto_meta       = "3.3"
+           size_gradient_inflection = "0.3"
+           size_gradient_steepness  = "3.0"
+           size_gradient_asymmetry  = "1.0" />
+
+    <!-- Cortical tissues — listed from inside (low order) to outside (high order)  -->
+    <!-- cell_diameter = radial cell size [mm] ; cell_width = tangential size [mm]  -->
+    <!-- shift = cell offset (0 = aligned, 0.5 = half-cell stagger)                 -->
+    <pericycle  cell_diameter="0.01"  cell_width="0.009" n_layers="1" shift="0.0" order="2" />
+    <endodermis cell_diameter="0.02"  cell_width="0.03"  n_layers="1" shift="0.0" order="3" />
+    <cortex     cell_diameter="0.04"                     n_layers="6" shift="0.0" order="4" />
+    <exodermis  cell_diameter="0.03"                     n_layers="1" shift="0.0" order="5" />
+    <epidermis  cell_diameter="0.01"                     n_layers="1" shift="0.5" order="6" />
+
+    <!-- Intercellular spaces                                                             -->
+    <!-- tissue and smoothness omitted → defaults to ["cortex","exodermis"], [0.05,0.05] -->
+    <!-- inter_cellular_space_proportion = fraction of air space (0–1)                   -->
+    <inter_cellular_spaces inter_cellular_space_proportion="0.1" />
+
+    <!-- Aerenchyma                                                                       -->
+    <!-- aerenchyma_proportion = 0.0 disables aerenchyma generation                      -->
+    <!-- aerenchyma_type: 1 = strip / 2 = patch                                          -->
+    <aerenchyma tissue="cortex" aerenchyma_proportion="0.0" aerenchyma_type="1" n_files="2" />
+</granar>

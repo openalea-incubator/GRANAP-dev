@@ -7,6 +7,11 @@ import shapely as sp
 from typing import Tuple, List, Optional
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from cv2 import fitEllipse
+from scipy.optimize import minimize
+from scipy.spatial import Delaunay, ConvexHull
+from shapely.ops import unary_union
+
+from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
 
 
 class GeometryProcessor:
@@ -52,6 +57,46 @@ class GeometryProcessor:
         y = radius * np.sin(theta)
         return sp.Polygon(np.column_stack((x, y)))
     
+    @staticmethod
+    def star_polygon(
+        n_branches: int,
+        r_min: float,
+        r_max: float,
+        arc_base: float,
+        arc_top: float,
+        n_arc: int = 200,
+    ) -> Polygon:
+        """
+        Generate a star-shaped polygon as a single continuous boundary.
+
+        Alternates outer arcs at r_max (peaks) with inner arcs at r_min (valleys),
+        connected by straight sides. No boolean operations.
+
+        Args:
+            n_branches: Number of branches (>= 2)
+            r_min:      Inner radius between branches
+            r_max:      Outer radius at branch tips (> r_min)
+            arc_base:   Half arc length at r_min (base width of each branch)
+            arc_top:    Half arc length at r_max (tip width of each branch)
+            n_arc:      Number of points per arc segment
+        """
+        w_base = arc_base / r_min
+        w_top  = arc_top  / r_max
+
+        segments = []
+        for k in range(n_branches):
+            tk     = 2 * np.pi * k / n_branches
+            t_next = 2 * np.pi * (k + 1) / n_branches
+            outer  = np.linspace(tk - w_top,  tk + w_top,      n_arc)
+            valley = np.linspace(tk + w_base, t_next - w_base, n_arc)
+            segments.append([[r_min * np.cos(tk - w_base), r_min * np.sin(tk - w_base)]])
+            segments.append(np.column_stack([r_max * np.cos(outer),  r_max * np.sin(outer)]))
+            segments.append([[r_min * np.cos(tk + w_base), r_min * np.sin(tk + w_base)]])
+            segments.append(np.column_stack([r_min * np.cos(valley), r_min * np.sin(valley)]))
+
+        return sp.Polygon(np.vstack(segments))
+
+
     @staticmethod
     def resample_coords(coords: np.ndarray, target_n_points: int = 200, 
                         shift_distance: float = 0) -> np.ndarray:
@@ -259,6 +304,128 @@ class GeometryProcessor:
             return deepest.centroid.x, deepest.centroid.y, lb
         except Exception:
             return polygon.centroid.x, polygon.centroid.y, 0.0
+
+    @staticmethod
+    def _chebyshev_center(polygon, grid_n: int = 15) -> Tuple[float, float, float]:
+        """
+        Pole of inaccessibility via grid search + Nelder-Mead refinement.
+        Returns (cx, cy, radius) of the largest inscribed circle.
+        """
+        minx, miny, maxx, maxy = polygon.bounds
+        best_r, best_xy = 0.0, (polygon.centroid.x, polygon.centroid.y)
+
+        for x in np.linspace(minx, maxx, grid_n):
+            for y in np.linspace(miny, maxy, grid_n):
+                p = sp.Point(x, y)
+                if polygon.contains(p):
+                    r = p.distance(polygon.boundary)
+                    if r > best_r:
+                        best_r, best_xy = r, (x, y)
+
+        def neg_r(xy):
+            p = sp.Point(xy)
+            return -p.distance(polygon.boundary) if polygon.contains(p) else 0.0
+
+        res = minimize(neg_r, best_xy, method='Nelder-Mead',
+                       options={'xatol': 1e-5, 'fatol': 1e-5, 'maxiter': 300})
+        cx, cy = res.x
+        p = sp.Point(cx, cy)
+        if polygon.contains(p):
+            r = p.distance(polygon.boundary)
+            if r >= best_r:
+                return cx, cy, r
+        return best_xy[0], best_xy[1], best_r
+
+    @staticmethod
+    def apollonian_pack(
+        polygon,
+        diam_max: float,
+        diam_min: float,
+        gradient_function: str = "five_pl",
+        gradient_inflection: float = 0.5,
+        gradient_steepness: float = 3.0,
+        gradient_asymmetry: float = 1.0,
+        first_vessel_shift: float = 0.0,
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Iterative Apollonian packing with a centre-to-edge size gradient.
+
+        Circles near the polygon centroid get up to diam_max; circles near the
+        boundary get down to diam_min. Target diameter is computed via
+        ``rescale(five_pl, lo=diam_min, hi=diam_max, c, b, m)``.
+
+        Args:
+            polygon:              Shapely polygon to fill
+            diam_max:             Maximum circle diameter (at centroid, t=0)
+            diam_min:             Minimum circle diameter (at boundary, t=1)
+            gradient_function:    Name of the shape function from GRADIENT_FUNCTIONS (e.g. "five_pl", "linear")
+            gradient_inflection:  Inflection point on [0, 1] — passed as ``c`` to the shape function
+            gradient_steepness:   Hill coefficient — sharpness of transition — passed as ``b``
+            gradient_asymmetry:   Asymmetry exponent — passed as ``m``
+            first_vessel_shift:   Maximum random shift of the first vessel centre,
+                                  expressed as a fraction of the local inscribed radius.
+                                  0.0 = deterministic (always at the Chebyshev centre).
+
+        Returns:
+            List of (cx, cy, radius) tuples for each placed circle
+        """
+        target_diam_fn = rescale(
+            GRADIENT_FUNCTIONS[gradient_function],
+            lo=diam_min,
+            hi=diam_max,
+            c=gradient_inflection,
+            b=gradient_steepness,
+            m=gradient_asymmetry,
+        )
+
+        placed = []
+        stack = [polygon]
+
+        poly_cx, poly_cy = polygon.centroid.x, polygon.centroid.y
+        minx, miny, maxx, maxy = polygon.bounds
+        max_dist = max(maxx - poly_cx, poly_cx - minx, maxy - poly_cy, poly_cy - miny)
+
+        while stack:
+            region = stack.pop()
+
+            if region.area < np.pi * (diam_min / 2) ** 2:
+                continue
+
+            cx, cy, r_ins = GeometryProcessor._chebyshev_center(region)
+
+            # Random shift for the first vessel only, bounded so the centre
+            # stays inside the polygon and the inscribed radius is recomputed.
+            # The shifted position is accepted only when r_ins at the new location
+            # is still >= diam_min/2; otherwise fall back to the Chebyshev centre
+            # to avoid skipping the entire region.
+            if not placed and first_vessel_shift > 0.0:
+                angle = np.random.uniform(0.0, 2.0 * np.pi)
+                magnitude = np.random.uniform(0.0, first_vessel_shift * r_ins)
+                new_cx = cx + magnitude * np.cos(angle)
+                new_cy = cy + magnitude * np.sin(angle)
+                if polygon.contains(Point(new_cx, new_cy)):
+                    new_r_ins = polygon.exterior.distance(Point(new_cx, new_cy))
+                    if new_r_ins >= diam_min / 2:
+                        cx, cy = new_cx, new_cy
+                        r_ins = new_r_ins
+
+            t = min(np.hypot(cx - poly_cx, cy - poly_cy) / max_dist, 1.0)
+            target_diam = target_diam_fn(t)
+            r = min(r_ins, target_diam / 2)
+
+            if r * 2 < diam_min:
+                continue
+
+            placed.append((cx, cy, r))
+
+            remaining = region.difference(sp.Point(cx, cy).buffer(r, resolution=32))
+            if remaining.is_empty:
+                continue
+
+            geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
+            stack.extend(g for g in geoms if not g.is_empty)
+
+        return placed
 
     @staticmethod
     def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):

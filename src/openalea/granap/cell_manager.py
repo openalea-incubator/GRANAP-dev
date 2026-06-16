@@ -121,33 +121,3 @@ class CellManager:
             cell.angle = np.arctan2(cell.y, cell.x)
             if cell.polygon is not None:
                 cell.polygon = translate(cell.polygon, xoff = -x_center, yoff = -y_center)
-
-    def plot_cells(self, ax = None):
-        # plot cells coordinates
-        # color code by type
-        # legend
-        import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
-        if ax is None:
-            fig, ax = plt.subplots()
-        
-        types = self.get_all_types()
-        # Create a color map
-        colors = cm.viridis(np.linspace(0, 1, len(types)))
-        type_to_color = dict(zip(types, colors))
-
-        # Plot cells
-        for cell in self.cells:
-            if cell.type in type_to_color:
-                c = type_to_color[cell.type]
-                ax.plot(cell.x, cell.y, marker='o', linestyle='', c=c, label=cell.type)
-        
-        # Deduplicate legend
-        handles, labels = ax.get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        if by_label:
-            ax.legend(by_label.values(), by_label.keys())
-        
-        ax.set_aspect('equal', adjustable='box')
-        plt.show()
-
