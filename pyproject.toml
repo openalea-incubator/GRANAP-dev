@@ -10,18 +10,15 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools]
-include-package-data = true # force explicit declaration of data (disable automatic inclusion)
-
-[tool.setuptools.package-data]
-"mecha" = ["*.yaml"]
+include-package-data = false # force explicit declaration of data (disable automatic inclusion)
 
 # enable dynamic version based on git tags
 [tool.setuptools_scm]
 
 [project]
-name = "granap"
+name = "openalea.granap"
 authors = [
-  { name = "Adrien Heymans", email = "tristan.gerault@uclouvain.be" },
+  { name = "Adrien Heymans", email = "adrien.heymans@uclouvain.be" },
 ]
 description = "Todo"
 readme = "README.md"
@@ -52,11 +49,10 @@ classifiers = [
 dependencies = []
 
 # section specific to conda-only distributed package (not used by pip yet)
-[tool.conda-environment]
+[tool.conda.environment]
 
 dependencies = [
     "geopandas",
-    "ipykernel",
     "lxml",
     "matplotlib",
     "numpy",
@@ -64,6 +60,8 @@ dependencies = [
     "scikit-learn", # not sure if it is still needed
     "scipy",
     "shapely",
+    "pydantic",
+    "roifile",
     "opencv"
 ]
 
@@ -83,11 +81,12 @@ doc = [
   "ipykernel",
   "sphinx-copybutton",
   "ipython_genutils",
-  "nbsphinx"
+  "nbsphinx",
+  "pyan3"
 ]
 
 [project.urls]
-Repository = "https://github.com/MECHARoot/GRANAP"
+Repository = "https://github.com/openalea-incubator/GRANAP-dev"
 
-# [project.entry-points."wralea"]
-# "my_pkg" = "granap_wralea"
+[project.entry-points."wralea"]
+"granap" = "granap_wralea"

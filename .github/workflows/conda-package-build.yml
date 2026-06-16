@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - master
-      - ganache
+      - develop
     tags:
       - 'v*'
   pull_request:

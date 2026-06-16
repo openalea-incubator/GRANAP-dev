@@ -1336,7 +1336,7 @@ class RootAnatomy(Organ):
             return
 
         sc = self.secondary_cambium_params
-        self._render_layer(secondary_cambium_polygon, "secondary_cambium", sc["cell_diameter"], sc["cell_width"], cx, cy)
+        self._render_layer(secondary_cambium_polygon, "cambium", sc["cell_diameter"], sc["cell_width"], cx, cy)
 
         # Step 3: annular zone between the two cambium boundaries
         annular_zone = secondary_cambium_polygon.difference(primary_cambium_polygon)
