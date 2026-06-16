@@ -443,7 +443,7 @@ class OrganInputData(BaseModel):
             "pericycle":             PericycleParams(),
         }
 
-        # Translate legacy GRANAR XML attribute names → current field names.
+        # Translate legacy GRANAR XML attribute names into current field names.
         # Format: { tag_name: { old_attr: new_attr, ... } }
         _ATTR_RENAMES: Dict[str, Dict[str, str]] = {
             "planttype": {
@@ -451,6 +451,12 @@ class OrganInputData(BaseModel):
             },
             "stele": {
                 "layer_diameter": "thickness",
+            },
+            "xylem": {
+                "cell_diameter": "protoxylem_diameter",
+                "max_size":      "cell_diameter",
+                "n_files":       "n_vascular_bundles",
+                "ratio":         "ratio_proto_meta",
             },
             "aerenchyma": {
                 "proportion": "aerenchyma_proportion",
@@ -484,9 +490,9 @@ class OrganInputData(BaseModel):
         # parameters (<xylem>) into separate tags.  The new SteleParams
         # consolidates both.  Map <xylem> attributes into the stele dict.
         _XYLEM_TO_STELE: Dict[str, str] = {
-            "max_size": "xylem_diameter",
-            "n_files":  "n_vascular_bundles",
-            "ratio":    "ratio_proto_meta",
+            "cell_diameter":      "xylem_diameter",
+            "n_vascular_bundles": "n_vascular_bundles",
+            "ratio_proto_meta":   "ratio_proto_meta",
         }
         if "stele" in raw and "xylem" in raw:
             xylem_raw = raw["xylem"]
