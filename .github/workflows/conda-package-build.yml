@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - master
-      - ganache
     tags:
       - 'v*'
   pull_request:

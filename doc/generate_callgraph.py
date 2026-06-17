@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import granap
+import openalea.granap
 import pyan
 
 
@@ -18,8 +18,8 @@ import pyan
 # Configuration
 # ============================================================================
 
-PACKAGE_NAME = granap.__name__
-PACKAGE_DIR = Path(granap.__path__[0]).resolve()
+PACKAGE_NAME = openalea.granap.__name__
+PACKAGE_DIR = Path(openalea.granap.__path__[0]).resolve()
 
 # Output directory for GitHub Pages / docs
 OUTDIR = Path("./callgraph")
