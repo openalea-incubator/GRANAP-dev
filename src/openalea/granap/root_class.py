@@ -396,7 +396,7 @@ class RootAnatomy(Organ):
             actual_r = actual_diam / 2
 
             placed = Point(pcx, pcy).buffer(actual_r, resolution=32)
-            cell_type = "metaxylem" if actual_diam >= min_diam else "stele"
+            cell_type = "xylem" if actual_diam >= min_diam else "stele"
 
             placed_buff = placed.buffer(-actual_r * 0.15)
             if placed_buff.is_empty:
@@ -425,7 +425,7 @@ class RootAnatomy(Organ):
                 )
                 self.vascular_cells.add_cell(new_cell)
 
-            if cell_type == "metaxylem":
+            if cell_type == "xylem":
                 self.vascular_polygons.append(placed)
 
     def _remove_stele_seeds_near_xylem(self) -> None:
@@ -1288,7 +1288,7 @@ class RootAnatomy(Organ):
                         er = a_rad * border_cos[j]
                         et = b_tan * border_sin[j]
                         self.vascular_cells.add_cell(Cell(
-                            type="ray_parenchyma",
+                            type="stele",
                             x=px + er * cos_t - et * sin_t,
                             y=py + er * sin_t + et * cos_t,
                             diameter=d_cell,
@@ -1424,7 +1424,7 @@ class RootAnatomy(Organ):
 
                 for border_pt in border_coords[1:]:
                     self.vascular_cells.add_cell(Cell(
-                        type="secondary_xylem",
+                        type="xylem",
                         x=border_pt[0],
                         y=border_pt[1],
                         diameter=actual_diam,
@@ -1452,7 +1452,7 @@ class RootAnatomy(Organ):
                 axial_zone,
                 sx["cell_diameter"],
                 sx["cell_width"],
-                "secondary_xylem",
+                "stele",
                 cx, cy,
                 next_id,
             )
