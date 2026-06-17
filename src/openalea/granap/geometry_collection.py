@@ -409,9 +409,6 @@ class GeometryProcessor:
         stack = [polygon]
 
         while stack:
-            if total_area / poly_area >= proportion:
-                break
-
             region = stack.pop()
             if region.is_empty or region.area < np.pi * (diameter_min / 2) ** 2:
                 continue
@@ -463,11 +460,28 @@ class GeometryProcessor:
                         stack.extend(g for g in geoms if not g.is_empty)
                     continue
 
+            # Budget check: if placing r would overshoot the proportion target, shrink it
+            # to exactly consume the remaining budget. If even diameter_min won't fit in
+            # the budget, stop entirely.
+            budget = proportion * poly_area - total_area
+            if budget <= 0.0:
+                break
+            at_limit = False
+            if np.pi * r ** 2 > budget:
+                r_budget = np.sqrt(budget / np.pi)
+                if r_budget >= diameter_min / 2:
+                    r = r_budget
+                    at_limit = True
+                else:
+                    break
+
             placed.append((cx, cy, r))
             total_area += np.pi * r ** 2
 
             remaining = region.difference(sp.Point(cx, cy).buffer(r, resolution=32))
-            if remaining.is_empty:
+            if remaining.is_empty or at_limit:
+                if at_limit:
+                    break
                 continue
             geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
             stack.extend(g for g in geoms if not g.is_empty)
