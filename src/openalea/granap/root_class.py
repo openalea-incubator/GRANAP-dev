@@ -125,6 +125,7 @@ class RootAnatomy(Organ):
                 "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",  5.0)),
                 "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",  1.0)),
                 "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",  0.7)),
+                "pith_radius":               float(xylem.get("pith_radius",          0.0)),
                 "xylem_direction":           str(xylem.get("direction", "center")),
                 "phloem_diameter":           float(phloem.get("vessel_diameter",      0.005)),
                 "phloem_diameter_sd":        float(phloem.get("vessel_diameter_sd",   0.001)),
