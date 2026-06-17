@@ -1340,14 +1340,15 @@ class RootAnatomy(Organ):
 
         # Step 3: annular zone between the two cambium boundaries
         annular_zone = secondary_cambium_polygon.difference(primary_cambium_polygon)
-        if annular_zone.is_empty:
+        # buffer by half cell width to avoid overlaps
+        shrinked_sec_cambium_pol = GeometryProcessor.buffer_polygon(secondary_cambium_polygon, +sc["cell_diameter"] / 1.5, 0)
+        buffed_annular_zone = shrinked_sec_cambium_pol.difference(primary_cambium_polygon)
+        
+        if buffed_annular_zone.is_empty:
             return
-
-        # Remove stele parenchyma seeds from the annular zone (secondary growth replaces them)
-        self.all_cells.cells = [
-            c for c in self.all_cells.cells
-            if not (c.type == "stele" and annular_zone.contains(Point(c.x, c.y)))
-        ]
+        else: 
+            # Remove stele parenchyma seeds from the annular zone (secondary growth replaces them)
+            self.all_cells.remove_cells_in_polygon(buffed_annular_zone)
 
         # Step 4: pizza-slice vessel zones — one per valley between xylem peaks
         # Angular position: midpoint between adjacent peaks (same logic as fit_phloem_elements)
@@ -1464,6 +1465,10 @@ class RootAnatomy(Organ):
         )
 
         # Step 7: register vessel circles so stele seeds inside them are cleared
+        # remove cells inside vessel circles
+        # for vessel_poly in all_vessel_polys:
+        #     self.all_cells.remove_cells_by_polygon(vessel_poly)
+
         self.vascular_polygons.extend(all_vessel_polys)
 
     def _organ_specific_tissues(self):
