@@ -117,18 +117,20 @@ class RootXylemParams(BaseParams):
     name                    : str   = "xylem"
     cell_diameter           : float = Field(default=0.06,   ge=0.00001, title="Cell Diameter",              description="Metaxylem vessel diameter.")
     cell_diameter_sd        : float = Field(default=0.005,  ge=0.0,     title="Cell Diameter SD",           description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
-    protoxylem_diameter     : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
-    protoxylem_diameter_sd  : float = Field(default=0.002,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
-    n_vascular_bundles      : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
-    n_protoxylem_per_bundle : int   = Field(default=2,      ge=1,       title="Protoxylem per Bundle",      description="Number of protoxylem elements per bundle.")
-    ratio_proto_meta        : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
+    protoxylem_diameter    : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
+    protoxylem_diameter_sd : float = Field(default=0.002,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
+    protoxylem_width       : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Bundle Width",    description="Tangential width of the protoxylem ellipse.")
+    protoxylem_height      : float = Field(default=0.03,   ge=0.00001, title="Protoxylem Bundle Height",   description="Radial height of the protoxylem ellipse.")
+    n_vascular_bundles     : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
+    ratio_proto_meta       : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
 
 
 class RootPhloemParams(BaseParams):
     name             : str   = "phloem"
-    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
-    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
-    n_per_bundle     : int   = Field(default=5,      ge=1,       title="Cells per Bundle", description="Number of sieve elements packed inside each phloem bundle.")
+    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",         description="Diameter of phloem sieve elements.")
+    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD",      description="Standard deviation of phloem cell diameter.")
+    width            : float = Field(default=0.01,   ge=0.00001, title="Phloem Bundle Width",   description="Tangential width of the phloem ellipse.")
+    height           : float = Field(default=0.015,  ge=0.00001, title="Phloem Bundle Height",  description="Radial height of the phloem ellipse.")
 
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
@@ -157,6 +159,7 @@ class DicotXylemParams(BaseParams):
     gradient_steepness  : float                        = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",      description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     first_vessel_shift  : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
+    direction           : Optional[str] = Field(default="center", title="Packing Direction", description="Size gradient direction: 'center' (large near centre), 'edge' (large near boundary), 'middle' (large at mid-radius), None (random).")
 
 
 class DicotPhloemParams(BaseParams):
