@@ -1285,45 +1285,50 @@ class RootAnatomy(Organ):
             # Remove stele parenchyma seeds from the annular zone (secondary growth replaces them)
             self.all_cells.remove_cells_in_polygon(buffed_annular_zone)
 
-        # Step 4: pizza-slice vessel zones — one per valley between xylem peaks
-        # Angular position: midpoint between adjacent peaks (same logic as fit_phloem_elements)
+        # Step 4: pizza-slice vessel zones — one per valley between xylem peaks.
+        # When prop_stele == 1 the slices would tile the full ring with no gaps, so
+        # skip the angular split and treat the entire annular zone as one vessel zone.
         full_angle_per_slice = 2.0 * np.pi / n_peaks
         half_width = full_angle_per_slice * sx["prop_stele"] / 2.0
 
-        minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
-        outer_r = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
-
         vessel_zones: List = []
-        for k in range(n_peaks):
-            theta = 2.0 * np.pi * (k + 0.5) / n_peaks
+        if sx["prop_stele"] >= 1.0:
+            if not annular_zone.is_empty and annular_zone.area >= np.pi * (sx["vessel_diameter_min"] / 2) ** 2:
+                vessel_zones.append(annular_zone)
+        else:
+            minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
+            outer_r = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
 
-            if half_width < 1e-9:
-                vessel_zones.append(None)
-                continue
+            for k in range(n_peaks):
+                theta = 2.0 * np.pi * (k + 0.5) / n_peaks
 
-            arc_angles = np.linspace(theta - half_width, theta + half_width, 50)
-            wedge_pts  = [(cx, cy)] + [
-                (cx + outer_r * np.cos(a), cy + outer_r * np.sin(a)) for a in arc_angles
-            ]
-            raw_wedge = Polygon(wedge_pts)
+                if half_width < 1e-9:
+                    vessel_zones.append(None)
+                    continue
 
-            zone = raw_wedge.intersection(annular_zone)
-            if zone.is_empty or zone.area < np.pi * (sx["vessel_diameter_min"] / 2) ** 2:
-                vessel_zones.append(None)
-                continue
+                arc_angles = np.linspace(theta - half_width, theta + half_width, 50)
+                wedge_pts  = [(cx, cy)] + [
+                    (cx + outer_r * np.cos(a), cy + outer_r * np.sin(a)) for a in arc_angles
+                ]
+                raw_wedge = Polygon(wedge_pts)
 
-            # Smooth only simple polygons to avoid losing multi-part geometry
-            if zone.geom_type == "Polygon":
-                zone_coords = GeometryProcessor.smoothing_polygon(
-                    np.column_stack(zone.exterior.xy),
-                    smooth_factor=0.3,
-                    iterations=3,
-                )
-                smoothed = Polygon(zone_coords).buffer(0)
-                if not smoothed.is_empty and smoothed.geom_type == "Polygon":
-                    zone = smoothed
+                zone = raw_wedge.intersection(annular_zone)
+                if zone.is_empty or zone.area < np.pi * (sx["vessel_diameter_min"] / 2) ** 2:
+                    vessel_zones.append(None)
+                    continue
 
-            vessel_zones.append(zone)
+                # Smooth only simple polygons to avoid losing multi-part geometry
+                if zone.geom_type == "Polygon":
+                    zone_coords = GeometryProcessor.smoothing_polygon(
+                        np.column_stack(zone.exterior.xy),
+                        smooth_factor=0.3,
+                        iterations=3,
+                    )
+                    smoothed = Polygon(zone_coords).buffer(0)
+                    if not smoothed.is_empty and smoothed.geom_type == "Polygon":
+                        zone = smoothed
+
+                vessel_zones.append(zone)
 
         # Step 5: pack vessels and fill axial parenchyma within each zone
         all_vessel_polys: List[Polygon] = []

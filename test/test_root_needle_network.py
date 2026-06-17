@@ -58,7 +58,7 @@ def test_root_and_needle_networks(show=False):
     # Plot Root and Needle networks on bottom row
     root_sim.plot_network(ax=axs[1, 0], show=show, title="Root Network (XML)")
     needle_sim.plot_network(ax=axs[1, 1], show=show, title="Needle Network (Param)")
-    n_xylem = len([cell for cell in root_sim.all_cells.cells if cell.type == "xylem"])
+    n_xylem = len([cell for cell in root_sim.all_cells.cells if cell.type == "metaxylem"])
     n_airspace = len([cell for cell in root_sim.all_cells.cells if cell.type == "air space"])
     # assert that root from xml has 3 xylem
     assert n_xylem == 3

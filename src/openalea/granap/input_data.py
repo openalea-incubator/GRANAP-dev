@@ -209,8 +209,8 @@ class DicotSecondaryGrowthParams(BaseParams):
 class DicotSecondaryXylemParams(BaseParams):
     name                : str   = "secondary_xylem"
     prop_stele          : float = Field(default=0.7,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
-    cell_diameter       : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
-    cell_width          : float = Field(default=0.015,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
+    cell_diameter       : float = Field(default=0.012,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
+    cell_width          : float = Field(default=0.01,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
     vessel_diameter     : float = Field(default=0.12,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
     vessel_diameter_sd  : float = Field(default=0.005, ge=0.0,     title="Vessel Diameter SD",           description="Standard deviation added to each vessel diameter after gradient sampling.")
     vessel_diameter_min : float = Field(default=0.06,  ge=0.00001, title="Vessel Diameter (min)",        description="Minimum secondary xylem vessel diameter (lower bound of the size gradient).")
@@ -219,7 +219,7 @@ class DicotSecondaryXylemParams(BaseParams):
     gradient_steepness  : float = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",   description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     n_ring              : int   = Field(default=1,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
-    prop_vessel_ring    : float = Field(default=0.5,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
+    prop_vessel_ring    : float = Field(default=0.2,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
     must_be_adjacent    : bool  = Field(default=False, title="Must Be Adjacent",                         description="If True, each new vessel circle must be tangent to at least one already-placed circle (first circle is always placed freely).")
     parenchyma_diameter    : float = Field(default=0.02,  ge=0.00001, title="Parenchyma Diameter",      description="Mean cell diameter for ray parenchyma zones (angular gaps between pizza slices).")
     parenchyma_diameter_sd : float = Field(default=0.002, ge=0.0,     title="Parenchyma Diameter SD",   description="Standard deviation of ray parenchyma cell diameter.")
