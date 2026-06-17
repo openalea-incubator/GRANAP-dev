@@ -339,17 +339,18 @@ class GeometryProcessor:
     @staticmethod
     def pack_circles(
         polygon,
-        proportion:          float          = 1.0,
-        direction:           Optional[str]  = "center",
-        diameter_max:        float          = 0.1,
-        diameter_min:        Optional[float] = None,
-        diameter_sd:         float          = 0.0,
-        gradient_function:   str            = "five_pl",
-        gradient_inflection: float          = 0.5,
-        gradient_steepness:  float          = 3.0,
-        gradient_asymmetry:  float          = 1.0,
-        first_circle_shift:  float          = 0.0,
-        adjacent:            bool           = False,
+        proportion:          float                       = 1.0,
+        direction:           Optional[str]               = "center",
+        diameter_max:        float                       = 0.1,
+        diameter_min:        Optional[float]             = None,
+        diameter_sd:         float                       = 0.0,
+        gradient_function:   str                         = "five_pl",
+        gradient_inflection: float                       = 0.5,
+        gradient_steepness:  float                       = 3.0,
+        gradient_asymmetry:  float                       = 1.0,
+        first_circle_shift:  float                       = 0.0,
+        adjacent:            bool                        = False,
+        gradient_center:     Optional[Tuple[float, float]] = None,
     ) -> List[Tuple[float, float, float]]:
         """
         Unified Apollonian circle packing with proportion stop, directional gradient,
@@ -375,6 +376,12 @@ class GeometryProcessor:
                                  of its inscribed radius.  0.0 = deterministic.
             adjacent:            If True, every circle after the first must be tangent to at
                                  least one already-placed circle.
+            gradient_center:     Optional (x, y) reference point for computing the gradient
+                                 position t.  When None (default) the polygon centroid is
+                                 used.  Pass the stele/organ centre when the polygon is a
+                                 sub-region (e.g. a pizza-slice zone) so that t reflects
+                                 radial distance from the true anatomical centre rather than
+                                 from the zone centroid.
 
         Returns:
             List of (cx, cy, radius) tuples for each placed circle.
@@ -399,7 +406,19 @@ class GeometryProcessor:
 
         poly_cx, poly_cy = polygon.centroid.x, polygon.centroid.y
         minx, miny, maxx, maxy = polygon.bounds
-        max_dist = max(maxx - poly_cx, poly_cx - minx, maxy - poly_cy, poly_cy - miny)
+
+        if gradient_center is not None:
+            ref_cx, ref_cy = gradient_center
+            max_dist = max(
+                np.hypot(maxx - ref_cx, maxy - ref_cy),
+                np.hypot(maxx - ref_cx, miny - ref_cy),
+                np.hypot(minx - ref_cx, maxy - ref_cy),
+                np.hypot(minx - ref_cx, miny - ref_cy),
+            )
+        else:
+            ref_cx, ref_cy = poly_cx, poly_cy
+            max_dist = max(maxx - ref_cx, ref_cx - minx, maxy - ref_cy, ref_cy - miny)
+
         if max_dist < 1e-12:
             max_dist = 1.0
         poly_area = polygon.area
@@ -436,7 +455,7 @@ class GeometryProcessor:
                 else:
                     target_diam = diameter_max
             else:
-                t = min(np.hypot(cx - poly_cx, cy - poly_cy) / max_dist, 1.0)
+                t = min(np.hypot(cx - ref_cx, cy - ref_cy) / max_dist, 1.0)
                 if direction == "edge":
                     t = 1.0 - t
                 elif direction == "middle":

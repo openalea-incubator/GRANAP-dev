@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 from shapely.affinity import translate, scale as affine_scale, rotate
+from shapely.prepared import prep
 
 from openalea.granap.organ_class import Organ
 from openalea.granap.layer_class import Layer
@@ -1060,7 +1061,7 @@ class RootAnatomy(Organ):
         space    = cell_diameter / 2
         tang     = cell_width if cell_width else cell_diameter
         current  = erosion_polygon if erosion_polygon is not None else fill_zone
-        filter_z = fill_zone if erosion_polygon is not None else None
+        filter_z = prep(fill_zone) if erosion_polygon is not None else None
 
         while not current.is_empty and current.area > (cell_diameter / 2) ** 2 * np.pi:
             current = current.buffer(-space - cell_diameter / 2, resolution=16)
@@ -1375,6 +1376,7 @@ class RootAnatomy(Organ):
                 gradient_steepness=sx["gradient_steepness"],
                 gradient_asymmetry=sx["gradient_asymmetry"],
                 adjacent=sx["must_be_adjacent"],
+                gradient_center=(cx, cy),
             )
             zone_vessel_polys: List[Polygon] = []
 
