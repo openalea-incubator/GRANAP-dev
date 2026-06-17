@@ -114,12 +114,12 @@ def test_root_dicot_features(show=False):
         for t, n in sorted(counts.items()):
             print(f"    {t:22s}: {n}")
 
-        meta = counts.get("metaxylem", 0)
+        xylem = counts.get("xylem", 0)
         stele = counts.get("stele", 0)
-        assert meta > 0, f"Expected at least one metaxylem cell in scenario '{s['label']}'"
-        print(f"  metaxylem / stele-in-star: {meta} / {stele}")
+        assert xylem > 0, f"Expected at least one xylem cell in scenario '{s['label']}'"
+        print(f"  xylem / stele-in-star: {xylem} / {stele}")
 
-        # Verify the size-based classification: no metaxylem cell should have a
+        # Verify the size-based classification: no xylem cell should have a
         # diameter below vessel_diameter_min (they must have been labelled 'stele').
         data_defaults = OrganInputData.for_dicot_root()
         for f, v in s["kwargs"].items():
@@ -128,12 +128,12 @@ def test_root_dicot_features(show=False):
             for f, v in s["cambium"].items():
                 data_defaults.set_value("cambium", f, v)
         dmin = data_defaults.get("xylem").vessel_diameter_min
-        small_meta = [
+        small_xylem = [
             c for c in root.all_cells.cells
-            if c.type == "metaxylem" and c.diameter < dmin
+            if c.type == "xylem" and c.diameter < dmin
         ]
-        assert len(small_meta) == 0, (
-            f"Found {len(small_meta)} metaxylem cell(s) with diameter < vessel_diameter_min ({dmin})"
+        assert len(small_xylem) == 0, (
+            f"Found {len(small_xylem)} xylem cell(s) with diameter < vessel_diameter_min ({dmin})"
         )
 
         roots.append(root)

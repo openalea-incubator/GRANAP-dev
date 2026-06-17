@@ -117,18 +117,38 @@ class RootXylemParams(BaseParams):
     name                    : str   = "xylem"
     cell_diameter           : float = Field(default=0.06,   ge=0.00001, title="Cell Diameter",              description="Metaxylem vessel diameter.")
     cell_diameter_sd        : float = Field(default=0.005,  ge=0.0,     title="Cell Diameter SD",           description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
-    protoxylem_diameter     : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
-    protoxylem_diameter_sd  : float = Field(default=0.002,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
-    n_vascular_bundles      : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
-    n_protoxylem_per_bundle : int   = Field(default=2,      ge=1,       title="Protoxylem per Bundle",      description="Number of protoxylem elements per bundle.")
-    ratio_proto_meta        : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
+    protoxylem_diameter    : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
+    protoxylem_diameter_sd : float = Field(default=0.002,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
+    protoxylem_width       : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Bundle Width",    description="Tangential width of the protoxylem ellipse.")
+    protoxylem_height      : float = Field(default=0.03,   ge=0.00001, title="Protoxylem Bundle Height",   description="Radial height of the protoxylem ellipse.")
+    n_vascular_bundles     : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
+    ratio_proto_meta       : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
+    # Star-shaped xylem mode (xylem_shape = "star")
+    xylem_shape            : Literal["default", "star"] = Field(default="default", title="Xylem Shape", description="'default' = ring of discrete vessels; 'star' = continuous star-shaped xylem region (monocot with star).")
+    n_vascular_peak        : int   = Field(default=5,     ge=1,       title="Number of Arms",          description="Number of star arms (star mode only).")
+    inner_radius           : float = Field(default=0.05,  ge=0.00001, title="Inner Radius",            description="Neck radius of each arm at the inner edge (star mode only).")
+    outer_radius           : float = Field(default=0.15,  ge=0.00001, title="Outer Radius",            description="Tip radius of each arm (star mode only).")
+    arc_top                : float = Field(default=0.02,  ge=0.00001, title="Arc Width at Tip",        description="Arc length of each arm at outer_radius (star mode only).")
+    arc_bottom             : float = Field(default=0.04,  ge=0.00001, title="Arc Width at Neck",       description="Arc length of each arm at inner_radius (star mode only).")
+    vessel_diameter        : float = Field(default=0.06,  ge=0.00001, title="Vessel Diameter (max)",   description="Maximum vessel diameter at the star centre (star mode only).")
+    vessel_diameter_min    : float = Field(default=0.01,  ge=0.00001, title="Vessel Diameter (min)",   description="Minimum vessel diameter; below this a circle is labelled stele (star mode only).")
+    vessel_diameter_sd     : float = Field(default=0.005, ge=0.0,     title="Vessel Diameter SD",      description="Per-vessel diameter noise std-dev (star mode only).")
+    gradient_function      : Literal["five_pl", "linear"] = Field(default="five_pl", title="Gradient Function",    description="Shape function for the centre-to-tip size gradient (star mode only).")
+    gradient_inflection    : float = Field(default=0.7,   ge=0.001, le=1.0, title="Gradient Inflection",  description="Inflection point of the gradient (star mode only).")
+    gradient_steepness     : float = Field(default=5.0,   ge=0.1,   title="Gradient Steepness",          description="Hill coefficient of the gradient (star mode only).")
+    gradient_asymmetry     : float = Field(default=1.0,   ge=0.1,   title="Gradient Asymmetry",          description="Asymmetry exponent of the gradient (star mode only).")
+    first_vessel_shift     : float = Field(default=0.7,   ge=0.0, le=1.0, title="First Vessel Shift",    description="Max random shift of the first vessel as a fraction of its inscribed radius (star mode only).")
+    direction              : Optional[str] = Field(default="center", title="Packing Direction",           description="Size gradient direction: 'center', 'edge', 'middle', or None (star mode only).")
+    pith_radius            : float = Field(default=0.0,   ge=0.0,   title="Pith Radius",                 description="Radius of the central pith circle subtracted from the star. 0 = no pith (star mode only).")
 
 
 class RootPhloemParams(BaseParams):
     name             : str   = "phloem"
-    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",    description="Diameter of phloem sieve elements.")
-    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD", description="Standard deviation of phloem cell diameter.")
-    n_per_bundle     : int   = Field(default=5,      ge=1,       title="Cells per Bundle", description="Number of sieve elements packed inside each phloem bundle.")
+    cell_diameter    : float = Field(default=0.005,  ge=0.00001, title="Cell Diameter",         description="Diameter of phloem sieve elements.")
+    cell_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Cell Diameter SD",      description="Standard deviation of phloem cell diameter.")
+    width            : float = Field(default=0.01,   ge=0.00001, title="Phloem Bundle Width",   description="Tangential width of the phloem ellipse.")
+    height           : float = Field(default=0.015,  ge=0.00001, title="Phloem Bundle Height",  description="Radial height of the phloem ellipse.")
+    relative_distance : float = Field(default=0.5,    ge=0.0, le=1.0, title="Relative Distance",     description="Relative distance of the phloem from the xylem inner radius (star mode only).")
 
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
@@ -157,6 +177,9 @@ class DicotXylemParams(BaseParams):
     gradient_steepness  : float                        = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",      description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     first_vessel_shift  : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
+    direction           : Optional[str] = Field(default="center", title="Packing Direction", description="Size gradient direction: 'center' (large near centre), 'edge' (large near boundary), 'middle' (large at mid-radius), None (random).")
+    pith_radius         : float = Field(default=0.0,   ge=0.0,   title="Pith Radius",                 description="Radius of the central pith circle subtracted from the star. 0 = no pith (star mode only).")
+
 
 
 class DicotPhloemParams(BaseParams):
@@ -165,7 +188,7 @@ class DicotPhloemParams(BaseParams):
     vessel_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Vessel Diameter SD", description="Standard deviation of phloem sieve element diameter.")
     width            : float = Field(default=0.1,   ge=0.00001, title="Width",            description="Width of the phloem bundle region.")
     height           : float = Field(default=0.05,    ge=0.00001, title="Height",           description="Height of the phloem bundle region.")
-    relative_cambium : float = Field(default=0.8,    ge=0.0, le = 1.0, title="Relative Distance Cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
+    relative_distance : float = Field(default=0.8,    ge=0.0, le = 1.0, title="Relative Distance to cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
 
 
 class DicotCambiumParams(BaseParams):
@@ -186,8 +209,8 @@ class DicotSecondaryGrowthParams(BaseParams):
 class DicotSecondaryXylemParams(BaseParams):
     name                : str   = "secondary_xylem"
     prop_stele          : float = Field(default=0.7,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
-    cell_diameter       : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
-    cell_width          : float = Field(default=0.015,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
+    cell_diameter       : float = Field(default=0.012,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
+    cell_width          : float = Field(default=0.01,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
     vessel_diameter     : float = Field(default=0.12,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
     vessel_diameter_sd  : float = Field(default=0.005, ge=0.0,     title="Vessel Diameter SD",           description="Standard deviation added to each vessel diameter after gradient sampling.")
     vessel_diameter_min : float = Field(default=0.06,  ge=0.00001, title="Vessel Diameter (min)",        description="Minimum secondary xylem vessel diameter (lower bound of the size gradient).")
@@ -196,7 +219,7 @@ class DicotSecondaryXylemParams(BaseParams):
     gradient_steepness  : float = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",   description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     n_ring              : int   = Field(default=1,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
-    prop_vessel_ring    : float = Field(default=0.5,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
+    prop_vessel_ring    : float = Field(default=0.2,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
     must_be_adjacent    : bool  = Field(default=False, title="Must Be Adjacent",                         description="If True, each new vessel circle must be tangent to at least one already-placed circle (first circle is always placed freely).")
     parenchyma_diameter    : float = Field(default=0.02,  ge=0.00001, title="Parenchyma Diameter",      description="Mean cell diameter for ray parenchyma zones (angular gaps between pizza slices).")
     parenchyma_diameter_sd : float = Field(default=0.002, ge=0.0,     title="Parenchyma Diameter SD",   description="Standard deviation of ray parenchyma cell diameter.")
