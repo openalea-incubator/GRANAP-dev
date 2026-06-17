@@ -85,7 +85,28 @@ class RootAnatomy(Organ):
                 "phloem_diameter_sd":     float(phloem.get("cell_diameter_sd",      0.001)),
                 "phloem_width":           float(phloem.get("width",                 0.02)),
                 "phloem_height":          float(phloem.get("height",                0.03)),
+                "xylem_shape":            str(xylem.get("xylem_shape", "default")),
             })
+
+            if self.vascular_params["xylem_shape"] == "star":
+                self.vascular_params.update({
+                    "xylem_diameter_max":        float(xylem.get("vessel_diameter",      0.06)),
+                    "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",  0.01)),
+                    "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",   0.005)),
+                    "n_vascular_peak":           int(xylem.get("n_vascular_peak",        5)),
+                    "inner_radius_xylem":        float(xylem.get("inner_radius", 0.05)),
+                    "outer_radius_xylem":        float(xylem.get("outer_radius",         0.15)),
+                    "arc_top_xylem":             float(xylem.get("arc_top",              0.02)),
+                    "arc_bottom_xylem":          float(xylem.get("arc_bottom",           0.04)),
+                    "xylem_gradient_function":   str(xylem.get("gradient_function",      "five_pl")),
+                    "xylem_gradient_inflection": float(xylem.get("gradient_inflection",  0.7)),
+                    "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",   5.0)),
+                    "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",   1.0)),
+                    "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",   0.7)),
+                    "xylem_direction":           str(xylem.get("direction",              "center")),
+                    "pith_radius":               float(xylem.get("pith_radius",          0.0)),
+                    "relative_phloem":           float(phloem.get("relative_distance",   0.5)),
+                })
         elif self.planttype == 2:
             xylem   = next((p for p in self.params if p["name"] == "xylem"),   {})
             phloem  = next((p for p in self.params if p["name"] == "phloem"),  {})
@@ -107,10 +128,9 @@ class RootAnatomy(Organ):
                 "xylem_direction":           str(xylem.get("direction", "center")),
                 "phloem_diameter":           float(phloem.get("vessel_diameter",      0.005)),
                 "phloem_diameter_sd":        float(phloem.get("vessel_diameter_sd",   0.001)),
-                "n_phloem_per_bundle":       int(phloem.get("n_per_bundle",         5)),
                 "phloem_width":              float(phloem.get("width",              0.15)),
                 "phloem_height":             float(phloem.get("height",             0.2)),
-                "relative_cambium":          float(phloem.get("relative_cambium",   0.2)),
+                "relative_phloem":          float(phloem.get("relative_distance",   0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
                 "cambium_primary_inner_distance":   float(cambium.get("inner_distance",   0.10)),
@@ -305,7 +325,23 @@ class RootAnatomy(Organ):
             raise ValueError(f"Unknown planttype: {self.planttype}")
 
     def _create_vascular_tissue_monocot(self, polygon_for_vascular: Polygon, debug: bool = False):
-        """Monocot stele: ring of metaxylem vessels with alternating phloem/protoxylem."""
+        """Monocot stele: ring of metaxylem vessels with alternating phloem/protoxylem,
+        or star-shaped xylem when xylem_shape == 'star'."""
+        if self.vascular_params.get("xylem_shape", "default") == "star":
+            self.vascular_cells = CellManager()
+            self.vascular_polygons = []
+            self.fit_star_shapped_xylem(polygon_for_vascular)
+            self._remove_stele_seeds_near_xylem()
+            self.fit_phloem_elements(polygon_for_vascular, type="monocot")
+
+            vascular_polygons = unary_union(self.vascular_polygons)
+            self.all_cells.remove_cells_in_polygon(vascular_polygons)
+            self.all_cells.extend_cells(self.vascular_cells.cells)
+            self.all_cells.recalculate_cell_properties()
+            if debug:
+                self.all_cells.plot_cells()
+            return
+
         self.fit_metaxylem_elements(polygon_for_vascular)
         self.fit_metaxylem_sheath(polygon_for_vascular)
         self.fit_phloem_protoxylem_elements(polygon_for_vascular)
@@ -325,7 +361,7 @@ class RootAnatomy(Organ):
             self.fit_secondary_xylem(polygon_for_vascular)
         else:
             self.fit_primary_cambium_elements(polygon_for_vascular)
-            self.fit_phloem_elements(polygon_for_vascular)
+            self.fit_phloem_elements(polygon_for_vascular, type="dicot")
 
         vascular_polygons = unary_union(self.vascular_polygons)
         self.all_cells.remove_cells_in_polygon(vascular_polygons)
@@ -369,6 +405,18 @@ class RootAnatomy(Organ):
         star = translate(star, cx, cy).intersection(stele_polygon)
         if star.is_empty:
             return
+
+        # Pith: subtract a central circle so no vessel is placed inside it.
+        # Stele seeds already generated over the full stele remain inside the
+        # pith and become pith parenchyma after Voronoi.
+        pith_r = p.get("pith_radius", 0.0)
+        if pith_r and pith_r > 0.0:
+            pith_circle = Point(cx, cy).buffer(pith_r)
+            self.pith_polygon = pith_circle
+            star = star.difference(pith_circle)
+        else:
+            self.pith_polygon = None
+
         self.xylem_star = star
 
         packed = GeometryProcessor.pack_circles(
@@ -447,12 +495,14 @@ class RootAnatomy(Organ):
         probe_area = np.pi * probe_r ** 2
 
         xylem_union = unary_union(self.vascular_polygons)
+        pith_polygon = getattr(self, "pith_polygon", None)
 
         self.all_cells.cells = [
             c for c in self.all_cells.cells
             if not (
                 c.type == "stele"
                 and self.xylem_star.contains(Point(c.x, c.y))
+                and (pith_polygon is None or not pith_polygon.contains(Point(c.x, c.y)))
                 and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.6
             )
         ]
@@ -518,7 +568,7 @@ class RootAnatomy(Organ):
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None
         self._render_layer(visible_boundary, "cambium", cell_diam, cell_width, cx, cy, xylem_union)
 
-    def fit_phloem_elements(self, stele_polygon: Polygon):
+    def fit_phloem_elements(self, stele_polygon: Polygon, type = "monocot"):
         """Place one phloem ellipse per valley between xylem peaks, filled with Apollonian packing."""
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
@@ -528,14 +578,17 @@ class RootAnatomy(Organ):
         height    = p["phloem_height"]
         cell_diam = p["phloem_diameter"]
         cell_sd   = p["phloem_diameter_sd"]
-        relative_distance = p["relative_cambium"]
+        relative_distance = p["relative_phloem"]
 
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        cambium_inner = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
-
-        # cambium_cell_diameter marks where the cambium boundary sits (inner edge + one cell thickness).
-        # relative_distance then interpolates the phloem bundle center between that position and the stele edge.
-        r_center = cambium_inner + p["cambium_cell_diameter"] + (height/2) + (stele_r - p["cambium_cell_diameter"] - (height) - cambium_inner) * relative_distance
+        if type == "monocot":
+            minimal_distance = min(p["inner_radius_xylem"], stele_r * 0.95)
+            adjustment = p.get("cell_diameter", 0.0)
+        if type == "dicot":
+            minimal_distance = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
+            adjustment = p.get("cambium_cell_diameter", 0.0)
+            
+        r_center = minimal_distance + adjustment + (height/2) + (stele_r - adjustment - height - minimal_distance) * relative_distance
 
         xylem_star = getattr(self, "xylem_star", None) # get the star-shaped xylem region if it exists, to avoid placing phloem cells there
         next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0 # unique id_group for each phloem region
