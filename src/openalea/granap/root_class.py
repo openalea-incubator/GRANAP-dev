@@ -74,18 +74,18 @@ class RootAnatomy(Organ):
             xylem  = next((p for p in self.params if p["name"] == "xylem"),  {})
             phloem = next((p for p in self.params if p["name"] == "phloem"), {})
             self.vascular_params.update({
-                "xylem_diameter":         float(xylem.get("cell_diameter",          0.06)),
-                "xylem_diameter_sd":      float(xylem.get("cell_diameter_sd",       0.005)),
+                "xylem_diameter":         float(xylem.get("vessel_diameter",          0.06)),
+                "xylem_diameter_sd":      float(xylem.get("vessel_diameter_sd",       0.005)),
                 "protoxylem_diameter":    float(xylem.get("protoxylem_diameter",    0.01)),
                 "protoxylem_diameter_sd": float(xylem.get("protoxylem_diameter_sd", 0.002)),
-                "protoxylem_width":       float(xylem.get("protoxylem_width",       0.03)),
-                "protoxylem_height":      float(xylem.get("protoxylem_height",      0.05)),
+                "protoxylem_width":       float(xylem.get("protoxylem_cluster_width",       0.03)),
+                "protoxylem_height":      float(xylem.get("protoxylem_cluster_height",      0.05)),
                 "n_vascular_bundles":     int(xylem.get("n_vascular_bundles",       5)),
                 "ratio_proto_meta":       float(xylem.get("ratio_proto_meta",       2.2)),
-                "phloem_diameter":        float(phloem.get("cell_diameter",         0.005)),
-                "phloem_diameter_sd":     float(phloem.get("cell_diameter_sd",      0.001)),
-                "phloem_width":           float(phloem.get("width",                 0.02)),
-                "phloem_height":          float(phloem.get("height",                0.03)),
+                "phloem_diameter":        float(phloem.get("sieve_diameter",         0.005)),
+                "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",      0.001)),
+                "phloem_width":           float(phloem.get("cluster_width",                 0.02)),
+                "phloem_height":          float(phloem.get("cluster_height",                0.03)),
                 "xylem_shape":            str(xylem.get("xylem_shape", "default")),
             })
 
@@ -128,10 +128,10 @@ class RootAnatomy(Organ):
                 "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",  0.7)),
                 "pith_radius":               float(xylem.get("pith_radius",          0.0)),
                 "xylem_direction":           str(xylem.get("direction", "center")),
-                "phloem_diameter":           float(phloem.get("vessel_diameter",      0.005)),
-                "phloem_diameter_sd":        float(phloem.get("vessel_diameter_sd",   0.001)),
-                "phloem_width":              float(phloem.get("width",              0.15)),
-                "phloem_height":             float(phloem.get("height",             0.2)),
+                "phloem_diameter":           float(phloem.get("sieve_diameter",      0.005)),
+                "phloem_diameter_sd":        float(phloem.get("sieve_diameter_sd",   0.001)),
+                "phloem_width":              float(phloem.get("cluster_width",              0.15)),
+                "phloem_height":             float(phloem.get("cluster_height",             0.2)),
                 "relative_phloem":          float(phloem.get("relative_distance",   0.2)),
                 "cambium_cell_diameter":     float(cambium.get("cell_diameter",     0.015)),
                 "cambium_cell_width":        float(cambium.get("cell_width",        0.03)),
@@ -607,7 +607,7 @@ class RootAnatomy(Organ):
             ellipse = raw.intersection(stele_polygon) # clip to stele boundary
             if xylem_star is not None and not xylem_star.is_empty: 
                 ellipse = ellipse.difference(xylem_star) # further remove the star-shaped xylem region from the phloem ellipse to avoid placing phloem cells there
-            if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2:
+            if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015):
                 continue
 
             # Remove stele seeds inside this phloem region
@@ -686,22 +686,35 @@ class RootAnatomy(Organ):
         list_polygons = []
         cells_in_slice = CellManager()
 
-        bundle_cx, bundle_cy, _ = GeometryProcessor.get_inscribed_circle(slice_poly)
+        bundle_cx, bundle_cy, available_r = GeometryProcessor.get_inscribed_circle(slice_poly)
         radial_angle_deg = np.degrees(np.arctan2(bundle_cy, bundle_cx))
 
+        # Scale cluster down uniformly if it doesn't fit in the available inscribed space
+        parent_r = max(p["protoxylem_width"], p["protoxylem_height"]) / 2
+        scale    = min(1.0, available_r / parent_r) if parent_r > 0 else 1.0
+        width    = p["protoxylem_width"]    * scale
+        height   = p["protoxylem_height"]   * scale
+        diameter = p["protoxylem_diameter"] * scale
+
         raw = Point(0, 0).buffer(1, resolution=64)
-        raw = affine_scale(raw, p["protoxylem_width"] / 2, p["protoxylem_height"] / 2)
+        raw = affine_scale(raw, width / 2, height / 2)
         raw = rotate(raw, radial_angle_deg - 90, origin=(0, 0))
-        ellipse = translate(raw, bundle_cx, bundle_cy).intersection(slice_poly)
-        if ellipse.is_empty or ellipse.area < np.pi * (p["protoxylem_diameter"] / 2) ** 2:
+        ellipse = translate(raw, bundle_cx, bundle_cy)
+        if ellipse.is_empty or ellipse.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
             return cells_in_slice, list_polygons
+
+        # Remove stele seeds inside this protoxylem region
+        self.all_cells.cells = [
+            c for c in self.all_cells.cells
+            if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
+        ]
 
         packed = GeometryProcessor.pack_circles(
             ellipse,
             proportion=1.0,
             direction=None,
-            diameter_max=p["protoxylem_diameter"],
-            diameter_sd=p["protoxylem_diameter_sd"],
+            diameter_max=diameter,
+            diameter_sd=p["protoxylem_diameter_sd"] * scale,
             gradient_function="normal",
         )
 
@@ -740,22 +753,35 @@ class RootAnatomy(Organ):
         list_polygons = []
         cells_in_slice = CellManager()
 
-        bundle_cx, bundle_cy, _ = GeometryProcessor.get_inscribed_circle(slice_poly)
+        bundle_cx, bundle_cy, available_r = GeometryProcessor.get_inscribed_circle(slice_poly)
         radial_angle_deg = np.degrees(np.arctan2(bundle_cy, bundle_cx))
 
+        # Scale cluster down uniformly if it doesn't fit in the available inscribed space
+        parent_r = max(p["phloem_width"], p["phloem_height"]) / 2
+        scale    = min(1.0, available_r / parent_r) if parent_r > 0 else 1.0
+        width    = p["phloem_width"]    * scale
+        height   = p["phloem_height"]   * scale
+        diameter = p["phloem_diameter"] * scale
+
         raw = Point(0, 0).buffer(1, resolution=64)
-        raw = affine_scale(raw, p["phloem_width"] / 2, p["phloem_height"] / 2)
+        raw = affine_scale(raw, width / 2, height / 2)
         raw = rotate(raw, radial_angle_deg - 90, origin=(0, 0))
-        ellipse = translate(raw, bundle_cx, bundle_cy).intersection(slice_poly)
-        if ellipse.is_empty or ellipse.area < np.pi * (p["phloem_diameter"] / 2) ** 2:
+        ellipse = translate(raw, bundle_cx, bundle_cy)
+        if ellipse.is_empty or ellipse.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
             return cells_in_slice, list_polygons
+
+        # Remove stele seeds inside this phloem region
+        self.all_cells.cells = [
+            c for c in self.all_cells.cells
+            if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
+        ]
 
         packed = GeometryProcessor.pack_circles(
             ellipse,
             proportion=1.0,
             direction=None,
-            diameter_max=p["phloem_diameter"],
-            diameter_sd=p["phloem_diameter_sd"],
+            diameter_max=diameter,
+            diameter_sd=p["phloem_diameter_sd"] * scale,
             gradient_function="normal",
         )
 

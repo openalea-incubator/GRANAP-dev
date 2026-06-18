@@ -429,7 +429,7 @@ class GeometryProcessor:
 
         while stack:
             region = stack.pop()
-            if region.is_empty or region.area < np.pi * (diameter_min / 2) ** 2:
+            if region.is_empty or region.area < np.pi * (diameter_min / 2) ** 2 * (1 - 0.001):
                 continue
 
             cx, cy, r_ins = GeometryProcessor._chebyshev_center(region)
@@ -467,7 +467,7 @@ class GeometryProcessor:
                     ))
 
             r = min(r_ins, target_diam / 2)
-            if r * 2 < diameter_min:
+            if r * 2 < diameter_min * (1 - 0.001):
                 continue
 
             if adjacent and placed:
