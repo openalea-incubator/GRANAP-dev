@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath('..'))
 
 from openalea.granap.root_class import RootAnatomy
-from openalea.granap.input_data import OrganInputData
+from openalea.granap.input_data import OrganInputData, InterCellularSpacesParams
 
 
 def make_secondary_root(**overrides) -> RootAnatomy:
@@ -17,6 +17,12 @@ def make_secondary_root(**overrides) -> RootAnatomy:
     data.set_value("stele", "thickness", 1.0)
     for field, value in overrides.items():
         data.set_value("secondary_xylem", field, value)
+    # Intercellular spaces between axial parenchyma cells in the secondary xylem zone
+    data.params.append(InterCellularSpacesParams(
+        tissue=["stele"],
+        inter_cellular_space_proportion=0.1,
+        smoothness=0.05,
+    ))
     return RootAnatomy(data)
 
 
@@ -28,7 +34,7 @@ def cell_type_counts(root: RootAnatomy) -> dict:
 
 
 scenarios = [
-    {"label": "Defaults\n(five_pl gradient)",      "kwargs": {}},
+    {"label": "Defaults\n",      "kwargs": {}},
     {"label": "prop_stele=0.3\n(narrow zones)",    "kwargs": {"prop_stele": 0.3}},
     {"label": "prop_stele=1.0\n(full ring)",       "kwargs": {"prop_stele": 1.0}},
     {"label": "must_be_adjacent=True",             "kwargs": {"must_be_adjacent": True}},

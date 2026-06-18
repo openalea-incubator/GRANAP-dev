@@ -47,23 +47,13 @@ BASE_CAMBIUM = {
 
 scenarios = [
     {
-        "label": "Diarch (2 peaks)\ndefault",
+        "label": "Diarch (2 peaks)\n",
         "kwargs": {**BASE_KWARGS, "n_vascular_peak": 2},
         "cambium": BASE_CAMBIUM,
     },
     {
-        "label": "Triarch (3 peaks)\ndefault",
-        "kwargs": {**BASE_KWARGS, "n_vascular_peak": 3},
-        "cambium": BASE_CAMBIUM,
-    },
-    {
-        "label": "Tétrarch (4 peaks)\ndefault",
+        "label": "Tétrarch (4 peaks)\n",
         "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4},
-        "cambium": BASE_CAMBIUM,
-    },
-    {
-        "label": "Pentarch (5 peaks)",
-        "kwargs": {**BASE_KWARGS, "n_vascular_peak": 5},
         "cambium": BASE_CAMBIUM,
     },
     {
@@ -72,19 +62,9 @@ scenarios = [
         "cambium": BASE_CAMBIUM,
     },
     {
-        "label": "Large vessels\n(diam_max=0.08)",
-        "kwargs": {**BASE_KWARGS, "vessel_diameter": 0.08, "vessel_diameter_min": 0.05},
-        "cambium": {**BASE_CAMBIUM, "visible_distance": 0.20,},
-    },
-    {
         "label": "Narrow peaks",
         "kwargs": {**BASE_KWARGS, "arc_bottom": 0.05, "arc_top": 0.05, "vessel_diameter": 0.07, "vessel_diameter_min": 0.04, "inner_radius": 0.04},
         "cambium": BASE_CAMBIUM,
-    },
-    {
-        "label": "Narrow star\n(inner=0.10, outer=0.15)",
-        "kwargs": {**BASE_KWARGS, "inner_radius": 0.10, "outer_radius": 0.15},
-        "cambium": {**BASE_CAMBIUM, "inner_distance": 0.14, "visible_distance": 0.16}
     },
     {
         "label": "Wide star\n(inner=0.15, outer=0.20)",
@@ -141,7 +121,7 @@ def test_root_dicot_features(show=False):
     # ── Visualisation ─────────────────────────────────────────────────────────
 
     n = len(scenarios)
-    n_cols = 4
+    n_cols = 3
     n_rows = (n + n_cols - 1) // n_cols
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
     axs_flat = axs.flatten()

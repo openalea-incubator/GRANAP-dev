@@ -1441,15 +1441,23 @@ class RootAnatomy(Organ):
                 erosion_polygon=erosion_poly,
             )
 
-        # Step 6: ray parenchyma in angular gaps between pizza slices
+        # Step 6: ray parenchyma in angular gaps between pizza slices.
+        # Shrink the annular zone inward from the outer boundary by one cambium
+        # cell diameter so ray parenchyma seeds cannot be placed at the cambium
+        # ring and eat into cambium Voronoi territories.
+        ray_annular_zone = secondary_cambium_polygon.buffer(
+            -sc["cell_diameter"]
+        ).difference(primary_cambium_polygon)
+
         r_outer = max(
             np.hypot(x - cx, y - cy)
             for x, y in secondary_cambium_polygon.exterior.coords
-        )
+        ) - sc["cell_diameter"]
 
-        next_id = self._fill_ray_parenchyma(
-            vessel_zones, annular_zone, cx, cy, sx, r_outer, n_peaks, next_id,
-        )
+        if not ray_annular_zone.is_empty:
+            next_id = self._fill_ray_parenchyma(
+                vessel_zones, ray_annular_zone, cx, cy, sx, r_outer, n_peaks, next_id,
+            )
 
         # Step 7: register vessel circles so stele seeds inside them are cleared
         self.vascular_polygons.extend(all_vessel_polys)
