@@ -245,8 +245,19 @@ class Organ(AbstractNetwork, ABC):
             print("Time to generate cells info:", t_end - t_start)
 
             t_start = time.time()
+            # Reset vascular containers so each generate_cells() call starts clean
+            self.vascular_cells = CellManager()
+            self.vascular_polygons = []
+            self.vascular_tissue_polygons: Dict[str, list] = {}
             # add vascular tissue
             self.allocate_vascular_tissue(layers_polygons)
+            # Unified mask+merge: one pass removes layer seeds under vascular tissue,
+            # then inserts all vascular seeds with offset ids.
+            if getattr(self, 'vascular_polygons', []):
+                vascular_mask = unary_union(self.vascular_polygons)
+                self.all_cells.remove_cells_in_polygon(vascular_mask)
+            if getattr(self, 'vascular_cells', None) and self.vascular_cells.cells:
+                self.all_cells.extend_cells(self.vascular_cells.cells)
 
             # add organ specific tissues
             self._organ_specific_tissues()
@@ -783,6 +794,21 @@ class Organ(AbstractNetwork, ABC):
         from openalea.granap.anatomy_writer import AnatomyWriter
         AnatomyWriter(self).write_to_geo(path, **kwargs)
 
+
+    def build_anatomy_tissues(self) -> List[Dict[str, Any]]:
+        """Return tissue zone descriptors (layer rings + vascular polygons).
+        See :func:`openalea.granap.visualization.build_anatomy_tissues`."""
+        from openalea.granap.visualization import build_anatomy_tissues
+        return build_anatomy_tissues(self)
+
+    def plot_tissues(self, ax=None, show: bool = True, labels: bool = True,
+                     show_effective: bool = False,
+                     fuse: bool = False) -> Optional[plt.Figure]:
+        """Plot every tissue zone before placing any cell.
+        See :func:`openalea.granap.visualization.plot_tissues`."""
+        from openalea.granap.visualization import plot_tissues
+        return plot_tissues(self, ax=ax, show=show, labels=labels,
+                            show_effective=show_effective, fuse=fuse)
 
     def export_to_adjencymatrix(self) -> lil_matrix:
         """

@@ -214,7 +214,19 @@ class CellGenerator:
                     id_group += 1
                 else:
                     cell_border_points = layer_cell_borders[i]
+                    # Pre-fetch the next-inner layer polygon once per cell group
+                    next_inner = (
+                        layers_polygons[i_layer + 1]["polygon"]
+                        if i_layer + 1 < len(layers_polygons)
+                        else None
+                    )
                     for border_point in cell_border_points[1:]:
+                        # Discard border points that bleed into the next inner layer —
+                        # they would create seeds inside the wrong tissue zone.
+                        if next_inner is not None and next_inner.contains(
+                            Point(border_point[0], border_point[1])
+                        ):
+                            continue
                         new_cell = Cell(
                             type=layer["name"],
                             x=border_point[0],

@@ -295,18 +295,12 @@ class NeedleAnatomy(Organ):
     def _create_vascular_tissue(self, polygon: Polygon):
         """
         Create vascular tissue.
-        
-        Args:
-            polygon: Polygon boundary
+
+        The remove-mask + extend step is done once in Organ.generate_cells()
+        after this method returns, so we only need to populate vascular_cells
+        and vascular_polygons here.
         """
         self.fit_vascular_elements(polygon)
-        # remove the cells in the vascular elements
-        vascular_polygons = unary_union(self.vascular_polygons)
-        self.all_cells.remove_cells_in_polygon(vascular_polygons)
-
-        # add vascular cells to all_cells
-        self.all_cells.extend_cells(self.vascular_cells)
-        self.all_cells.recalculate_cell_properties()
 
     def fit_vascular_elements(self, polygon):
         # from polygon, fit two ellipses
@@ -314,7 +308,9 @@ class NeedleAnatomy(Organ):
         ry = self.central_cylinder_params["vascular_height"]/2
         ellipses = GeometryProcessor.two_ellipses(polygon, rx, ry)
         cells_in_ellipses, list_ellipses_polygons = self.vascular_elements_in_ellipses(ellipses)
-        self.vascular_cells = cells_in_ellipses
+        vascular_cm = CellManager()
+        vascular_cm.cells = cells_in_ellipses
+        self.vascular_cells = vascular_cm
         self.vascular_polygons = list_ellipses_polygons
         
 
