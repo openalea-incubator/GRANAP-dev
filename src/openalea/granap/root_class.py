@@ -361,10 +361,11 @@ class RootAnatomy(Organ):
             if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015):
                 continue
 
-            # Remove stele seeds inside this phloem ellipse
-            # (phloem ellipses are NOT added to vascular_polygons, so must be done here)
-            self.all_cells.remove_cells_by_polygon(GeometryProcessor.buffer_polygon(ellipse, adjustment / 2))
-            self.vascular_tissue_polygons.setdefault("phloem", []).append(ellipse)
+            # Store the buffered ellipse so the systematic vascular mask in
+            # generate_cells() removes stele seeds with the correct clearance.
+            self.vascular_tissue_polygons.setdefault("phloem", []).append(
+                GeometryProcessor.buffer_polygon(ellipse, adjustment / 2)
+            )
 
             packed = GeometryProcessor.pack_circles(
                 ellipse,
@@ -721,12 +722,6 @@ class MonocotRootAnatomy(RootAnatomy):
         if ellipse.is_empty or ellipse.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
             return cells_in_slice, list_polygons
 
-        # Remove stele seeds inside this phloem region
-        self.all_cells.cells = [
-            c for c in self.all_cells.cells
-            if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
-        ]
-
         packed = GeometryProcessor.pack_circles(
             ellipse,
             proportion=1.0,
@@ -758,7 +753,7 @@ class MonocotRootAnatomy(RootAnatomy):
                     area=np.pi * r ** 2,
                 ))
 
-        list_polygons.append(ellipse)
+        list_polygons.append(GeometryProcessor.buffer_polygon(ellipse, diameter / 2))
         return cells_in_slice, list_polygons
 
 

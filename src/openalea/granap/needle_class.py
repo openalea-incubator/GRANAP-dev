@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 # Module-level constants — geometry tuning parameters
 # ---------------------------------------------------------------------------
 # Number of epidermis border-point cells to skip at the start of the boundary
-# when selecting stomata positions (avoids the sharp tip of the half-ellipse).
 _STOMATA_SKIP_BORDER_PTS: int = 300
 
 # The mesophyll ring used for duct placement is the outer annulus whose inner
