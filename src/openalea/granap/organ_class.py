@@ -369,10 +369,15 @@ class Organ(AbstractNetwork, ABC):
     def _organ_specific_tissues(self):
         """
         Add organ specific tissues.
-        
+
         Returns:
         """
         pass
+
+    def _extra_tissue_polygons(self, layers_polygons: List[Dict[str, Any]]) -> Dict[str, list]:
+        """Return extra tissue polygons for visualization without placing cells.
+        Subclasses override to expose organ-specific structures (e.g. stomata, resin ducts)."""
+        return {}
 
     def _get_param(self, name: str) -> dict:
         """Return the params dict whose 'name' key matches, or an empty dict."""

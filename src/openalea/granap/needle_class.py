@@ -466,243 +466,299 @@ class NeedleAnatomy(Organ):
         For needles, it adds resin ducts and stomata.
         """
         self.add_canal()
-
-        # add stomata
         self.add_stomata()
 
-    def add_canal(self):
+    # ------------------------------------------------------------------
+    # Geometry helpers — pure computation, no cell placement
+    # ------------------------------------------------------------------
+
+    def _duct_zone_data(self, layers_polygons):
         """
-        Add resin ducts.
-        Selection of portion of mesophyll layer. The two first ducts are located at the edges of the needle.
+        Compute resin duct geometry from layer polygons without placing cells.
 
-        diameter of the inner part of the duct full diameter - two parenchyma cells.
+        Returns (duct_data, rdp) where duct_data is a list of per-duct dicts:
+          - "outer":        mask polygon used to remove existing cells
+          - "ring":         parenchyma ring polygon (for resin-duct cell placement)
+          - "canal":        inner lumen polygon (for duct cell placement)
+          - "ring_center":  centroid of the fitted inner ellipse (angle reference)
+        rdp is the resin_duct parameter dict.
+        Returns ([], None) when there are no resin_duct params or no mesophyll layer.
         """
+        rdp_list = [p for p in self.params if p["name"] == "resin_duct"]
+        if not rdp_list:
+            return [], None
+        rdp = rdp_list[0]
 
-        resin_duct_params = [
-            p for p in self.params if p["name"] == "resin_duct"
-        ]
-        if not resin_duct_params:
-            return []
+        layer_names = [l["name"] for l in layers_polygons]
+        if "mesophyll" not in layer_names:
+            return [], None
 
-        layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
-        polygon_for_duct = self._layers_polygons[layer_for_duct]["polygon"]
+        polygon_for_duct = layers_polygons[layer_names.index("mesophyll")]["polygon"]
+        polygon_for_duct = polygon_for_duct.difference(
+            GeometryProcessor.buffer_polygon(polygon_for_duct, -rdp["diameter"] * 1.2, 0)
+        )
 
-        polygon_for_duct = polygon_for_duct.difference(GeometryProcessor.buffer_polygon(polygon_for_duct, -resin_duct_params[0]["diameter"]*1.2, 0))
-
-        duct_cells = []
-        id_cell = len(self.all_cells.cells)+1
-        id_group = self.all_cells.get_last_id_group() + 1
-        
+        n_canal = rdp["n_files"]
         add_duct = []
-        n_canal = resin_duct_params[0]["n_files"]
         if n_canal < 7:
             n_regions = 7
             if n_canal > 0:
                 add_duct.append(3)
             if n_canal > 1:
                 add_duct.append(6)
-
             remaining_places = [i for i in range(n_regions) if i not in add_duct]
-            add_duct += list(np.random.choice(remaining_places, n_canal-len(add_duct), replace=False))
+            add_duct += list(np.random.choice(remaining_places, n_canal - len(add_duct), replace=False))
         else:
             n_regions = n_canal
-            add_duct = range(n_regions)
+            add_duct = list(range(n_regions))
 
-        polygons_for_duct = GeometryProcessor.pizza_slice(polygon_for_duct, n_regions)
-        ducts = []
-        for slice_id, slice_polygon in enumerate(polygons_for_duct):
-
+        duct_data = []
+        for slice_id, slice_polygon in enumerate(GeometryProcessor.pizza_slice(polygon_for_duct, n_regions)):
             if slice_id not in add_duct:
                 continue
+            duct_poly       = GeometryProcessor.fit_inner_ellipse(slice_polygon, rdp["diameter"] / 2)
+            outer           = GeometryProcessor.buffer_polygon(duct_poly["polygon"],  rdp["cell_diameter"] / 2, 0)
+            ring            = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(rdp["cell_diameter"] / 2) * 0.15)
+            canal           = GeometryProcessor.buffer_polygon(ring,                 -rdp["cell_diameter"])
+            duct_data.append({
+                "outer":       outer,
+                "ring":        ring,
+                "canal":       canal,
+                "ring_center": duct_poly["polygon"].centroid,
+            })
 
-            # create the bounding polygon of the duct
-            duct_poly = GeometryProcessor.fit_inner_ellipse(slice_polygon, resin_duct_params[0]["diameter"]/2)
-            duct_poly_buffered = GeometryProcessor.buffer_polygon(duct_poly["polygon"], resin_duct_params[0]["cell_diameter"]/2, 0)
-            # create the duct polygon
-            ducts.append(duct_poly_buffered)
-            # create the parenchyma cells polygon
-            duct_polygon_buff = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(resin_duct_params[0]["cell_diameter"]/2)*0.15)
-            # create the inner canal polygon
-            canal_polygon = GeometryProcessor.buffer_polygon(duct_polygon_buff, -(resin_duct_params[0]["cell_diameter"]))
-            # get the centroid of the parenchyma cells 
-            x, y = duct_polygon_buff.exterior.coords.xy
-            center = duct_poly["polygon"].centroid
-            coords = np.column_stack((x, y))
-            duct_perim = duct_polygon_buff.length
-            coords = GeometryProcessor.resample_coords(coords, target_n_points=np.round(duct_perim/resin_duct_params[0]["cell_diameter"]).astype(int))
-            cell_borders = CellGenerator.cell_border(coords, 
-                    resin_duct_params[0]["cell_diameter"], 
-                    resin_duct_params[0]["cell_diameter"])        
+        return duct_data, rdp
 
+    @staticmethod
+    def _stomata_carve_polygons(triplet_centers, sp, cell_diam):
+        """
+        Compute stomata geometry from triplet positions without placing cells.
 
-            for i_border, border in enumerate(cell_borders[1:]):
+        triplet_centers: list of ((px,py), (cx,cy), (nx,ny)) — prev/curr/next
+                         epidermis seed positions for each stoma.
+        sp:             stomata parameter dict.
+        cell_diam:      epidermis cell diameter.
+
+        Returns a list of (carve_poly, gc1, gc2, chamber, pore) tuples,
+        one per successfully computed stoma.
+        """
+        results = []
+        for k, (prev_xy, curr_xy, next_xy) in enumerate(triplet_centers):
+            mock_cells = [
+                Cell(x=prev_xy[0], y=prev_xy[1], diameter=cell_diam,
+                     id_group=3 * k,     id_cell=3 * k,     id_layer=0, type="epidermis"),
+                Cell(x=curr_xy[0], y=curr_xy[1], diameter=cell_diam,
+                     id_group=3 * k + 1, id_cell=3 * k + 1, id_layer=0, type="epidermis"),
+                Cell(x=next_xy[0], y=next_xy[1], diameter=cell_diam,
+                     id_group=3 * k + 2, id_cell=3 * k + 2, id_layer=0, type="epidermis"),
+            ]
+            try:
+                results.append(CellGenerator.create_stomata(mock_cells, stomata_setting=sp))
+            except Exception:
+                pass
+        return results
+
+    # ------------------------------------------------------------------
+    # Cell-placement methods — call geometry helpers then place cells
+    # ------------------------------------------------------------------
+
+    def add_canal(self):
+        """Add resin ducts (parenchyma ring + inner lumen) to the mesophyll."""
+        duct_data, rdp = self._duct_zone_data(self._layers_polygons)
+        if not duct_data:
+            return
+
+        layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
+        duct_cells = []
+        id_cell  = len(self.all_cells.cells) + 1
+        id_group = self.all_cells.get_last_id_group() + 1
+
+        for duct in duct_data:
+            ring_center = duct["ring_center"]
+
+            # resin-duct parenchyma cells along the ring
+            x, y   = duct["ring"].exterior.coords.xy
+            coords  = np.column_stack((x, y))
+            coords  = GeometryProcessor.resample_coords(
+                coords,
+                target_n_points=np.round(duct["ring"].length / rdp["cell_diameter"]).astype(int)
+            )
+            for border in CellGenerator.cell_border(coords, rdp["cell_diameter"], rdp["cell_diameter"])[1:]:
                 id_group += 1
-                for i_cell, cell_coord in enumerate(border):
+                for cell_coord in border:
                     duct_cells.append(Cell(
-                        id_cell=id_cell,
-                        id_layer=layer_for_duct,
-                        id_group=id_group,
+                        id_cell=id_cell, id_layer=layer_for_duct, id_group=id_group,
                         type="resin duct",
-                        x=cell_coord[0],
-                        y=cell_coord[1],
-                        diameter=resin_duct_params[0]["cell_diameter"],
-                        angle=np.arctan2(cell_coord[1]-center.y, cell_coord[0]-center.x),
-                        radius=np.sqrt((cell_coord[0]-center.x)**2 + (cell_coord[1]-center.y)**2),
-                        area=np.pi * (resin_duct_params[0]["cell_diameter"]/2)**2,
+                        x=cell_coord[0], y=cell_coord[1],
+                        diameter=rdp["cell_diameter"],
+                        angle=np.arctan2(cell_coord[1] - ring_center.y, cell_coord[0] - ring_center.x),
+                        radius=np.sqrt((cell_coord[0] - ring_center.x)**2 + (cell_coord[1] - ring_center.y)**2),
+                        area=np.pi * (rdp["cell_diameter"] / 2)**2,
                     ))
                     id_cell += 1
 
-            x, y = canal_polygon.exterior.coords.xy
-            center = canal_polygon.centroid
-            coords = np.column_stack((x, y))
-            coords = GeometryProcessor.resample_coords(coords, target_n_points=15)
+            # inner lumen cells along the canal
+            canal_center = duct["canal"].centroid
+            x, y  = duct["canal"].exterior.coords.xy
+            coords = GeometryProcessor.resample_coords(np.column_stack((x, y)), target_n_points=15)
             id_group += 1
-            for i_cell, coord in enumerate(coords[1:]):
+            for coord in coords[1:]:
                 duct_cells.append(Cell(
-                    id_cell=id_cell,
-                    id_layer=layer_for_duct,
-                    id_group=id_group,
+                    id_cell=id_cell, id_layer=layer_for_duct, id_group=id_group,
                     type="duct",
-                    x=coord[0],
-                    y=coord[1],
-                    diameter=resin_duct_params[0]["diameter"],
-                    angle=np.arctan2(coord[1]-center.y, coord[0]-center.x),
-                    radius=np.sqrt((coord[0]-center.x)**2 + (coord[1]-center.y)**2),
-                    area=np.pi * (resin_duct_params[0]["diameter"]/2)**2,
+                    x=coord[0], y=coord[1],
+                    diameter=rdp["diameter"],
+                    angle=np.arctan2(coord[1] - canal_center.y, coord[0] - canal_center.x),
+                    radius=np.sqrt((coord[0] - canal_center.x)**2 + (coord[1] - canal_center.y)**2),
+                    area=np.pi * (rdp["diameter"] / 2)**2,
                 ))
                 id_cell += 1
 
-        # remove cells that are in the ducts
-        for duct in ducts:
-            self.all_cells.remove_cells_by_polygon(duct)
-
-        # add the resin duct cells to the list of cells
+        for duct in duct_data:
+            self.all_cells.remove_cells_by_polygon(duct["outer"])
         self.all_cells.extend_cells(duct_cells)
         self.all_cells.recalculate_cell_properties()
-
 
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         return float(n_files ** 1.12 + 1)
 
     def add_stomata(self):
-        """
-        Add stomata to the needle.
-
-        {"name": "stomata", "n_files": 5, "width": 0.07, "depth": 0.01, "sub_chamber": 0.01}
-
-        """
+        """Add stomata to the needle epidermis."""
         self.all_cells.recenter_cells()
-        stomata_params = [
-            p for p in self.params if p["name"] == "stomata"
-        ]
-        if stomata_params:
-            organ_specific_cells = CellManager()
-            stomata_params = stomata_params[0]
-            n_stomata = stomata_params["n_files"]
-            # select "n_files" points on the epidermis
+        stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
+        if not stomata_params_list:
+            return
 
-            # Get epidermis cells
-            epidermis_cells = self.all_cells.get_cells_by_type("epidermis")
-            
-            if not epidermis_cells:
-                return organ_specific_cells
-                
-            # Sample `n_stomata` evenly spaced cells, avoiding the very ends
-            indices = np.linspace(300, len(epidermis_cells)-np.round(len(epidermis_cells)/n_stomata), n_stomata, dtype=int)
-            located_cells = []
+        sp         = stomata_params_list[0]
+        n_stomata  = sp["n_files"]
+        epidermis_cells = self.all_cells.get_cells_by_type("epidermis")
+        if not epidermis_cells:
+            return
 
-            # makes the stomata
-            stomata_carve_polys = []
-            id_stomata = len(self.all_cells.cells) + 1
-            i_cell = id_stomata
-            
-            for i in indices:
-                # get cell triplet with different id_group
-                i_group_triplet  = epidermis_cells[i].id_group
+        cell_diam = epidermis_cells[0].diameter
 
-                epidermis_cell_triplet = self.all_cells.get_cells_by_groups([i_group_triplet-1, i_group_triplet, i_group_triplet+1])
-                located_cell = epidermis_cells[i]
-                
-                carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly = CellGenerator.create_stomata(epidermis_cell_triplet, stomata_setting = stomata_params)
-                stomata_carve_polys.append(carve_poly)
-                
-                # guard cell 1
-                poly = guard_cell_1_poly.buffer(-located_cell.diameter/5)
-                x, y = poly.exterior.coords.xy
+        # Sample n_stomata evenly spaced groups, avoiding the very ends
+        indices = np.linspace(
+            300,
+            len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
+            n_stomata, dtype=int
+        )
 
-                coords = np.column_stack((x, y))
+        # Build triplet centroids from placed epidermis cell groups
+        triplet_centers = []
+        for i in indices:
+            g = epidermis_cells[i].id_group
+            triplet_centers.append((
+                self.all_cells.get_centroid_of_group(g - 1),
+                self.all_cells.get_centroid_of_group(g),
+                self.all_cells.get_centroid_of_group(g + 1),
+            ))
 
-                resampled_coords = GeometryProcessor.resample_coords(coords, 20)
+        stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
+
+        organ_specific_cells = CellManager()
+        stomata_carve_polys  = []
+        id_stomata = len(self.all_cells.cells) + 1
+        i_cell     = id_stomata
+
+        for carve_poly, gc1, gc2, chamber, pore in stomata_geoms:
+            stomata_carve_polys.append(carve_poly)
+
+            for raw_poly, cell_type, n_pts in [
+                (gc1,     "guard cell", 20),
+                (gc2,     "guard cell", 20),
+                (chamber, "air space",  10),
+            ]:
+                poly   = raw_poly.buffer(-cell_diam / 5)
+                coords = GeometryProcessor.resample_coords(
+                    np.column_stack(poly.exterior.coords.xy), n_pts
+                )
                 id_stomata += 1
-                for i_coord in resampled_coords:
+                for i_coord in coords:
                     i_cell += 1
-                    gc1_cell = Cell(
+                    organ_specific_cells.cells.append(Cell(
                         x=i_coord[0], y=i_coord[1],
-                        diameter=np.sqrt(poly.area/np.pi)*2,
+                        diameter=np.sqrt(poly.area / np.pi) * 2,
                         id_cell=i_cell, id_layer=0, id_group=id_stomata,
-                        type="guard cell")
+                        type=cell_type,
+                    ))
 
-                    organ_specific_cells.cells.append(gc1_cell)
-                
-                # guard cell 2
-                poly = guard_cell_2_poly.buffer(-located_cell.diameter/5)
-                x, y = poly.exterior.coords.xy
+            poly   = pore.buffer(-sp["width"] / 4)
+            coords = GeometryProcessor.resample_coords(
+                np.column_stack(poly.exterior.coords.xy), 10
+            )
+            id_stomata += 1
+            for i_coord in coords:
+                i_cell += 1
+                organ_specific_cells.cells.append(Cell(
+                    x=i_coord[0], y=i_coord[1],
+                    diameter=np.sqrt(poly.area / np.pi) * 2,
+                    id_cell=i_cell, id_layer=0, id_group=id_stomata,
+                    type="pore",
+                ))
 
-                coords = np.column_stack((x, y))
+        for carve in stomata_carve_polys:
+            self.all_cells.remove_cells_by_polygon(carve.buffer(cell_diam / 5))
+        self.all_cells.extend_cells(organ_specific_cells.cells)
+        self.all_cells.recalculate_cell_properties()
 
-                resampled_coords = GeometryProcessor.resample_coords(coords, 20)
-                id_stomata += 1
-                for i_coord in resampled_coords:
-                    i_cell += 1
-                    gc2_cell = Cell(
-                        x=i_coord[0], y=i_coord[1],
-                        diameter=np.sqrt(poly.area/np.pi)*2,
-                        id_cell=i_cell, id_layer=0, id_group=id_stomata,
-                        type="guard cell")
-                    organ_specific_cells.cells.append(gc2_cell)
+    # ------------------------------------------------------------------
+    # Visualization hook
+    # ------------------------------------------------------------------
 
-                # chamber
-                poly = sub_stomatal_chamber.buffer(-located_cell.diameter/5)
-                x, y = poly.exterior.coords.xy
+    def _extra_tissue_polygons(self, layers_polygons):
+        """
+        Return resin-duct and stomata polygons for plot_tissues visualization,
+        without placing any cell.
 
-                coords = np.column_stack((x, y))
+        Resin ducts are exact (same geometry as add_canal).
+        Stomata positions are approximated from epidermis seed positions using
+        the same index formula as add_stomata, so count and placement are
+        consistent with generate_cells output.
+        """
+        extra = {}
 
-                resampled_coords = GeometryProcessor.resample_coords(coords, 10)
-                id_stomata += 1
-                for i_coord in resampled_coords:
-                    i_cell += 1
-                    chamber_cell = Cell(
-                        x=i_coord[0], y=i_coord[1],
-                        diameter=np.sqrt(poly.area/np.pi)*2,
-                        id_cell=i_cell, id_layer=0, id_group=id_stomata,
-                        type="air space")
-                    organ_specific_cells.cells.append(chamber_cell)
+        # Resin ducts — delegate entirely to the shared geometry helper
+        duct_data, _ = self._duct_zone_data(layers_polygons)
+        if duct_data:
+            extra["resin_duct"]  = [d["outer"] for d in duct_data]
+            extra["resin_canal"] = [d["canal"] for d in duct_data]
 
-                # spacing
-                poly = spacing_poly.buffer(-stomata_params["width"]/4)
-                x, y = poly.exterior.coords.xy
+        # Stomata — approximate seed positions from the epidermis layer polygon
+        stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
+        if stomata_params_list and layers_polygons:
+            sp        = stomata_params_list[0]
+            n_stomata = sp["n_files"]
+            layer_names = [l["name"] for l in layers_polygons]
+            if "epidermis" in layer_names:
+                epi_layer  = layers_polygons[layer_names.index("epidermis")]
+                cell_diam  = epi_layer.get("cell_diameter", 0.015)
+                cell_width = epi_layer.get("cell_width", 0)
+                shift      = epi_layer.get("shift", 0)
 
-                coords = np.column_stack((x, y))
+                seeds   = CellGenerator.cells_on_layer(epi_layer["polygon"], cell_diam, cell_width, shift)
+                # n_border matches cell_border: 14 pts if rectangular, 9 if circular
+                n_border    = 14 if cell_width != 0 else 9
+                n_epi_cells = max(1, (len(seeds) - 1) * n_border)
 
-                resampled_coords = GeometryProcessor.resample_coords(coords, 10)
-                id_stomata += 1
-                for i_coord in resampled_coords:
-                    i_cell += 1
-                    spacing_cell = Cell(
-                        x=i_coord[0], y=i_coord[1],
-                        diameter=np.sqrt(poly.area/np.pi)*2,
-                        id_cell=i_cell, id_layer=0, id_group=id_stomata,
-                    type="pore")
-                    organ_specific_cells.cells.append(spacing_cell)
+                # Mirror the index selection from add_stomata
+                end_idx = n_epi_cells - int(np.round(n_epi_cells / n_stomata))
+                indices = np.linspace(300, end_idx, n_stomata, dtype=int)
+                seed_indices = np.clip(indices // n_border, 0, len(seeds) - 2)
 
+                triplet_centers = [
+                    (
+                        tuple(seeds[max(0, si - 1)]),
+                        tuple(seeds[si]),
+                        tuple(seeds[min(len(seeds) - 2, si + 1)]),
+                    )
+                    for si in seed_indices
+                ]
 
-            # remove cells that are in the stomata
-            for stomata in stomata_carve_polys:
-                self.all_cells.remove_cells_by_polygon(stomata.buffer(located_cell.diameter/5))
-    
-            # add the stomata cells to the list of cells
-            self.all_cells.extend_cells(organ_specific_cells.cells)
-            self.all_cells.recalculate_cell_properties()
+                stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
+                extra["stomata"] = [geom[0] for geom in stomata_geoms]
+
+        return extra
 
         
 

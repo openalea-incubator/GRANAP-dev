@@ -277,6 +277,32 @@ def plot_tissues(organ: "Organ",
         for geom in geoms:
             ax.plot(*geom.exterior.xy, color="red", linewidth=1.5, linestyle="--")
 
+    # Organ-specific extras (e.g. resin ducts, stomata for needles)
+    _extra_style = {
+        "resin_duct":  ("burlywood",  "darkorange", 0.75),
+        "resin_canal": ("lightyellow", "goldenrod",  0.90),
+        "stomata":     ("lightpink",   "crimson",    0.80),
+    }
+    for tissue_name, poly_list in organ._extra_tissue_polygons(layers).items():
+        face, edge, alpha = _extra_style.get(tissue_name, ("orange", "darkorange", 0.7))
+        first_geom = None
+        for poly in poly_list:
+            if poly is None or poly.is_empty:
+                continue
+            geoms = list(poly.geoms) if hasattr(poly, "geoms") else [poly]
+            for geom in geoms:
+                if geom.geom_type != "Polygon":
+                    continue
+                ax.fill(*geom.exterior.xy, color=face, alpha=alpha)
+                ax.plot(*geom.exterior.xy, color=edge, linewidth=0.8)
+                if first_geom is None:
+                    first_geom = geom
+        if labels and first_geom is not None:
+            pt = first_geom.representative_point()
+            ax.text(pt.x, pt.y, tissue_name, ha="center", va="center",
+                    fontsize=6, color="black",
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", alpha=0.65, ec="none"))
+
     ax.set_aspect("equal")
     ax.set_xlabel("x (mm)")
     ax.set_ylabel("y (mm)")
