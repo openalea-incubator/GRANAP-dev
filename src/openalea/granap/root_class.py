@@ -287,7 +287,7 @@ class RootAnatomy(Organ):
                     type=cell_type,
                     x=border_pt[0], y=border_pt[1],
                     diameter=actual_diam,
-                    id_cell=i_cell, id_layer=0, id_group=i_cell,
+                    id_cell=i_cell, id_group=i_cell,
                     angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
                     radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
                     area=np.pi * r ** 2,
@@ -395,7 +395,7 @@ class RootAnatomy(Organ):
                         type="phloem",
                         x=border_pt[0], y=border_pt[1],
                         diameter=actual_diam,
-                        id_cell=id_group, id_layer=0, id_group=id_group,
+                        id_cell=id_group, id_group=id_group,
                         angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
                         radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
                         area=np.pi * r ** 2,
@@ -450,7 +450,7 @@ class RootAnatomy(Organ):
                         type=cell_type,
                         x=border_pt[0], y=border_pt[1],
                         diameter=cell_diam,
-                        id_cell=id_group, id_layer=0, id_group=id_group,
+                        id_cell=id_group, id_group=id_group,
                         angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
                         radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
                         area=np.pi * (cell_diam / 2) ** 2,
@@ -599,7 +599,7 @@ class MonocotRootAnatomy(RootAnatomy):
                     type="stele",
                     x=pt[0], y=pt[1],
                     diameter=cell_diameter,
-                    id_cell=next_id_group, id_layer=0, id_group=next_id_group,
+                    id_cell=next_id_group, id_group=next_id_group,
                     angle=np.arctan2(pt[1] - center.y, pt[0] - center.x),
                     radius=np.sqrt((pt[0] - center.x) ** 2 + (pt[1] - center.y) ** 2),
                     area=np.pi * (cell_diameter / 2) ** 2,
@@ -692,7 +692,7 @@ class MonocotRootAnatomy(RootAnatomy):
                     type="protoxylem",
                     x=border_pt[0], y=border_pt[1],
                     diameter=cell_diam,
-                    id_cell=cell_id_group, id_layer=0, id_group=cell_id_group,
+                    id_cell=cell_id_group, id_group=cell_id_group,
                     angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
                     radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
                     area=np.pi * r ** 2,
@@ -747,13 +747,13 @@ class MonocotRootAnatomy(RootAnatomy):
                     type="phloem",
                     x=border_pt[0], y=border_pt[1],
                     diameter=cell_diam,
-                    id_cell=cell_id_group, id_layer=0, id_group=cell_id_group,
+                    id_cell=cell_id_group, id_group=cell_id_group,
                     angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
                     radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
                     area=np.pi * r ** 2,
                 ))
 
-        list_polygons.append(GeometryProcessor.buffer_polygon(ellipse, diameter / 2))
+        list_polygons.append(ellipse)
         return cells_in_slice, list_polygons
 
 
@@ -1003,7 +1003,7 @@ class DicotRootAnatomy(RootAnatomy):
                             type=cell_type,
                             x=border_pt[0], y=border_pt[1],
                             diameter=cell_diameter,
-                            id_cell=id_group, id_layer=0, id_group=id_group,
+                            id_cell=id_group, id_group=id_group,
                             angle=cell_angle, radius=cell_radius,
                             area=np.pi * (cell_diameter / 2) ** 2,
                         ))
@@ -1118,7 +1118,7 @@ class DicotRootAnatomy(RootAnatomy):
                             x=px + er * cos_t - et * sin_t,
                             y=py + er * sin_t + et * cos_t,
                             diameter=d_cell,
-                            id_cell=id_group, id_layer=0, id_group=id_group,
+                            id_cell=id_group, id_group=id_group,
                             angle=theta_mid, radius=r,
                             area=np.pi * a_rad * b_tan,
                         ))
@@ -1231,7 +1231,7 @@ class DicotRootAnatomy(RootAnatomy):
                         type="xylem",
                         x=border_pt[0], y=border_pt[1],
                         diameter=actual_diam,
-                        id_cell=id_group, id_layer=0, id_group=id_group,
+                        id_cell=id_group, id_group=id_group,
                         angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
                         radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
                         area=np.pi * r ** 2,

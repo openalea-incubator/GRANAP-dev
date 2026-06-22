@@ -1,4 +1,4 @@
-
+import copy
 from typing import List, Optional
 from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon, Point, MultiPoint
@@ -27,18 +27,18 @@ class CellManager:
 
     def extend_cells(self, cells: List[Cell]):
         if not self.cells:
-            self.cells.extend(cells)
+            self.cells.extend(copy.copy(c) for c in cells)
             return
 
-        max_id_layer = max(c.id_layer for c in self.cells)
         max_id_cell  = max(c.id_cell  for c in self.cells)
         max_id_group = max(c.id_group for c in self.cells)
 
         for cell in cells:
-            cell.id_layer = max_id_layer + cell.id_layer + 1
-            cell.id_cell  = max_id_cell  + cell.id_cell  + 1
-            cell.id_group = max_id_group + cell.id_group + 1
-            self.cells.append(cell)
+            new_cell = copy.copy(cell)
+            # id_layer is an absolute layer index — preserve it as-is
+            new_cell.id_cell  = max_id_cell  + cell.id_cell  + 1
+            new_cell.id_group = max_id_group + cell.id_group + 1
+            self.cells.append(new_cell)
 
     def get_cells_by_type(self, type: str):
         return [cell for cell in self.cells if cell.type == type]

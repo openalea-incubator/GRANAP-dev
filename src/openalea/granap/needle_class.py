@@ -333,7 +333,6 @@ class NeedleAnatomy(Organ):
         cells_in_ellipses: List[Cell] = []
         
         id_cell = 0
-        id_layer = 0
         for ellipse in ellipses:
             # get ellipse parameters
             center = ellipse["polygon"].centroid
@@ -368,7 +367,6 @@ class NeedleAnatomy(Organ):
             temp_cluster_id = xylem_cluster_size
     
             for i in range(n_xylem_width+1):
-                id_layer += 1
                 for j_xlm in range(xylem_rows+1):
                     id_cell += 1
                     xyl_coord = [i*xylem_cell_width - ry + xylem_cell_width/2,  # starting from left to right
@@ -386,7 +384,6 @@ class NeedleAnatomy(Organ):
                     
                     xylem_cell = Cell(
                         id_cell=id_cell,
-                        id_layer=id_layer,
                         id_group=id_cell,
                         type=cell_type,
                         x=xyl_coord[0],
@@ -412,7 +409,6 @@ class NeedleAnatomy(Organ):
 
                     phloem_cell = Cell(
                         id_cell=id_cell,
-                        id_layer=id_layer,
                         id_group=id_cell,
                         type="phloem",
                         x=phlo_coord[0],
@@ -441,7 +437,6 @@ class NeedleAnatomy(Organ):
                 xyl_coord = [xyl_coord[0] + center.x, xyl_coord[1] + center.y]
                 cambium_cell = Cell(
                     id_cell=id_cell,
-                    id_layer=id_layer,
                     id_group=id_cell,
                     type="cambium",
                     x=xyl_coord[0],
@@ -557,11 +552,11 @@ class NeedleAnatomy(Organ):
         for k, (prev_xy, curr_xy, next_xy) in enumerate(triplet_centers):
             mock_cells = [
                 Cell(x=prev_xy[0], y=prev_xy[1], diameter=cell_diam,
-                     id_group=3 * k,     id_cell=3 * k,     id_layer=0, type="epidermis"),
+                     id_group=3 * k,     id_cell=3 * k,     type="epidermis"),
                 Cell(x=curr_xy[0], y=curr_xy[1], diameter=cell_diam,
-                     id_group=3 * k + 1, id_cell=3 * k + 1, id_layer=0, type="epidermis"),
+                     id_group=3 * k + 1, id_cell=3 * k + 1, type="epidermis"),
                 Cell(x=next_xy[0], y=next_xy[1], diameter=cell_diam,
-                     id_group=3 * k + 2, id_cell=3 * k + 2, id_layer=0, type="epidermis"),
+                     id_group=3 * k + 2, id_cell=3 * k + 2, type="epidermis"),
             ]
             try:
                 results.append(CellGenerator.create_stomata(mock_cells, stomata_setting=sp))
@@ -693,7 +688,7 @@ class NeedleAnatomy(Organ):
                     organ_specific_cells.cells.append(Cell(
                         x=i_coord[0], y=i_coord[1],
                         diameter=np.sqrt(poly.area / np.pi) * 2,
-                        id_cell=i_cell, id_layer=0, id_group=id_stomata,
+                        id_cell=i_cell, id_group=id_stomata,
                         type=cell_type,
                     ))
 
@@ -707,7 +702,7 @@ class NeedleAnatomy(Organ):
                 organ_specific_cells.cells.append(Cell(
                     x=i_coord[0], y=i_coord[1],
                     diameter=np.sqrt(poly.area / np.pi) * 2,
-                    id_cell=i_cell, id_layer=0, id_group=id_stomata,
+                    id_cell=i_cell, id_group=id_stomata,
                     type="pore",
                 ))
 
