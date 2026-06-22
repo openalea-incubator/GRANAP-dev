@@ -150,7 +150,7 @@ class RootAnatomy(Organ):
         return radius
 
     def _create_central_layers(self, current_polygon: Polygon,
-                               params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                               params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         """Create stele parenchyma rings from the stele edge toward the centre."""
         central_layers = []
 
@@ -190,14 +190,14 @@ class RootAnatomy(Organ):
 
         return central_layers
 
-    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         return layers_polygons
 
     def set_vascular_params(self, **kwargs) -> None:
         self.vascular_params.update(kwargs)
         self._invalidate_geometry()
 
-    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+    def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         layer_for_vascular = [l["name"] for l in layers_polygons].index("stele")
         return layers_polygons[layer_for_vascular]["polygon"]
 

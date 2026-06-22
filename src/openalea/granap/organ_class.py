@@ -45,7 +45,7 @@ class Organ(AbstractNetwork, ABC):
         self.randomness = randomness
         self.params: List[Dict[str, Any]] = []
         self._base_polygon: Optional[Polygon] = None
-        self._layers_polygons: List[Dict[str, Any]] = []
+        self._layers_polygons: List[LayerPolygon] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
         self.all_cells = CellManager()
 
@@ -161,7 +161,7 @@ class Organ(AbstractNetwork, ABC):
             self._base_polygon = self._create_base_shape()
         return self._base_polygon
     
-    def generate_layer_polygons(self) -> List[Dict[str, Any]]:
+    def generate_layer_polygons(self) -> List[LayerPolygon]:
         """
         Generate polygons for all layers.
         
@@ -172,7 +172,7 @@ class Organ(AbstractNetwork, ABC):
             self._layers_polygons = self._build_layer_polygons()
         return self._layers_polygons
     
-    def _build_layer_polygons(self) -> List[Dict[str, Any]]:
+    def _build_layer_polygons(self) -> List[LayerPolygon]:
         """Build layer polygons from current layer configuration."""
         layers_polygons = []
         layer_array = self.layer_manager.expand_layers()
@@ -300,7 +300,7 @@ class Organ(AbstractNetwork, ABC):
         return self._cells_gdf
     
     @abstractmethod
-    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
         Optionally reshape layer polygons after they have been built.
 
@@ -310,15 +310,14 @@ class Organ(AbstractNetwork, ABC):
         ellipse so that the central cylinder has a different cross-section.
 
         Args:
-            layers_polygons: List of layer polygon dictionaries as produced
-                by ``_build_layer_polygons``.
+            layers_polygons: Layer polygons as produced by ``_build_layer_polygons``.
 
         Returns:
-            The (potentially modified) list of layer polygon dictionaries.
+            The (potentially modified) list of LayerPolygon objects.
         """
         return layers_polygons
 
-    def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
+    def allocate_vascular_tissue(self, layers_polygons: List[LayerPolygon]):
         """
         Allocate vascular tissue.
         Define the region where vascular tissue will be allocated.
@@ -332,7 +331,7 @@ class Organ(AbstractNetwork, ABC):
         self._create_vascular_tissue(polygon_for_vascular)
 
     @abstractmethod
-    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+    def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         """
         Find the layer where vascular tissue will be allocated.
         
@@ -360,7 +359,7 @@ class Organ(AbstractNetwork, ABC):
         """
         pass
 
-    def _extra_tissue_polygons(self, layers_polygons: List[Dict[str, Any]]) -> Dict[str, list]:
+    def _extra_tissue_polygons(self, layers_polygons: List[LayerPolygon]) -> Dict[str, list]:
         """Return extra tissue polygons for visualization without placing cells.
         Subclasses override to expose organ-specific structures (e.g. stomata, resin ducts)."""
         return {}
@@ -865,18 +864,15 @@ class Organ(AbstractNetwork, ABC):
     
     @abstractmethod
     def _create_central_layers(self, current_polygon: Polygon,
-                               params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                               params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         """
         Create central tissue layers (vascular, parenchyma, etc.).
-        
-        This method must be implemented by subclasses to define
-        organ-specific central structures.
-        
+
         Args:
             current_polygon: Current inner polygon boundary
             params: Parameter dictionaries
-        
+
         Returns:
-            List of central layer polygon dictionaries
+            List of LayerPolygon objects for the central zone.
         """
         pass

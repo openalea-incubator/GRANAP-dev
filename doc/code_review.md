@@ -38,7 +38,7 @@ For a scientific modelling tool this is a reproducibility problem.
 
 ---
 
-### 3. Abstract method `_create_central_layers` has a wrong return type
+### 3. ✅ Abstract method `_create_central_layers` has a wrong return type *(fixed)*
 Implementations in `NeedleAnatomy` and `RootAnatomy` now return
 `List[LayerPolygon]`, but the abstract declaration in `Organ` and the stub in
 `RoiOrgan` still declare `List[Dict[str, Any]]`.  The type contract is broken.

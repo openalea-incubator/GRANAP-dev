@@ -106,7 +106,7 @@ class NeedleAnatomy(Organ):
         
         return GeometryProcessor.half_ellipse_polygon(width, thickness)
 
-    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
         When "central_cylinder" has shape="ellipse", interpolate each layer
         polygon between the outer half-ellipse (t=0) and a full ellipse
@@ -204,7 +204,7 @@ class NeedleAnatomy(Organ):
         return thickness
     
     def _create_central_layers(self, current_polygon: Polygon,
-                               params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                               params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         """
         Create transfusion tissue and parenchyma layers.
         
@@ -292,7 +292,7 @@ class NeedleAnatomy(Organ):
         self.transfusion_params.update(kwargs)
         self._invalidate_geometry()
 
-    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+    def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         """
         Find the layer where vascular tissue will be allocated.
         
