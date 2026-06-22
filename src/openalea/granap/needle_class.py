@@ -2,6 +2,7 @@
 Needle anatomy implementation.
 """
 
+import dataclasses
 import numpy as np
 from typing import List, Dict, Any
 from shapely.geometry import Polygon, Point
@@ -11,11 +12,30 @@ from openalea.granap.organ_class import Organ
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.generate_cell import CellGenerator
-from openalea.granap.layer_class import Layer
+from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
 import matplotlib.pyplot as plt
+
+# ---------------------------------------------------------------------------
+# Module-level constants — geometry tuning parameters
+# ---------------------------------------------------------------------------
+# Number of epidermis border-point cells to skip at the start of the boundary
+# when selecting stomata positions (avoids the sharp tip of the half-ellipse).
+_STOMATA_SKIP_BORDER_PTS: int = 300
+
+# The mesophyll ring used for duct placement is the outer annulus whose inner
+# edge is 1.2× duct diameters from the mesophyll boundary.
+_DUCT_RING_BUFFER_FACTOR: float = 1.2
+
+# The parenchyma-ring polygon is obtained by shrinking the fitted ellipse
+# inward by this fraction of cell_diameter (prevents ring cells from sitting
+# on the exact ellipse edge).
+_DUCT_RING_INNER_SHRINK: float = 0.15
+
+# Number of resampled points for the inner lumen (canal) polygon.
+_CANAL_RESAMPLE_PTS: int = 15
 
 class NeedleAnatomy(Organ):
     """
@@ -137,12 +157,10 @@ class NeedleAnatomy(Organ):
         
         for i in range(1, n_to_morph):          # skip index 0 (outside)
             t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1
-            print(t)
             try:
                 new_poly = interp.fast_interpolate(t)
                 if not new_poly.is_empty and new_poly.is_valid:
-                    layers_polygons[i] = dict(layers_polygons[i])
-                    layers_polygons[i]["polygon"] = new_poly
+                    layers_polygons[i] = dataclasses.replace(layers_polygons[i], polygon=new_poly)
             except Exception:
                 pass  # leave this layer polygon unchanged on error
 
@@ -224,21 +242,16 @@ class NeedleAnatomy(Organ):
 
                 space_increment = avg_diameter / 2
 
-                layer_dict = {
-                    "name": "transfusion",
-                    "polygon": current_polygon,
-                    "cell_diameter": avg_diameter,
-                    "id_layer": i_layer + 1,
-                    "cell_width": 0
-                }
-                if transfusion_type:
-                    layer_dict.update({
-                        "transfusion_type": True,
-                        "tt_diameter": tt_diameter,
-                        "tp_diameter": tp_diameter,
-                        "p_tt": p_tt,
-                    })
-                central_layers.append(layer_dict)
+                central_layers.append(LayerPolygon(
+                    name="transfusion",
+                    polygon=current_polygon,
+                    cell_diameter=avg_diameter,
+                    id_layer=i_layer + 1,
+                    transfusion_type=transfusion_type,
+                    tt_diameter=tt_diameter if transfusion_type else 0.0,
+                    tp_diameter=tp_diameter if transfusion_type else 0.0,
+                    p_tt=p_tt if transfusion_type else 0.0,
+                ))
             else:
                 # Parenchyma
                 current_polygon = GeometryProcessor.buffer_polygon(
@@ -246,16 +259,15 @@ class NeedleAnatomy(Organ):
                     -space_increment - parenchyma_diameter / 2,
                     smooth_factor=0.7
                 )
-                
+
                 space_increment = parenchyma_diameter / 2
-                
-                central_layers.append({
-                    "name": "parenchyma",
-                    "polygon": current_polygon,
-                    "cell_diameter": parenchyma_diameter,
-                    "id_layer": i_layer + 1,
-                    "cell_width": 0
-                })
+
+                central_layers.append(LayerPolygon(
+                    name="parenchyma",
+                    polygon=current_polygon,
+                    cell_diameter=parenchyma_diameter,
+                    id_layer=i_layer + 1,
+                ))
             
             i_layer += 1
         
@@ -495,7 +507,7 @@ class NeedleAnatomy(Organ):
 
         polygon_for_duct = layers_polygons[layer_names.index("mesophyll")]["polygon"]
         polygon_for_duct = polygon_for_duct.difference(
-            GeometryProcessor.buffer_polygon(polygon_for_duct, -rdp["diameter"] * 1.2, 0)
+            GeometryProcessor.buffer_polygon(polygon_for_duct, -rdp["diameter"] * _DUCT_RING_BUFFER_FACTOR, 0)
         )
 
         n_canal = rdp["n_files"]
@@ -518,7 +530,7 @@ class NeedleAnatomy(Organ):
                 continue
             duct_poly       = GeometryProcessor.fit_inner_ellipse(slice_polygon, rdp["diameter"] / 2)
             outer           = GeometryProcessor.buffer_polygon(duct_poly["polygon"],  rdp["cell_diameter"] / 2, 0)
-            ring            = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(rdp["cell_diameter"] / 2) * 0.15)
+            ring            = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(rdp["cell_diameter"] / 2) * _DUCT_RING_INNER_SHRINK)
             canal           = GeometryProcessor.buffer_polygon(ring,                 -rdp["cell_diameter"])
             duct_data.append({
                 "outer":       outer,
@@ -600,7 +612,7 @@ class NeedleAnatomy(Organ):
             # inner lumen cells along the canal
             canal_center = duct["canal"].centroid
             x, y  = duct["canal"].exterior.coords.xy
-            coords = GeometryProcessor.resample_coords(np.column_stack((x, y)), target_n_points=15)
+            coords = GeometryProcessor.resample_coords(np.column_stack((x, y)), target_n_points=_CANAL_RESAMPLE_PTS)
             id_group += 1
             for coord in coords[1:]:
                 duct_cells.append(Cell(
@@ -639,7 +651,7 @@ class NeedleAnatomy(Organ):
 
         # Sample n_stomata evenly spaced groups, avoiding the very ends
         indices = np.linspace(
-            300,
+            _STOMATA_SKIP_BORDER_PTS,
             len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
             n_stomata, dtype=int
         )
@@ -648,11 +660,14 @@ class NeedleAnatomy(Organ):
         triplet_centers = []
         for i in indices:
             g = epidermis_cells[i].id_group
-            triplet_centers.append((
-                self.all_cells.get_centroid_of_group(g - 1),
-                self.all_cells.get_centroid_of_group(g),
-                self.all_cells.get_centroid_of_group(g + 1),
-            ))
+            try:
+                triplet_centers.append((
+                    self.all_cells.get_centroid_of_group(g - 1),
+                    self.all_cells.get_centroid_of_group(g),
+                    self.all_cells.get_centroid_of_group(g + 1),
+                ))
+            except KeyError:
+                pass  # adjacent group was removed; skip this stomata position
 
         stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
 
@@ -743,7 +758,7 @@ class NeedleAnatomy(Organ):
 
                 # Mirror the index selection from add_stomata
                 end_idx = n_epi_cells - int(np.round(n_epi_cells / n_stomata))
-                indices = np.linspace(300, end_idx, n_stomata, dtype=int)
+                indices = np.linspace(_STOMATA_SKIP_BORDER_PTS, end_idx, n_stomata, dtype=int)
                 seed_indices = np.clip(indices // n_border, 0, len(seeds) - 2)
 
                 triplet_centers = [

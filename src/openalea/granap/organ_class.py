@@ -5,6 +5,7 @@ Plant anatomy base module providing abstract interface.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union
 import geopandas as gpd
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
@@ -12,8 +13,10 @@ from shapely.ops import unary_union
 from collections import defaultdict
 from scipy.sparse import lil_matrix
 import time
-from openalea.granap.layer_class import Layer
+from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.layer_manager import LayerManager
+
+log = logging.getLogger(__name__)
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.cell_class import Cell
@@ -183,31 +186,30 @@ class Organ(AbstractNetwork, ABC):
                 polygon = GeometryProcessor.buffer_polygon(
                     polygon, space_increment, smooth_factor=0.01
                 )
-                layers_polygons.append({
-                    "name": "outside",
-                    "polygon": polygon,
-                    "cell_diameter": layer["cell_diameter"] / 3,
-                    "id_layer": i_layer,
-                    "cell_width": 0
-                })
-            
+                layers_polygons.append(LayerPolygon(
+                    name="outside",
+                    polygon=polygon,
+                    cell_diameter=layer["cell_diameter"] / 3,
+                    id_layer=i_layer,
+                ))
+
             # Add the layer polygon
             polygon = GeometryProcessor.buffer_polygon(
-                polygon, 
-                -space_increment - layer["cell_diameter"]/2,
-                smooth_factor=0.5
+                polygon,
+                -space_increment - layer["cell_diameter"] / 2,
+                smooth_factor=0.5,
             )
-            
+
             space_increment = layer["cell_diameter"] / 2
-            
-            layers_polygons.append({
-                "name": layer["name"],
-                "polygon": polygon,
-                "cell_diameter": layer["cell_diameter"],
-                "id_layer": i_layer + 1,
-                "cell_width": layer["cell_width"],
-                "shift": layer["shift"]
-            })
+
+            layers_polygons.append(LayerPolygon(
+                name=layer["name"],
+                polygon=polygon,
+                cell_diameter=layer["cell_diameter"],
+                id_layer=i_layer + 1,
+                cell_width=layer["cell_width"],
+                shift=layer["shift"],
+            ))
         
         # Add central layers (vascular, parenchyma, etc.)
         params = [l.to_dict() for l in self.layer_manager.get_layers()]
@@ -227,42 +229,29 @@ class Organ(AbstractNetwork, ABC):
             GeoDataFrame with cell geometries
         """
         if self._cells_gdf is None:
-            t_start = time.time()   
+            t_start = time.time()
             layers_polygons = self.generate_layer_polygons()
-            t_end = time.time()
-            print("Time to generate layer polygons:", t_end - t_start)
+            log.debug("Layer polygons generated in %.3fs", time.time() - t_start)
             center = layers_polygons[0]["polygon"].centroid
 
             t_start = time.time()
-            # Clear existing cells in layers
             for layer in self.layer_manager.get_layers():
                 layer.cells = []
-            
-            self.all_cells = CellGenerator.generate_cells_info(
-                layers_polygons, center
-            )
-            t_end = time.time()
-            print("Time to generate cells info:", t_end - t_start)
+            self.all_cells = CellGenerator.generate_cells_info(layers_polygons, center)
+            log.debug("Cells info generated in %.3fs", time.time() - t_start)
 
             t_start = time.time()
-            # Reset vascular containers so each generate_cells() call starts clean
             self.vascular_cells = CellManager()
             self.vascular_polygons = []
             self.vascular_tissue_polygons: Dict[str, list] = {}
-            # add vascular tissue
             self.allocate_vascular_tissue(layers_polygons)
-            # Unified mask+merge: one pass removes layer seeds under vascular tissue,
-            # then inserts all vascular seeds with offset ids.
             if getattr(self, 'vascular_polygons', []):
                 vascular_mask = unary_union(self.vascular_polygons)
                 self.all_cells.remove_cells_in_polygon(vascular_mask)
             if getattr(self, 'vascular_cells', None) and self.vascular_cells.cells:
                 self.all_cells.extend_cells(self.vascular_cells.cells)
-
-            # add organ specific tissues
             self._organ_specific_tissues()
-            t_end = time.time()
-            print("Time to add vascular and organ specific tissues:", t_end - t_start)
+            log.debug("Vascular + organ-specific tissues in %.3fs", time.time() - t_start)
 
             t_start = time.time()
             vor = CellGenerator.voronoi_diagram(self.all_cells)
@@ -534,11 +523,14 @@ class Organ(AbstractNetwork, ABC):
         target_aerenchyma_area = (total_tissue_area + total_air_area) * aerenchyma_prop
 
         if target_aerenchyma_area > max_possible_area:
-            print(f"Warning: asked proportion ({aerenchyma_prop:.2f}) requires {target_aerenchyma_area:.2f} area, which is greater than available cells ({max_possible_area:.2f}). Lowering aerenchyma_proportion.")
+            log.warning(
+                "Requested aerenchyma proportion %.2f requires %.4f area but only %.4f is available; clamping.",
+                aerenchyma_prop, target_aerenchyma_area, max_possible_area,
+            )
             aerenchyma_prop = max_possible_area / (total_tissue_area + total_air_area)
             target_aerenchyma_area = max_possible_area
 
-        print(f"Targeted aerenchyma prop: {(target_aerenchyma_area / (total_tissue_area + total_air_area)):.3f}")
+        log.debug("Targeted aerenchyma proportion: %.3f", target_aerenchyma_area / (total_tissue_area + total_air_area))
 
         target_per_quadrant = (target_aerenchyma_area - total_air_area) / self._aerenchyma_target_denominator(n_files)
 
@@ -588,7 +580,7 @@ class Organ(AbstractNetwork, ABC):
         tissue = self.aerenchyma_params.get("tissue")
         total_tissue_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type(tissue) if c.polygon is not None)
         total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
-        print(f"Actual aerenchyma prop: {(total_air_area / (total_tissue_area + total_air_area)):.3f}")
+        log.debug("Actual aerenchyma proportion: %.3f", total_air_area / (total_tissue_area + total_air_area))
 
     def merge_intercellular_aerenchyma(self):
         """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""

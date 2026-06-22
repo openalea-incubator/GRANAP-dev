@@ -1,6 +1,7 @@
 """
 Layer module for plant anatomy representation.
-Provides the Layer class representing individual tissue layers.
+Provides the Layer class representing individual tissue layers,
+and LayerPolygon which carries the computed geometry for one layer ring.
 """
 
 from dataclasses import dataclass, field
@@ -8,6 +9,43 @@ from typing import Optional, Dict, Any, List
 from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon
 from openalea.granap.input_data import LayerDefaultParams
+
+
+@dataclass
+class LayerPolygon:
+    """
+    Typed representation of a layer polygon produced by _build_layer_polygons.
+
+    Replaces the ad-hoc plain dicts that were previously passed around.
+    Backward-compatible dict-style access (``lp["key"]``, ``lp.get("key")``)
+    is kept so callers that have not yet been migrated continue to work.
+    """
+    name: str
+    polygon: Polygon
+    cell_diameter: float
+    cell_width: float = 0.0
+    id_layer: int = 0
+    shift: float = 0.0
+    # Transfusion-tissue fields (needle-specific)
+    transfusion_type: bool = False
+    tt_diameter: float = 0.0
+    tp_diameter: float = 0.0
+    p_tt: float = 0.0
+
+    # ------------------------------------------------------------------
+    # Backward-compatible dict-style access
+    # ------------------------------------------------------------------
+    def __getitem__(self, key: str):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default=None):
+        return getattr(self, key, default)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
 
 
 @dataclass

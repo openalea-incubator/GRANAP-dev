@@ -16,7 +16,7 @@ from shapely.affinity import translate, scale as affine_scale, rotate
 from shapely.prepared import prep
 
 from openalea.granap.organ_class import Organ
-from openalea.granap.layer_class import Layer
+from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.geometry_collection import GeometryProcessor
@@ -180,13 +180,12 @@ class RootAnatomy(Organ):
             )
             space_increment = cell_diameter / 2
 
-            central_layers.append({
-                "name": "stele",
-                "polygon": current_polygon,
-                "cell_diameter": cell_diameter,
-                "id_layer": i_layer + 1,
-                "cell_width": 0,
-            })
+            central_layers.append(LayerPolygon(
+                name="stele",
+                polygon=current_polygon,
+                cell_diameter=cell_diameter,
+                id_layer=i_layer + 1,
+            ))
             i_layer += 1
 
         return central_layers
@@ -207,7 +206,7 @@ class RootAnatomy(Organ):
 
     def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug: bool = False):
         """Implemented by each subclass."""
-        raise NotImplementedError
+        pass
 
     def add_lateral_root_primordium(self, angle: float, distance: float) -> None:
         pass
@@ -364,10 +363,7 @@ class RootAnatomy(Organ):
 
             # Remove stele seeds inside this phloem ellipse
             # (phloem ellipses are NOT added to vascular_polygons, so must be done here)
-            self.all_cells.cells = [
-                c for c in self.all_cells.cells
-                if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
-            ]
+            self.all_cells.remove_cells_by_polygon(GeometryProcessor.buffer_polygon(ellipse, adjustment / 2))
             self.vascular_tissue_polygons.setdefault("phloem", []).append(ellipse)
 
             packed = GeometryProcessor.pack_circles(
@@ -852,8 +848,8 @@ class DicotRootAnatomy(RootAnatomy):
         if self.vascular_params.get("secondary_growth", False):
             self.fit_secondary_xylem(polygon_for_vascular)
         else:
-            self.fit_primary_cambium_elements(polygon_for_vascular)
             self.fit_phloem_elements(polygon_for_vascular, type="dicot")
+            self.fit_primary_cambium_elements(polygon_for_vascular)
         # Note: remove_cells_in_polygon + extend_cells happens in Organ.generate_cells()
 
     # ------------------------------------------------------------------
@@ -907,6 +903,17 @@ class DicotRootAnatomy(RootAnatomy):
         self.all_cells.cells = [
             c for c in self.all_cells.cells
             if c.type not in ("stele", "pericycle") or c.id_group not in groups_to_delete
+        ]
+
+        # Remove any phloem cells that encroach on the cambium ring
+        groups_to_delete = {
+            c.id_group
+            for c in self.vascular_cells.cells
+            if c.type == "phloem" and thin_ring.intersects(Point(c.x, c.y))
+        }
+        self.vascular_cells.cells = [
+            c for c in self.vascular_cells.cells
+            if c.type != "phloem" or c.id_group not in groups_to_delete
         ]
 
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None

@@ -26,16 +26,18 @@ class CellManager:
         return [cell for cell in self.cells if cell.id_cell in ids]
 
     def extend_cells(self, cells: List[Cell]):
+        if not self.cells:
+            self.cells.extend(cells)
+            return
 
-        max_id_layer = max([c.id_layer for c in self.cells])
-        max_id_cell = max([c.id_cell for c in self.cells])
-        max_id_group = max([c.id_group for c in self.cells])
+        max_id_layer = max(c.id_layer for c in self.cells)
+        max_id_cell  = max(c.id_cell  for c in self.cells)
+        max_id_group = max(c.id_group for c in self.cells)
 
-        # add a list of cells to the current list
         for cell in cells:
-            cell.id_layer = max_id_layer + cell.id_layer +1
-            cell.id_cell = max_id_cell + cell.id_cell+1 
-            cell.id_group = max_id_group + cell.id_group+1
+            cell.id_layer = max_id_layer + cell.id_layer + 1
+            cell.id_cell  = max_id_cell  + cell.id_cell  + 1
+            cell.id_group = max_id_group + cell.id_group + 1
             self.cells.append(cell)
 
     def get_cells_by_type(self, type: str):
@@ -60,9 +62,9 @@ class CellManager:
 
     def get_centroid_of_group(self, id_group: int):
         group_cells = self.get_cells_by_group(id_group)
-        cx = np.mean([cell.x for cell in group_cells])
-        cy = np.mean([cell.y for cell in group_cells])
-        return cx, cy
+        if not group_cells:
+            raise KeyError(f"No cells found for id_group={id_group}")
+        return np.mean([c.x for c in group_cells]), np.mean([c.y for c in group_cells])
 
     def get_polygons(self):
         return [cell.polygon for cell in self.cells if cell.polygon is not None]
@@ -109,7 +111,7 @@ class CellManager:
         self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
     
     def get_last_id_group(self):
-        return max([cell.id_group for cell in self.cells])
+        return max((c.id_group for c in self.cells), default=0)
 
     def recenter_cells(self):
         # re position cells to the center of the global cell population
