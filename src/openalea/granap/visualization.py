@@ -118,6 +118,7 @@ def _dry_run_vascular(organ: "Organ"):
     saved_vascular_cells        = getattr(organ, 'vascular_cells', CellManager())
     saved_vascular_polys        = list(getattr(organ, 'vascular_polygons', []))
     saved_vascular_tissue_polys = dict(getattr(organ, 'vascular_tissue_polygons', {}))
+    saved_rng_state             = organ.rng.bit_generator.state
     try:
         organ.all_cells                = CellManager()
         organ.vascular_cells           = CellManager()
@@ -132,6 +133,7 @@ def _dry_run_vascular(organ: "Organ"):
         organ.vascular_cells           = saved_vascular_cells
         organ.vascular_polygons        = saved_vascular_polys
         organ.vascular_tissue_polygons = saved_vascular_tissue_polys
+        organ.rng.bit_generator.state  = saved_rng_state
 
     return layers, vascular_polys, vascular_tissue_polys
 

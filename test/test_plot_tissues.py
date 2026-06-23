@@ -9,11 +9,14 @@ from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.input_data import OrganInputData
 
 
+SEED = 0
+
+
 def _dicot_secondary():
     data = OrganInputData.for_dicot_root()
     data.set_value("secondary_growth", "value", True)
     data.set_value("stele", "thickness", 1.2)
-    return RootAnatomy(data)
+    return RootAnatomy(data, seed=SEED)
 
 
 def test_plot_tissues(show=False):
@@ -23,10 +26,10 @@ def test_plot_tissues(show=False):
     """
 
     organs = [
-        ("monocot",         RootAnatomy(OrganInputData.for_root())),
-        ("dicot",           RootAnatomy(OrganInputData.for_dicot_root())),
+        ("monocot",         RootAnatomy(OrganInputData.for_root(),        seed=SEED)),
+        ("dicot",           RootAnatomy(OrganInputData.for_dicot_root(),  seed=SEED)),
         ("dicot secondary", _dicot_secondary()),
-        ("needle",          NeedleAnatomy()),
+        ("needle",          NeedleAnatomy(seed=SEED)),
     ]
 
     for name, organ in organs:

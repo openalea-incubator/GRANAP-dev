@@ -8,9 +8,12 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 
 
+SEED = 0
+
+
 def test_primary_cambium(show=False):
     data = OrganInputData.for_dicot_root()
-    root = RootAnatomy(data)
+    root = RootAnatomy(data, seed=SEED)
     root.generate_cells()
 
     types = {c.type for c in root.all_cells.cells}

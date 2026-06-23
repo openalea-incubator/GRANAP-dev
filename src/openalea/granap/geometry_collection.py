@@ -351,6 +351,7 @@ class GeometryProcessor:
         first_circle_shift:  float                       = 0.0,
         adjacent:            bool                        = False,
         gradient_center:     Optional[Tuple[float, float]] = None,
+        rng                                              = None,
     ) -> List[Tuple[float, float, float]]:
         """
         Unified Apollonian circle packing with proportion stop, directional gradient,
@@ -422,6 +423,7 @@ class GeometryProcessor:
         if max_dist < 1e-12:
             max_dist = 1.0
         poly_area = polygon.area
+        _rng = rng if rng is not None else np.random
 
         placed: List[Tuple[float, float, float]] = []
         total_area = 0.0
@@ -435,8 +437,8 @@ class GeometryProcessor:
             cx, cy, r_ins = GeometryProcessor._chebyshev_center(region)
 
             if not placed and first_circle_shift > 0.0:
-                angle     = np.random.uniform(0.0, 2.0 * np.pi)
-                magnitude = np.random.uniform(0.0, first_circle_shift * r_ins)
+                angle     = _rng.uniform(0.0, 2.0 * np.pi)
+                magnitude = _rng.uniform(0.0, first_circle_shift * r_ins)
                 new_cx    = cx + magnitude * np.cos(angle)
                 new_cy    = cy + magnitude * np.sin(angle)
                 if polygon.contains(Point(new_cx, new_cy)):
@@ -448,10 +450,10 @@ class GeometryProcessor:
                 if gradient_function == "normal":
                     mean_diam   = (diameter_max + diameter_min) / 2.0
                     target_diam = float(np.clip(
-                        np.random.normal(mean_diam, diameter_sd), diameter_min, diameter_max
+                        _rng.normal(mean_diam, diameter_sd), diameter_min, diameter_max
                     ))
                 elif gradient_function == "uniform":
-                    target_diam = float(np.random.uniform(diameter_min, diameter_max))
+                    target_diam = float(_rng.uniform(diameter_min, diameter_max))
                 else:
                     target_diam = diameter_max
             else:
@@ -463,7 +465,7 @@ class GeometryProcessor:
                 target_diam = base_fn(t)
                 if diameter_sd > 0.0:
                     target_diam = float(np.clip(
-                        np.random.normal(target_diam, diameter_sd), diameter_min, np.inf
+                        _rng.normal(target_diam, diameter_sd), diameter_min, np.inf
                     ))
 
             r = min(r_ins, target_diam / 2)

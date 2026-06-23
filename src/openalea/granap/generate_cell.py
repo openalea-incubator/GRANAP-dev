@@ -27,8 +27,8 @@ class CellGenerator:
     """
     
     @staticmethod
-    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float, 
-                      cell_width: float = 0, shift: float = 0) -> np.ndarray:
+    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float,
+                      cell_width: float = 0, shift: float = 0, rng=None) -> np.ndarray:
         """
         Generate cell center positions along a layer polygon.
         
@@ -52,7 +52,8 @@ class CellGenerator:
         # Calculate shift distance: shift of 1.0 = 1 cell width displacement
         # Randomized between 0 and shift * cell_width
         max_shift = shift * cell_width
-        shift_distance = np.random.uniform(0, max_shift) if max_shift > 0 else 0
+        _rng = rng if rng is not None else np.random
+        shift_distance = _rng.uniform(0, max_shift) if max_shift > 0 else 0
         
         cells_coords = GeometryProcessor.resample_coords(
             np.column_stack((x, y)), n_cells, shift_distance=shift_distance
@@ -100,8 +101,8 @@ class CellGenerator:
         return cells_border
     
     @staticmethod
-    def generate_cells_info(layers_polygons: List[Dict[str, Any]], 
-                           center: Point):
+    def generate_cells_info(layers_polygons: List[Dict[str, Any]],
+                           center: Point, rng=None):
         """
         Generate cell information from layer polygons.
         
@@ -116,12 +117,14 @@ class CellGenerator:
         id_cell = 1
         id_group = 1
         
+        _rng = rng if rng is not None else np.random
         for i_layer, layer in enumerate(layers_polygons):
             cells_coords = CellGenerator.cells_on_layer(
                 layer["polygon"],
                 layer["cell_diameter"],
                 layer["cell_width"],
-                layer.get("shift", 0)
+                layer.get("shift", 0),
+                rng=rng,
             )
 
             if layer.get("transfusion_type"):
@@ -145,7 +148,7 @@ class CellGenerator:
                 for i, cell_coord in enumerate(cells_coords[1:]):
                     seed_type = (
                         "transfusion tracheid"
-                        if np.random.random() < p_tt
+                        if _rng.random() < p_tt
                         else "transfusion parenchyma"
                     )
                     d = tt_d if seed_type == "transfusion tracheid" else tp_d

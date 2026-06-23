@@ -9,10 +9,13 @@ sys.path.append(os.path.abspath('..'))
 
 from openalea.granap.root_class import RootAnatomy
 
+SEED = 0
+
+
 def test_root_features(show=False):
     t_start = time.time()
     # Create a root anatomy
-    root = RootAnatomy()
+    root = RootAnatomy(seed=SEED)
     root.update_params("cortex", "n_layers", 5)
     root.update_params("inter_cellular_spaces", "tissue", "cortex")
     root.update_params("inter_cellular_spaces", "smoothness", 0.05)

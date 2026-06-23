@@ -11,6 +11,9 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 
 
+SEED = 0
+
+
 def make_dicot_root(cambium_kwargs: dict = None, **xylem_kwargs) -> RootAnatomy:
     """Construct a dicot RootAnatomy with custom xylem and optional cambium parameters."""
     data = OrganInputData.for_dicot_root()
@@ -19,7 +22,7 @@ def make_dicot_root(cambium_kwargs: dict = None, **xylem_kwargs) -> RootAnatomy:
     if cambium_kwargs:
         for field, value in cambium_kwargs.items():
             data.set_value("cambium", field, value)
-    return RootAnatomy(data)
+    return RootAnatomy(data, seed=SEED)
 
 
 def cell_type_counts(root: RootAnatomy) -> dict:

@@ -13,12 +13,15 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
  
  
+SEED = 0
+
+
 def make_star_root(**xylem_overrides) -> RootAnatomy:
     data = OrganInputData.for_root()
     data.set_value("xylem", "xylem_shape", "star")
     for field, value in xylem_overrides.items():
         data.set_value("xylem", field, value)
-    root = RootAnatomy(data)
+    root = RootAnatomy(data, seed=SEED)
     root.generate_cells()
     return root
  

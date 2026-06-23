@@ -11,6 +11,9 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData, InterCellularSpacesParams
 
 
+SEED = 0
+
+
 def make_secondary_root(**overrides) -> RootAnatomy:
     data = OrganInputData.for_dicot_root()
     data.set_value("secondary_growth", "value", True)
@@ -23,7 +26,7 @@ def make_secondary_root(**overrides) -> RootAnatomy:
         inter_cellular_space_proportion=0.1,
         smoothness=0.05,
     ))
-    return RootAnatomy(data)
+    return RootAnatomy(data, seed=SEED)
 
 
 def cell_type_counts(root: RootAnatomy) -> dict:

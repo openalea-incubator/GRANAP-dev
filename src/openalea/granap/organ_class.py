@@ -33,14 +33,16 @@ class Organ(AbstractNetwork, ABC):
     Inherits from AbstractNetwork for hydraulic network construction.
     """
     
-    def __init__(self, randomness: float = 1.0):
+    def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
-        
+
         Args:
             randomness: Degree of randomness in cell placement (0-3)
+            seed:       Optional integer seed for reproducible cell placement.
         """
         AbstractNetwork.__init__(self)
+        self.rng = np.random.default_rng(seed)
         self.layer_manager = LayerManager()
         self.randomness = randomness
         self.params: List[Dict[str, Any]] = []
@@ -237,7 +239,7 @@ class Organ(AbstractNetwork, ABC):
             t_start = time.time()
             for layer in self.layer_manager.get_layers():
                 layer.cells = []
-            self.all_cells = CellGenerator.generate_cells_info(layers_polygons, center)
+            self.all_cells = CellGenerator.generate_cells_info(layers_polygons, center, rng=self.rng)
             log.info("Cell seeds:              %.3fs", time.time() - t_start)
 
             t_start = time.time()
@@ -489,7 +491,7 @@ class Organ(AbstractNetwork, ABC):
         aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
 
         self._aerenchyma_n_files = n_files
-        self._aerenchyma_start_angle = np.random.uniform(0, 2 * np.pi)
+        self._aerenchyma_start_angle = self.rng.uniform(0, 2 * np.pi)
         start_angle = self._aerenchyma_start_angle
 
         def cell_quadrant(cell):

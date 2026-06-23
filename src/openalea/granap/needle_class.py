@@ -4,7 +4,7 @@ Needle anatomy implementation.
 
 import dataclasses
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 
@@ -36,6 +36,11 @@ _DUCT_RING_INNER_SHRINK: float = 0.15
 # Number of resampled points for the inner lumen (canal) polygon.
 _CANAL_RESAMPLE_PTS: int = 15
 
+# Fixed placement order for resin ducts within the 7 mesophyll slices.
+# Positions 3 and 6 are the edge positions (placed first, as in real anatomy);
+# the rest fill in around the ring in an evenly distributed pattern.
+_DUCT_PLACEMENT_ORDER: list = [3, 6, 0, 2, 4, 1, 5]
+
 class NeedleAnatomy(Organ):
     """
     Needle cross-sectional anatomy.
@@ -44,11 +49,15 @@ class NeedleAnatomy(Organ):
     including transfusion tissue and resin ducts.
     """
 
-    def __init__(self, input_data: Any = None):
+    def __init__(self, input_data: Any = None, seed: Optional[int] = None):
         """
         Initialize needle anatomy.
+
+        Args:
+            input_data: Parameter data (OrganInputData, list of dicts, or None for defaults).
+            seed:       Integer seed for reproducible anatomy generation.
         """
-        super().__init__()
+        super().__init__(seed=seed)
         if isinstance(input_data, OrganInputData):
             self.params = input_data.to_dict_list()
         elif isinstance(input_data, list):
@@ -505,15 +514,9 @@ class NeedleAnatomy(Organ):
         )
 
         n_canal = rdp["n_files"]
-        add_duct = []
         if n_canal < 7:
             n_regions = 7
-            if n_canal > 0:
-                add_duct.append(3)
-            if n_canal > 1:
-                add_duct.append(6)
-            remaining_places = [i for i in range(n_regions) if i not in add_duct]
-            add_duct += list(np.random.choice(remaining_places, n_canal - len(add_duct), replace=False))
+            add_duct = _DUCT_PLACEMENT_ORDER[:n_canal]
         else:
             n_regions = n_canal
             add_duct = list(range(n_regions))
@@ -745,7 +748,7 @@ class NeedleAnatomy(Organ):
                 cell_width = epi_layer.get("cell_width", 0)
                 shift      = epi_layer.get("shift", 0)
 
-                seeds   = CellGenerator.cells_on_layer(epi_layer["polygon"], cell_diam, cell_width, shift)
+                seeds   = CellGenerator.cells_on_layer(epi_layer["polygon"], cell_diam, cell_width, shift, rng=self.rng)
                 # n_border matches cell_border: 14 pts if rectangular, 9 if circular
                 n_border    = 14 if cell_width != 0 else 9
                 n_epi_cells = max(1, (len(seeds) - 1) * n_border)

@@ -240,6 +240,15 @@ class DicotSecondaryCambiumParams(BaseParams):
     arc_bottom     : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Base",  description="Arc length at inner_distance (base width of each arm).")
     
 
+class DicotMedularRaysParams(BaseParams):
+    name               : str   = "medullar_rays"
+    n_medullar         : int   = Field(default=6,     ge=0,       title="Number of Medullar Rays",  description="Number of medullar rays. When allow_non_vascular is False they are distributed evenly within the vessel zones; when True they are distributed uniformly around the full circle.")
+    base_width         : float = Field(default=0.005, ge=0.00001, title="Base Width",               description="Constant tangential width of each medullar ray.")
+    cell_diameter      : float = Field(default=0.025, ge=0.00001, title="Cell Diameter",            description="Radial diameter of medullar ray cells.")
+    cell_width         : float = Field(default=0.005, ge=0.00001, title="Cell Width",               description="Tangential width of each lane within the ray (determines number of lanes = base_width / cell_width).")
+    allow_non_vascular : bool  = Field(default=False,              title="Allow Non-Vascular Area", description="If True, medullar rays span the full annular zone. If False, rays are placed only within secondary xylem vessel zones.")
+
+
 class DicotSecondaryPhellodermParams(BaseParams):
     pass
 
@@ -576,6 +585,7 @@ class OrganInputData(BaseModel):
             DicotSecondaryGrowthParams(value=False),
             DicotSecondaryXylemParams(),
             DicotSecondaryCambiumParams(),
+            DicotMedularRaysParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),
             EpidermisParams(),

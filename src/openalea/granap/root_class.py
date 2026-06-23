@@ -58,7 +58,7 @@ class RootAnatomy(Organ):
     # Factory dispatch
     # ------------------------------------------------------------------
 
-    def __new__(cls, input_data=None):
+    def __new__(cls, input_data=None, seed=None):
         if cls is RootAnatomy:
             planttype = _get_planttype(input_data)
             actual_cls = DicotRootAnatomy if planttype == 2 else MonocotRootAnatomy
@@ -69,8 +69,8 @@ class RootAnatomy(Organ):
     # Initialisation — shared across both plant types
     # ------------------------------------------------------------------
 
-    def __init__(self, input_data=None):
-        super().__init__()
+    def __init__(self, input_data=None, seed=None):
+        super().__init__(seed=seed)
         if isinstance(input_data, OrganInputData):
             self.params = input_data.to_dict_list()
         elif isinstance(input_data, list):
@@ -81,6 +81,7 @@ class RootAnatomy(Organ):
         # Initialise secondary-growth dicts so they always exist
         self.secondary_xylem_params: dict = {}
         self.secondary_cambium_params: dict = {}
+        self.medullar_rays_params: dict = {}
 
         # Containers for vascular tissue building (populated by _create_vascular_tissue)
         self.vascular_cells: CellManager = CellManager()
@@ -262,6 +263,7 @@ class RootAnatomy(Organ):
             gradient_steepness=p["xylem_gradient_steepness"],
             gradient_asymmetry=p["xylem_gradient_asymmetry"],
             first_circle_shift=p["xylem_first_vessel_shift"],
+            rng=self.rng,
         )
 
         self.vascular_cells = CellManager()
@@ -297,26 +299,34 @@ class RootAnatomy(Organ):
                 self.vascular_polygons.append(placed)
 
     def _remove_stele_seeds_near_xylem(self) -> None:
-        """Remove stele parenchyma seeds engulfed by xylem vessels (probe-overlap test)."""
+        """Remove stele parenchyma seeds engulfed by xylem vessels.
+
+        Two cases, both operated on entire id_groups:
+          1. Cell center is strictly inside a vessel circle.
+          2. Cell center is in the interstitial gap between vessels but closer
+             to the vessel boundary than its own radius — it is squeezed out.
+        """
         if not hasattr(self, "xylem_star") or self.xylem_star is None:
             return
         if not self.vascular_polygons:
             return
 
-        diam_max = self.vascular_params["xylem_diameter_max"]
-        probe_r = diam_max / 2
-        probe_area = np.pi * probe_r ** 2
-        xylem_union = unary_union(self.vascular_polygons)
-        pith_polygon = getattr(self, "pith_polygon", None)
+        xylem_union     = unary_union(self.vascular_polygons)
+        xylem_star_prep = prep(self.xylem_star)
+
+        groups_to_delete: set = set()
+        for c in self.all_cells.cells:
+            if c.type != "stele" or c.id_group in groups_to_delete:
+                continue
+            pt = Point(c.x, c.y)
+            if not xylem_star_prep.contains(pt):
+                continue
+            if xylem_union.contains(pt):
+                groups_to_delete.add(c.id_group)
 
         self.all_cells.cells = [
             c for c in self.all_cells.cells
-            if not (
-                c.type == "stele"
-                and self.xylem_star.contains(Point(c.x, c.y))
-                and (pith_polygon is None or not pith_polygon.contains(Point(c.x, c.y)))
-                and Point(c.x, c.y).buffer(probe_r).intersection(xylem_union).area / probe_area > 0.6
-            )
+            if c.id_group not in groups_to_delete
         ]
 
     def fit_phloem_elements(self, stele_polygon: Polygon, type="monocot"):
@@ -375,6 +385,7 @@ class RootAnatomy(Organ):
                 diameter_min=cell_diam,
                 diameter_sd=cell_sd,
                 gradient_function="normal",
+                rng=self.rng,
             )
 
             for pcx, pcy, r in packed:
@@ -547,7 +558,7 @@ class MonocotRootAnatomy(RootAnatomy):
         i_cell = 0
         for i_slice, slice in enumerate(slices):
             xylem_diameter = float(np.clip(
-                np.random.normal(
+                self.rng.normal(
                     self.vascular_params["xylem_diameter"],
                     self.vascular_params["xylem_diameter_sd"],
                 ),
@@ -674,6 +685,7 @@ class MonocotRootAnatomy(RootAnatomy):
             diameter_max=diameter,
             diameter_sd=p["protoxylem_diameter_sd"] * scale,
             gradient_function="normal",
+            rng=self.rng,
         )
 
         next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
@@ -729,6 +741,7 @@ class MonocotRootAnatomy(RootAnatomy):
             diameter_max=diameter,
             diameter_sd=p["phloem_diameter_sd"] * scale,
             gradient_function="normal",
+            rng=self.rng,
         )
 
         next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
@@ -829,6 +842,15 @@ class DicotRootAnatomy(RootAnatomy):
                 "outer_distance": float(sec_cam.get("outer_distance", 0.45)),
                 "arc_top":        float(sec_cam.get("arc_top",        0.05)),
                 "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
+            }
+
+            med_rays = next((p for p in self.params if p["name"] == "medullar_rays"), {})
+            self.medullar_rays_params = {
+                "n_medullar":         int(med_rays.get("n_medullar",         6)),
+                "base_width":         float(med_rays.get("base_width",       0.005)),
+                "cell_diameter":      float(med_rays.get("cell_diameter",    0.025)),
+                "cell_width":         float(med_rays.get("cell_width",       0.005)),
+                "allow_non_vascular": bool(med_rays.get("allow_non_vascular", False)),
             }
 
     # ------------------------------------------------------------------
@@ -1009,6 +1031,183 @@ class DicotRootAnatomy(RootAnatomy):
                         ))
         return next_id
 
+    def _build_medullar_ray_polygons(
+        self,
+        annular_zone,
+        vessel_zones: list,
+        primary_cambium_polygon,
+        cx: float,
+        cy: float,
+        r_outer_wedge: float,
+        n_peaks: int,
+        prop_stele: float,
+        mr_params: dict,
+    ) -> list:
+        """Build wedge-shaped polygons for each medullar ray.
+
+        When allow_non_vascular=False, rays are distributed evenly within the
+        secondary xylem pizza slices (n_medullar / n_peaks per slice).
+        When allow_non_vascular=True, rays are placed uniformly around the
+        full circle (2π / n_medullar spacing) and span the full annular zone.
+
+        The inner boundary comes from intersecting with the primary cambium
+        polygon; no explicit r_inner is needed.
+
+        Returns a list of (polygon, theta_c) tuples.
+        """
+        n_medullar = mr_params["n_medullar"]
+        if n_medullar <= 0:
+            return []
+
+        base_width         = mr_params["base_width"]
+        allow_non_vascular = mr_params["allow_non_vascular"]
+        cambium_exterior   = primary_cambium_polygon.exterior
+
+        if allow_non_vascular:
+            # Uniform angular spacing around the full annular zone
+            thetas    = [2.0 * np.pi * k / n_medullar for k in range(n_medullar)]
+            clip_zone = annular_zone
+        else:
+            valid_zones = [z for z in vessel_zones if z is not None and not z.is_empty]
+            if not valid_zones:
+                return []
+            clip_zone = unary_union(valid_zones)
+
+            if prop_stele >= 1.0:
+                # Full ring — distribute uniformly (same as allow_non_vascular=True)
+                thetas = [2.0 * np.pi * k / n_medullar for k in range(n_medullar)]
+            else:
+                # Distribute n_medullar rays evenly across the n_peaks pizza slices
+                full_angle  = 2.0 * np.pi / n_peaks
+                half_width  = full_angle * prop_stele / 2.0
+                rays_pp     = n_medullar // n_peaks      # rays per peak
+                extra       = n_medullar % n_peaks       # first `extra` peaks get one more
+                thetas = []
+                for pk in range(n_peaks):
+                    theta_zone = 2.0 * np.pi * (pk + 0.5) / n_peaks
+                    n_r        = rays_pp + (1 if pk < extra else 0)
+                    for j in range(n_r):
+                        # Evenly spaced within [-half_width, +half_width]
+                        offset = (2 * j + 1 - n_r) / max(n_r, 1) * half_width
+                        thetas.append(theta_zone + offset)
+
+        result = []
+        for theta_c in thetas:
+            ray_tip  = (cx + r_outer_wedge * np.cos(theta_c),
+                        cy + r_outer_wedge * np.sin(theta_c))
+            ray_line = LineString([(cx, cy), ray_tip])
+            rim      = cambium_exterior.intersection(ray_line)
+
+            if rim.is_empty:
+                r_inner = max(np.hypot(x - cx, y - cy) for x, y in cambium_exterior.coords)
+            elif rim.geom_type == "Point":
+                r_inner = np.hypot(rim.x - cx, rim.y - cy)
+            else:
+                pts = [pt for pt in rim.geoms if pt.geom_type == "Point"]
+                r_inner = (
+                    max(np.hypot(pt.x - cx, pt.y - cy) for pt in pts)
+                    if pts else
+                    max(np.hypot(x - cx, y - cy) for x, y in cambium_exterior.coords)
+                )
+
+            half_angle = base_width / (2.0 * max(r_inner, 1e-9))
+            arc_angles = np.linspace(theta_c - half_angle, theta_c + half_angle, 50)
+            wedge_pts  = [(cx, cy)] + [
+                (cx + r_outer_wedge * np.cos(a), cy + r_outer_wedge * np.sin(a))
+                for a in arc_angles
+            ]
+            raw_wedge = Polygon(wedge_pts)
+            poly      = raw_wedge.intersection(clip_zone)
+            if not poly.is_empty:
+                result.append((poly, theta_c))
+        return result
+
+    def _fill_medullar_rays(
+        self,
+        medullar_poly,
+        theta_c: float,
+        cx: float,
+        cy: float,
+        mr_params: dict,
+        start_id: int,
+    ) -> int:
+        """Fill a medullar ray polygon with medullar_ray cells.
+
+        The tangential width is held constant at base_width at every radius by
+        recomputing the angular half-extent as base_width / (2 * r) at each
+        step.  The number of lanes (= ceil(base_width / cell_width)) is fixed,
+        so cells neither grow wider nor require lane splitting as radius increases.
+        """
+        if medullar_poly is None or medullar_poly.is_empty:
+            return start_id
+
+        d_cell     = mr_params["cell_diameter"]
+        w_cell     = mr_params["cell_width"]
+        base_width = mr_params["base_width"]
+        n_lanes    = max(1, int(np.ceil(base_width / max(w_cell, 1e-9))))
+        lane_width = base_width / n_lanes   # constant tangential width per lane
+
+        geoms = list(medullar_poly.geoms) if hasattr(medullar_poly, "geoms") else [medullar_poly]
+
+        n_border     = 25
+        phi          = np.linspace(0.0, 2.0 * np.pi, n_border, endpoint=False)
+        border_cos   = np.cos(phi)
+        border_sin   = np.sin(phi)
+        border_scale = 0.7
+
+        next_id = start_id
+
+        for geom in geoms:
+            if geom.is_empty or geom.geom_type != "Polygon":
+                continue
+            geom_prep = prep(geom)
+
+            radii   = [np.hypot(x - cx, y - cy) for x, y in geom.exterior.coords]
+            r_inner = min(radii)
+            r_outer = max(radii)
+
+            # Start half a cell before the estimated inner boundary so the
+            # first valid seed sits flush against the primary cambium edge
+            # rather than leaving a gap that Voronoi inflates.
+            r = max(r_inner - d_cell / 2.0, d_cell / 2.0)
+            while r <= r_outer:
+                # Recompute angular range at each r to keep arc width = base_width
+                half_angle_r = base_width / (2.0 * r)
+                theta_lo_r   = theta_c - half_angle_r
+                theta_hi_r   = theta_c + half_angle_r
+
+                for lane in range(n_lanes):
+                    theta_mid = theta_lo_r + (lane + 0.5) * (theta_hi_r - theta_lo_r) / n_lanes
+                    px = cx + r * np.cos(theta_mid)
+                    py = cy + r * np.sin(theta_mid)
+
+                    if not geom_prep.contains(Point(px, py)):
+                        continue
+
+                    a_rad    = d_cell * 0.5 * border_scale
+                    b_tan    = lane_width * 0.5 * border_scale
+                    cos_t, sin_t = np.cos(theta_mid), np.sin(theta_mid)
+
+                    id_group = next_id
+                    next_id += 1
+
+                    for j in range(n_border):
+                        er = a_rad * border_cos[j]
+                        et = b_tan * border_sin[j]
+                        self.vascular_cells.add_cell(Cell(
+                            type="medullar_ray",
+                            x=px + er * cos_t - et * sin_t,
+                            y=py + er * sin_t + et * cos_t,
+                            diameter=d_cell,
+                            id_cell=id_group, id_group=id_group,
+                            angle=theta_mid, radius=r,
+                            area=np.pi * a_rad * b_tan,
+                        ))
+
+                r += d_cell
+
+        return next_id
+
     def _fill_ray_parenchyma(
         self,
         vessel_zones: list,
@@ -1063,7 +1262,7 @@ class DicotRootAnatomy(RootAnatomy):
             lines  = list(np.linspace(theta_lo, theta_hi, n_init + 1))
             thresholds = [
                 float(np.clip(
-                    np.random.uniform(0.7, 1.3) * split_threshold,
+                    self.rng.uniform(0.7, 1.3) * split_threshold,
                     0.5 * split_threshold, 1.5 * split_threshold,
                 ))
                 for _ in range(len(lines) - 1)
@@ -1080,11 +1279,11 @@ class DicotRootAnatomy(RootAnatomy):
                     if (a2 - a1) * r > thr:
                         new_lines.append((a1 + a2) / 2.0)
                         t_left = float(np.clip(
-                            thr + np.random.normal(0, noise_scale),
+                            thr + self.rng.normal(0, noise_scale),
                             0.5 * split_threshold, 1.5 * split_threshold,
                         ))
                         t_right = float(np.clip(
-                            thr + np.random.normal(0, noise_scale),
+                            thr + self.rng.normal(0, noise_scale),
                             0.5 * split_threshold, 1.5 * split_threshold,
                         ))
                         new_thresholds.extend([t_left, t_right])
@@ -1161,14 +1360,15 @@ class DicotRootAnatomy(RootAnatomy):
         full_angle_per_slice = 2.0 * np.pi / n_peaks
         half_width = full_angle_per_slice * sx["prop_stele"] / 2.0
 
+        # Outer radius used for wedge construction (large enough to always cover the annular zone)
+        minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
+        r_outer_wedge = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
+
         vessel_zones: List = []
         if sx["prop_stele"] >= 1.0:
             if not annular_zone.is_empty and annular_zone.area >= np.pi * (sx["vessel_diameter_min"] / 2) ** 2:
                 vessel_zones.append(annular_zone)
         else:
-            minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
-            outer_r = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
-
             for k in range(n_peaks):
                 theta = 2.0 * np.pi * (k + 0.5) / n_peaks
                 if half_width < 1e-9:
@@ -1176,7 +1376,7 @@ class DicotRootAnatomy(RootAnatomy):
                     continue
                 arc_angles = np.linspace(theta - half_width, theta + half_width, 50)
                 wedge_pts  = [(cx, cy)] + [
-                    (cx + outer_r * np.cos(a), cy + outer_r * np.sin(a)) for a in arc_angles
+                    (cx + r_outer_wedge * np.cos(a), cy + r_outer_wedge * np.sin(a)) for a in arc_angles
                 ]
                 raw_wedge = Polygon(wedge_pts)
                 zone = raw_wedge.intersection(annular_zone)
@@ -1192,77 +1392,135 @@ class DicotRootAnatomy(RootAnatomy):
                         zone = smoothed
                 vessel_zones.append(zone)
 
+        # Build medullar ray polygons BEFORE pack_circles so they can cut the vessel zones
+        mr_params = self.medullar_rays_params
+        medullar_ray_polys = []
+        medullar_union = None
+        if mr_params.get("n_medullar", 0) > 0:
+            medullar_ray_polys = self._build_medullar_ray_polygons(
+                annular_zone, vessel_zones, primary_cambium_polygon,
+                cx, cy, r_outer_wedge, n_peaks, sx["prop_stele"], mr_params,
+            )
+            if medullar_ray_polys:
+                all_mr_geoms = []
+                for poly, _ in medullar_ray_polys:
+                    if hasattr(poly, "geoms"):
+                        all_mr_geoms.extend(g for g in poly.geoms if not g.is_empty)
+                    elif not poly.is_empty:
+                        all_mr_geoms.append(poly)
+                if all_mr_geoms:
+                    medullar_union = unary_union(all_mr_geoms)
+                    # Remove cambium seeds that fall inside the medullar ray corridors.
+                    # Buffer outward so that border points on or just outside the
+                    # secondary cambium boundary ring are also caught.
+                    mr_cambium_zone = prep(medullar_union.buffer(sc["cell_diameter"]))
+                    self.vascular_cells.cells = [
+                        c for c in self.vascular_cells.cells
+                        if not (c.type == "cambium" and mr_cambium_zone.contains(Point(c.x, c.y)))
+                    ]
+
         all_vessel_polys: List[Polygon] = []
         next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
 
-        for zone in vessel_zones:
-            if zone is None or zone.is_empty:
+        for original_zone in vessel_zones:
+            if original_zone is None or original_zone.is_empty:
                 continue
 
-            packed = GeometryProcessor.pack_circles(
-                zone,
-                proportion=sx["prop_vessel_ring"],
-                direction="center",
-                diameter_max=sx["vessel_diameter"],
-                diameter_min=sx["vessel_diameter_min"],
-                diameter_sd=sx["vessel_diameter_sd"],
-                gradient_function=sx["gradient_function"],
-                gradient_inflection=sx["gradient_inflection"],
-                gradient_steepness=sx["gradient_steepness"],
-                gradient_asymmetry=sx["gradient_asymmetry"],
-                adjacent=sx["must_be_adjacent"],
-                gradient_center=(cx, cy),
-            )
-            zone_vessel_polys: List[Polygon] = []
-
-            for pcx, pcy, r in packed:
-                actual_diam = r * 2
-                placed      = Point(pcx, pcy).buffer(r, resolution=32)
-                placed_buff = placed.buffer(-r * 0.15)
-                if placed_buff.is_empty:
-                    continue
-                bx, by = placed_buff.exterior.coords.xy
-                border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=25)
-                center   = placed.centroid
-                id_group = next_id
-                next_id += 1
-                for border_pt in border_coords[1:]:
-                    self.vascular_cells.add_cell(Cell(
-                        type="xylem",
-                        x=border_pt[0], y=border_pt[1],
-                        diameter=actual_diam,
-                        id_cell=id_group, id_group=id_group,
-                        angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
-                        radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
-                        area=np.pi * r ** 2,
-                    ))
-                zone_vessel_polys.append(placed)
-                all_vessel_polys.append(placed)
-
-            if zone_vessel_polys:
-                vessel_union_in_zone = unary_union(zone_vessel_polys)
-                axial_zone = zone.difference(vessel_union_in_zone)
+            # Split the vessel zone by medullar rays; each fragment is filled independently
+            if medullar_union is not None and not medullar_union.is_empty:
+                remaining = original_zone.difference(medullar_union)
             else:
-                axial_zone = zone
+                remaining = original_zone
 
-            erosion_poly = secondary_cambium_polygon if sx["prop_stele"] >= 1.0 else zone
-            next_id = self._fill_zone_with_cells(
-                axial_zone, sx["cell_diameter"], sx["cell_width"], "stele",
-                cx, cy, next_id, erosion_polygon=erosion_poly,
-            )
+            if remaining.is_empty:
+                sub_zones = []
+            elif hasattr(remaining, "geoms"):
+                sub_zones = [g for g in remaining.geoms if g.geom_type == "Polygon" and not g.is_empty]
+            else:
+                sub_zones = [remaining] if remaining.geom_type == "Polygon" else []
 
-        ray_annular_zone = secondary_cambium_polygon.buffer(
-            -sc["cell_diameter"]
-        ).difference(primary_cambium_polygon)
+            for zone in sub_zones:
+                packed = GeometryProcessor.pack_circles(
+                    zone,
+                    proportion=sx["prop_vessel_ring"],
+                    direction="center",
+                    diameter_max=sx["vessel_diameter"],
+                    diameter_min=sx["vessel_diameter_min"],
+                    diameter_sd=sx["vessel_diameter_sd"],
+                    gradient_function=sx["gradient_function"],
+                    gradient_inflection=sx["gradient_inflection"],
+                    gradient_steepness=sx["gradient_steepness"],
+                    gradient_asymmetry=sx["gradient_asymmetry"],
+                    adjacent=sx["must_be_adjacent"],
+                    gradient_center=(cx, cy),
+                    rng=self.rng,
+                )
+                zone_vessel_polys: List[Polygon] = []
+
+                for pcx, pcy, r in packed:
+                    actual_diam = r * 2
+                    placed      = Point(pcx, pcy).buffer(r, resolution=32)
+                    placed_buff = placed.buffer(-r * 0.15)
+                    if placed_buff.is_empty:
+                        continue
+                    bx, by = placed_buff.exterior.coords.xy
+                    border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=25)
+                    center   = placed.centroid
+                    id_group = next_id
+                    next_id += 1
+                    for border_pt in border_coords[1:]:
+                        self.vascular_cells.add_cell(Cell(
+                            type="xylem",
+                            x=border_pt[0], y=border_pt[1],
+                            diameter=actual_diam,
+                            id_cell=id_group, id_group=id_group,
+                            angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
+                            radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
+                            area=np.pi * r ** 2,
+                        ))
+                    zone_vessel_polys.append(placed)
+                    all_vessel_polys.append(placed)
+
+                if zone_vessel_polys:
+                    vessel_union_in_zone = unary_union(zone_vessel_polys)
+                    axial_zone = zone.difference(vessel_union_in_zone)
+                else:
+                    axial_zone = zone
+
+                erosion_poly = secondary_cambium_polygon if sx["prop_stele"] >= 1.0 else zone
+                next_id = self._fill_zone_with_cells(
+                    axial_zone, sx["cell_diameter"], sx["cell_width"], "stele",
+                    cx, cy, next_id, erosion_polygon=erosion_poly,
+                )
 
         r_outer = max(
             np.hypot(x - cx, y - cy)
             for x, y in secondary_cambium_polygon.exterior.coords
         ) - sc["cell_diameter"]
 
+        ray_annular_zone = secondary_cambium_polygon.buffer(
+            -sc["cell_diameter"]
+        ).difference(primary_cambium_polygon)
+        # Only exclude medullar areas from the ray zone when they can extend
+        # into the gap region (allow_non_vascular=True).  When False, medullar
+        # rays are fully inside the vessel pizza slices which _fill_ray_parenchyma
+        # already subtracts, so a second subtraction is unnecessary and can
+        # introduce floating-point artefacts that suppress ray parenchyma.
+        if (medullar_union is not None and not medullar_union.is_empty
+                and mr_params.get("allow_non_vascular", False)):
+            # Small outward buffer prevents ray-parenchyma seeds from landing
+            # right on the corridor wall, which would let their Voronoi cells
+            # crush the adjacent medullar-ray cells.
+            mr_exclusion = medullar_union.buffer(mr_params.get("cell_diameter", 0.025) / 2.0)
+            ray_annular_zone = ray_annular_zone.difference(mr_exclusion)
+
         if not ray_annular_zone.is_empty:
             next_id = self._fill_ray_parenchyma(
                 vessel_zones, ray_annular_zone, cx, cy, sx, r_outer, n_peaks, next_id,
             )
+
+        # Fill medullar ray zones with medullar_ray cells
+        for poly, theta_c in medullar_ray_polys:
+            next_id = self._fill_medullar_rays(poly, theta_c, cx, cy, mr_params, next_id)
 
         self.vascular_polygons.extend(all_vessel_polys)
