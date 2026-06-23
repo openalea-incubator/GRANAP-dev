@@ -1,0 +1,426 @@
+"""Reusable tissue-building vocabulary.
+
+This module extracts the low-level, organ-agnostic primitives that were
+previously duplicated across the ``fit_*`` methods of the anatomy classes.
+It is the *generative* half of a tag-based, compositional model:
+
+    generative primitives  -- create cells inside a zone
+        place_packed_group   : seed every circle of a pre-computed packing
+        fill_by_packing      : pack a zone with circles, then seed each
+        fill_along           : seed cells along a polygon edge / line
+        fill_by_rings        : seed concentric inward rings inside a zone
+
+    Tissue (shape-first)    -- a tagged anatomical *region* (a shapely shape)
+        .rotate / .translate : pure-geometry transforms of the region
+        .smooth              : smooth the region boundary (pre-fill)
+        .difference / .intersection / .union : region algebra
+
+    edit verbs              -- the only verb valid on a filled cell
+        retag_tissue         : rename a tag
+
+    composition             -- order primitives into an explicit recipe
+        TissueStep           : one named build step (+ the tags it produces)
+        TissueRecipe         : an ordered, inspectable list of steps
+
+The model is **shape-first**: a tissue is its region, manipulated as geometry,
+and *then* filled with cells by a ``fill_*`` primitive.  Cells are the terminal
+product of filling (retag-only).  The fill primitives operate on a
+:class:`~openalea.granap.cell_manager.CellManager`, so the same vocabulary builds
+vascular tissue, layer tissue, or any future organ.  Higher-level "recipes"
+(monocot, dicot, needle) compose these pieces instead of re-implementing loops.
+"""
+
+from typing import Callable, List, Optional, Tuple, Union
+
+import numpy as np
+from shapely.geometry import Point, Polygon
+from shapely.affinity import rotate as _shapely_rotate, translate as _shapely_translate
+from shapely.prepared import prep
+
+from openalea.granap.cell_class import Cell
+from openalea.granap.cell_manager import CellManager
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.generate_cell import CellGenerator
+
+
+# ---------------------------------------------------------------------------
+# Generative primitives
+# ---------------------------------------------------------------------------
+
+def place_packed_group(
+    target: CellManager,
+    packed,
+    cell_type: str,
+    *,
+    n_border: int = 25,
+    id_base: int = 0,
+    angle_center: Optional[Tuple[float, float]] = None,
+    min_diameter: Optional[float] = None,
+    alt_type: Optional[str] = None,
+) -> List[Tuple[Polygon, str, int]]:
+    """Place border-point seeds for every circle of a circle-packing.
+
+    This is the common pattern behind metaxylem/protoxylem/phloem packing:
+    for each packed circle ``(cx, cy, r)`` a slightly shrunk ring of border
+    points is resampled and added as a single Voronoi group.
+
+    Args:
+        target: CellManager the new cells are appended to.
+        packed: iterable of ``(cx, cy, r)`` tuples (output of ``pack_circles``).
+        cell_type: tag assigned to the cells.  When ``min_diameter`` is given,
+            this is the tag for circles whose diameter is >= ``min_diameter``.
+        n_border: number of border points resampled per circle (24 or 25 in the
+            legacy code).
+        id_base: ``id_group`` of circle *i* is ``id_base + i``.  Each circle is
+            therefore its own Voronoi group, with disjoint ranges between calls.
+        angle_center: ``(cx, cy)`` reference used for the per-seed ``angle`` /
+            ``radius`` attributes.  ``None`` uses each circle's own centroid.
+        min_diameter: optional diameter threshold to split a single packing into
+            two tags (e.g. wide vessels -> "xylem", narrow -> "stele").
+        alt_type: tag assigned to circles below ``min_diameter``.
+
+    Returns:
+        List of ``(placed_polygon, resolved_type, id_group)`` for every circle
+        actually placed, so the caller can record vascular polygons selectively.
+    """
+    placed_out: List[Tuple[Polygon, str, int]] = []
+
+    for i, (pcx, pcy, r) in enumerate(packed):
+        actual_diam = r * 2
+        placed = Point(pcx, pcy).buffer(r, resolution=32)
+        placed_buff = placed.buffer(-r * 0.15)
+        if placed_buff.is_empty:
+            continue
+
+        bx, by = placed_buff.exterior.coords.xy
+        border_coords = GeometryProcessor.resample_coords(
+            np.column_stack((bx, by)), target_n_points=n_border
+        )
+
+        if angle_center is None:
+            acx, acy = placed.centroid.x, placed.centroid.y
+        else:
+            acx, acy = angle_center
+
+        if min_diameter is not None:
+            rtype = cell_type if actual_diam >= min_diameter else alt_type
+        else:
+            rtype = cell_type
+
+        gid = id_base + i
+        for border_pt in border_coords[1:]:
+            target.add_cell(Cell(
+                type=rtype,
+                x=border_pt[0], y=border_pt[1],
+                diameter=actual_diam,
+                id_cell=gid, id_group=gid,
+                angle=np.arctan2(border_pt[1] - acy, border_pt[0] - acx),
+                radius=np.sqrt((border_pt[0] - acx) ** 2 + (border_pt[1] - acy) ** 2),
+                area=np.pi * r ** 2,
+            ))
+        placed_out.append((placed, rtype, gid))
+
+    return placed_out
+
+
+def fill_along(
+    target: CellManager,
+    geometry,
+    cell_type: str,
+    cell_diam: float,
+    cell_width: float,
+    cx: float,
+    cy: float,
+    xylem_union=None,
+) -> None:
+    """Place cell seeds along a geometry edge (Polygon exterior or line).
+
+    Each resampled position along the edge becomes one Voronoi group, oriented
+    by its local tangent (via ``CellGenerator.cell_border``).  Positions falling
+    inside ``xylem_union`` are skipped (but still consume an id_group, matching
+    the legacy behaviour).
+    """
+    if isinstance(geometry, Polygon):
+        line_segs = [geometry.exterior]
+    elif hasattr(geometry, "geoms"):
+        line_segs = list(geometry.geoms)
+    else:
+        line_segs = [geometry]
+
+    next_id_group = (target.get_last_id_group() + 1) if target.cells else 0
+
+    for line_seg in line_segs:
+        raw_coords = np.array(line_seg.coords)
+        seg_length = line_seg.length
+        n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
+        cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
+        if len(cells_coords) < 2:
+            continue
+
+        cell_borders = CellGenerator.cell_border(
+            cells_coords,
+            cell_width * 0.7 if cell_width else cell_diam * 0.7,
+            cell_diam * 0.7 if cell_width else 0,
+        )
+
+        for i, _coord in enumerate(cells_coords[1:]):
+            if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
+                next_id_group += 1
+                continue
+            id_group = next_id_group
+            next_id_group += 1
+            for border_pt in cell_borders[i][1:]:
+                target.add_cell(Cell(
+                    type=cell_type,
+                    x=border_pt[0], y=border_pt[1],
+                    diameter=cell_diam,
+                    id_cell=id_group, id_group=id_group,
+                    angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                    radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                    area=np.pi * (cell_diam / 2) ** 2,
+                ))
+
+
+def fill_by_rings(
+    target: CellManager,
+    fill_zone,
+    cell_diameter: float,
+    cell_width: float,
+    cell_type: str,
+    cx: float,
+    cy: float,
+    start_id: int,
+    erosion_polygon=None,
+) -> int:
+    """Fill a polygon zone with seeds on concentric inward rings.
+
+    Buffers ``fill_zone`` (or ``erosion_polygon`` if given) inward one cell at a
+    time, seeding each ring.  When ``erosion_polygon`` is supplied the rings are
+    eroded from it but filtered to stay inside ``fill_zone``.
+
+    Returns the next free ``id_group`` so callers can chain multiple zones.
+    """
+    if fill_zone is None or fill_zone.is_empty:
+        return start_id
+    if fill_zone.area < np.pi * (cell_diameter / 2) ** 2:
+        return start_id
+
+    next_id  = start_id
+    space    = cell_diameter / 2
+    tang     = cell_width if cell_width else cell_diameter
+    current  = erosion_polygon if erosion_polygon is not None else fill_zone
+    filter_z = prep(fill_zone) if erosion_polygon is not None else None
+
+    while not current.is_empty and current.area > (cell_diameter / 2) ** 2 * np.pi:
+        current = current.buffer(-space - cell_diameter / 2, resolution=16)
+        if current.is_empty:
+            break
+        space = cell_diameter / 2
+
+        geoms = list(current.geoms) if hasattr(current, "geoms") else [current]
+        for geom in geoms:
+            if geom.is_empty or geom.geom_type != "Polygon":
+                continue
+            seed_coords  = CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)
+            border_rings = CellGenerator.cell_border(seed_coords, tang * 0.7, cell_diameter * 0.7)
+            for pt, border_pts in zip(seed_coords[1:], border_rings[1:]):
+                if filter_z is not None and not filter_z.contains(Point(pt[0], pt[1])):
+                    continue
+                id_group    = next_id
+                next_id    += 1
+                cell_angle  = np.arctan2(pt[1] - cy, pt[0] - cx)
+                cell_radius = np.sqrt((pt[0] - cx) ** 2 + (pt[1] - cy) ** 2)
+                for border_pt in border_pts[1:]:
+                    if filter_z is not None and not filter_z.contains(Point(border_pt[0], border_pt[1])):
+                        continue
+                    target.add_cell(Cell(
+                        type=cell_type,
+                        x=border_pt[0], y=border_pt[1],
+                        diameter=cell_diameter,
+                        id_cell=id_group, id_group=id_group,
+                        angle=cell_angle, radius=cell_radius,
+                        area=np.pi * (cell_diameter / 2) ** 2,
+                    ))
+    return next_id
+
+
+def fill_by_packing(
+    target: CellManager,
+    zone,
+    cell_type: str,
+    *,
+    rng,
+    n_border: int = 25,
+    id_base: Optional[int] = None,
+    angle_center: Optional[Tuple[float, float]] = None,
+    min_diameter: Optional[float] = None,
+    alt_type: Optional[str] = None,
+    **pack_kwargs,
+) -> List[Tuple[Polygon, str, int]]:
+    """Fill a zone by circle-packing, then seed each circle (zone-level verb).
+
+    Combines ``GeometryProcessor.pack_circles`` with :func:`place_packed_group`
+    so a recipe can express "fill this zone by packing" as a single step,
+    symmetric with :func:`fill_along` and :func:`fill_by_rings`.
+
+    ``id_base`` defaults to one past the highest ``id_group`` already in
+    ``target``, so successive calls land in disjoint id ranges (each packed
+    circle is its own Voronoi group).  ``**pack_kwargs`` is forwarded verbatim
+    to ``pack_circles`` (``proportion``, ``diameter_max``, ``gradient_*`` ...).
+
+    Returns the :func:`place_packed_group` output.
+    """
+    if id_base is None:
+        id_base = (target.get_last_id_group() + 1) if target.cells else 0
+    packed = GeometryProcessor.pack_circles(zone, rng=rng, **pack_kwargs)
+    return place_packed_group(
+        target, packed, cell_type,
+        n_border=n_border, id_base=id_base, angle_center=angle_center,
+        min_diameter=min_diameter, alt_type=alt_type,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tissue -- a tagged anatomical region (shape-first); cells are a fill product
+# ---------------------------------------------------------------------------
+
+def _as_shape(other):
+    """Accept a :class:`Tissue` or a raw shapely geometry; return the geometry."""
+    return other.shape if isinstance(other, Tissue) else other
+
+
+class Tissue:
+    """A tagged anatomical region: a shapely shape plus the tag its cells take.
+
+    Shape-first: a tissue *is* its region, manipulated as pure geometry
+    (rotate / translate / smooth / boolean-combine) entirely before any cell
+    exists.  Filling the region with cells (the ``fill_*`` primitives, given
+    ``tissue.shape`` and ``tissue.tag``) is a separate, terminal step; the
+    resulting cells are retag-only (:func:`retag_tissue`).
+
+    Every transform mutates ``self.shape`` in place and returns ``self`` so they
+    can be chained, e.g. ``Tissue("phloem", e).intersection(stele).difference(xylem)``.
+    """
+
+    def __init__(self, tag: str, shape):
+        self.tag = tag
+        self.shape = shape
+
+    # -- pure-geometry transforms -------------------------------------------
+    def rotate(self, angle: float, origin: Tuple[float, float] = (0.0, 0.0)) -> "Tissue":
+        """Rotate the region by ``angle`` degrees about ``origin``."""
+        self.shape = _shapely_rotate(self.shape, angle, origin=origin)
+        return self
+
+    def translate(self, dx: float, dy: float) -> "Tissue":
+        """Translate the region by ``(dx, dy)``."""
+        self.shape = _shapely_translate(self.shape, xoff=dx, yoff=dy)
+        return self
+
+    def smooth(self, smoothness: float) -> "Tissue":
+        """Smooth the region boundary (pre-fill, pure geometry)."""
+        if smoothness:
+            self.shape = GeometryProcessor.buffer_polygon(
+                self.shape, 0, smooth_factor=smoothness
+            )
+        return self
+
+    # -- region algebra ------------------------------------------------------
+    def difference(self, other) -> "Tissue":
+        """Subtract another region (Tissue or shapely geometry) from this one."""
+        self.shape = self.shape.difference(_as_shape(other))
+        return self
+
+    def intersection(self, other) -> "Tissue":
+        """Clip this region to another (Tissue or shapely geometry)."""
+        self.shape = self.shape.intersection(_as_shape(other))
+        return self
+
+    def union(self, other) -> "Tissue":
+        """Merge another region (Tissue or shapely geometry) into this one."""
+        self.shape = self.shape.union(_as_shape(other))
+        return self
+
+    # -- queries -------------------------------------------------------------
+    @property
+    def is_empty(self) -> bool:
+        return self.shape is None or self.shape.is_empty
+
+    @property
+    def area(self) -> float:
+        return 0.0 if self.is_empty else self.shape.area
+
+    def __repr__(self) -> str:
+        return f"Tissue({self.tag!r}, area={self.area:.4g})"
+
+
+# ---------------------------------------------------------------------------
+# Edit verbs -- the only verb valid on a filled cell is retag
+# ---------------------------------------------------------------------------
+
+def retag_tissue(target: CellManager, old_tag: str, new_tag: str) -> int:
+    """Rename every cell tagged ``old_tag`` to ``new_tag``.
+
+    The terminal cell-level edit: once a region is filled, cells are inert
+    except for their tag.  Returns the number of cells retagged.
+    """
+    n = 0
+    for c in target.cells:
+        if c.type == old_tag:
+            c.type = new_tag
+            n += 1
+    return n
+
+
+# ---------------------------------------------------------------------------
+# Composition -- order primitives into an explicit recipe
+# ---------------------------------------------------------------------------
+
+class TissueStep:
+    """One named step of a tissue-build recipe.
+
+    A step is just a label, the tags it is expected to produce, and a callable
+    that performs the work (typically a closure over one or more of the
+    primitives / edit verbs above, or an existing ``fit_*`` method).  Keeping
+    the build order as data — rather than buried in control flow — lets a recipe
+    be inspected (:meth:`TissueRecipe.describe`), reordered, or extended with
+    edit-verb steps without touching the generators.
+    """
+
+    def __init__(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()):
+        self.name = name
+        self.fn = fn
+        self.produces = tuple(produces)
+
+    def run(self) -> None:
+        self.fn()
+
+    def __repr__(self) -> str:
+        tags = ", ".join(self.produces)
+        return f"TissueStep({self.name!r}, produces=[{tags}])"
+
+
+class TissueRecipe:
+    """An ordered, inspectable sequence of :class:`TissueStep` objects."""
+
+    def __init__(self, steps: Optional[List[TissueStep]] = None):
+        self.steps: List[TissueStep] = list(steps) if steps else []
+
+    def add(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()) -> "TissueRecipe":
+        self.steps.append(TissueStep(name, fn, produces=produces))
+        return self
+
+    def build(self) -> None:
+        """Run every step in order."""
+        for step in self.steps:
+            step.run()
+
+    def describe(self) -> List[Tuple[str, Tuple[str, ...]]]:
+        """Return ``(name, produces)`` for each step, for inspection / preview."""
+        return [(s.name, s.produces) for s in self.steps]
+
+    def __iter__(self):
+        return iter(self.steps)
+
+    def __len__(self):
+        return len(self.steps)

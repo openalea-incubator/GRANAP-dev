@@ -339,10 +339,10 @@ class CellGenerator:
         return all_cells
 
     @staticmethod
-    def voronoi_diagram(all_cells: CellManager) -> Voronoi:
+    def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
         # get all x and y coordinates
         for cell in all_cells.cells:
-            cell.jitter()
+            cell.jitter(rng=rng)
         cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells.cells])
         vor = Voronoi(cells_df[["x", "y"]])
         return vor

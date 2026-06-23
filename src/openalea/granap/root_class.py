@@ -21,6 +21,10 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
+from openalea.granap.tissue_builder import (
+    place_packed_group, fill_by_packing, fill_along, fill_by_rings,
+    TissueRecipe, Tissue,
+)
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
 
@@ -219,7 +223,13 @@ class RootAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def fit_star_shapped_xylem(self, stele_polygon: Polygon):
-        """Pack metaxylem vessels inside the star-shaped xylem region."""
+        """Build the star-shaped xylem *region*, then pack metaxylem vessels into it.
+
+        Shape-first: the star is assembled and clipped by region algebra
+        (place at the stele centre, clip to the stele, subtract the pith), then
+        the region is filled by circle-packing with a diameter split into
+        wide vessels ("xylem") and the narrow interstitial cells ("stele").
+        """
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
 
@@ -237,25 +247,31 @@ class RootAnatomy(Organ):
         star_coord = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.6, iterations=3,
         )
-        star = Polygon(star_coord).buffer(0)
-        star = translate(star, cx, cy).intersection(stele_polygon)
-        if star.is_empty:
+
+        xylem = (
+            Tissue("xylem", Polygon(star_coord).buffer(0))
+            .translate(cx, cy)
+            .intersection(stele_polygon)
+        )
+        if xylem.is_empty:
             return
 
         pith_r = p.get("pith_radius", 0.0)
         if pith_r and pith_r > 0.0:
-            pith_circle = Point(cx, cy).buffer(pith_r)
-            self.pith_polygon = pith_circle
-            star = star.difference(pith_circle)
+            self.pith_polygon = Point(cx, cy).buffer(pith_r)
+            xylem.difference(self.pith_polygon)
         else:
             self.pith_polygon = None
 
-        self.xylem_star = star
+        self.xylem_star = xylem.shape
 
-        packed = GeometryProcessor.pack_circles(
-            star,
-            proportion=1.0,
-            direction=p["xylem_direction"],
+        self.vascular_cells = CellManager()
+        self.vascular_polygons = []
+        placed_out = fill_by_packing(
+            self.vascular_cells, xylem.shape, xylem.tag, rng=self.rng,
+            n_border=25, id_base=0, angle_center=None,
+            min_diameter=p["xylem_diameter_min"], alt_type="stele",
+            proportion=1.0, direction=p["xylem_direction"],
             diameter_max=p["xylem_diameter_max"],
             diameter_min=p["xylem_diameter_min"],
             diameter_sd=p["xylem_diameter_sd"],
@@ -264,48 +280,22 @@ class RootAnatomy(Organ):
             gradient_steepness=p["xylem_gradient_steepness"],
             gradient_asymmetry=p["xylem_gradient_asymmetry"],
             first_circle_shift=p["xylem_first_vessel_shift"],
-            rng=self.rng,
         )
-
-        self.vascular_cells = CellManager()
-        self.vascular_polygons = []
-        min_diam = p["xylem_diameter_min"]
-
-        for i_cell, (pcx, pcy, r) in enumerate(packed):
-            actual_diam = r * 2
-            placed = Point(pcx, pcy).buffer(r, resolution=32)
-            cell_type = "xylem" if actual_diam >= min_diam else "stele"
-            placed_buff = placed.buffer(-r * 0.15)
-            if placed_buff.is_empty:
-                continue
-
-            bx, by = placed_buff.exterior.coords.xy
-            border_coords = GeometryProcessor.resample_coords(
-                np.column_stack((bx, by)), target_n_points=25
-            )
-            center = placed.centroid
-
-            for border_pt in border_coords[1:]:
-                self.vascular_cells.add_cell(Cell(
-                    type=cell_type,
-                    x=border_pt[0], y=border_pt[1],
-                    diameter=actual_diam,
-                    id_cell=i_cell, id_group=i_cell,
-                    angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
-                    radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
-                    area=np.pi * r ** 2,
-                ))
-
-            if cell_type == "xylem":
+        for placed, rtype, _gid in placed_out:
+            if rtype == "xylem":
                 self.vascular_polygons.append(placed)
 
     def _remove_stele_seeds_near_xylem(self) -> None:
-        """Remove stele parenchyma seeds engulfed by xylem vessels.
+        """Remove stele parenchyma cells engulfed by xylem vessels.
 
-        Two cases, both operated on entire id_groups:
-          1. Cell center is strictly inside a vessel circle.
-          2. Cell center is in the interstitial gap between vessels but closer
-             to the vessel boundary than its own radius — it is squeezed out.
+        This is a *group-level* cleanup, deliberately NOT replaced by the unified
+        region mask in ``Organ.generate_cells``: that mask removes individual
+        seeds whose point lies inside a vascular region, which would leave the
+        rest of an engulfed parenchyma cell's border seeds in place and produce a
+        partial, distorted Voronoi cell straddling the vessels.  Here, if any seed
+        of an ``id_group`` lands inside a vessel the whole cell is dropped.
+        (Removing this step leaves ~90 such partial cells in the default star
+        root — stele 217 -> 307.)
         """
         if not hasattr(self, "xylem_star") or self.xylem_star is None:
             return
@@ -330,8 +320,15 @@ class RootAnatomy(Organ):
             if c.id_group not in groups_to_delete
         ]
 
-    def fit_phloem_elements(self, stele_polygon: Polygon, type="monocot"):
-        """Place one phloem ellipse per valley between xylem peaks."""
+    def _phloem_valley_zones(self, stele_polygon: Polygon, type="monocot"):
+        """Build the phloem regions: one :class:`Tissue` per valley between peaks.
+
+        Shape-first — each valley starts as a ``Tissue("phloem", ellipse)`` and is
+        shaped purely by region algebra: clipped to the stele and carved out of
+        the xylem star.  Returns ``(tissues, adjustment)``; the cells are filled
+        in later by :meth:`fit_phloem_elements`.  ``adjustment`` is the clearance
+        used when recording the region for the stele-clearing mask.
+        """
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
         n_peaks = p["n_vascular_peak"]
@@ -339,7 +336,6 @@ class RootAnatomy(Organ):
         width     = p["phloem_width"]
         height    = p["phloem_height"]
         cell_diam = p["phloem_diameter"]
-        cell_sd   = p["phloem_diameter_sd"]
         relative_distance = p["relative_phloem"]
 
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
@@ -356,8 +352,8 @@ class RootAnatomy(Organ):
         )
 
         xylem_star = getattr(self, "xylem_star", None)
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
-
+        min_area = np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015)
+        tissues = []
         for k in range(n_peaks):
             theta = 2 * np.pi * (k + 0.5) / n_peaks
 
@@ -366,52 +362,41 @@ class RootAnatomy(Organ):
             raw = rotate(raw, np.degrees(theta) - 90, origin=(0, 0))
             raw = translate(raw, cx + r_center * np.cos(theta), cy + r_center * np.sin(theta))
 
-            ellipse = raw.intersection(stele_polygon)
+            tissue = Tissue("phloem", raw).intersection(stele_polygon)
             if xylem_star is not None and not xylem_star.is_empty:
-                ellipse = ellipse.difference(xylem_star)
-            if ellipse.is_empty or ellipse.area < np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015):
+                tissue.difference(xylem_star)
+            if tissue.is_empty or tissue.area < min_area:
                 continue
+            tissues.append(tissue)
 
-            # Store the buffered ellipse so the systematic vascular mask in
-            # generate_cells() removes stele seeds with the correct clearance.
-            self.vascular_tissue_polygons.setdefault("phloem", []).append(
-                GeometryProcessor.buffer_polygon(ellipse, adjustment / 2)
+        return tissues, adjustment
+
+    def fit_phloem_elements(self, stele_polygon: Polygon, type="monocot"):
+        """Place one phloem cluster per valley between the xylem peaks.
+
+        Shape-first vocabulary: build the valley *regions*
+        (:meth:`_phloem_valley_zones`), then fill each region's shape by
+        circle-packing (:func:`fill_by_packing`).  No bespoke seeding loop here.
+        """
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        cell_diam = p["phloem_diameter"]
+        cell_sd   = p["phloem_diameter_sd"]
+
+        tissues, adjustment = self._phloem_valley_zones(stele_polygon, type)
+        for tissue in tissues:
+            # Record the region so the systematic vascular mask in generate_cells()
+            # removes stele seeds with the correct clearance.
+            self.vascular_tissue_polygons.setdefault(tissue.tag, []).append(
+                GeometryProcessor.buffer_polygon(tissue.shape, adjustment / 2)
             )
-
-            packed = GeometryProcessor.pack_circles(
-                ellipse,
-                proportion=1.0,
-                direction=None,
-                diameter_max=cell_diam,
-                diameter_min=cell_diam,
-                diameter_sd=cell_sd,
-                gradient_function="normal",
-                rng=self.rng,
+            fill_by_packing(
+                self.vascular_cells, tissue.shape, tissue.tag, rng=self.rng,
+                n_border=25, angle_center=(cx, cy),
+                proportion=1.0, direction=None,
+                diameter_max=cell_diam, diameter_min=cell_diam,
+                diameter_sd=cell_sd, gradient_function="normal",
             )
-
-            for pcx, pcy, r in packed:
-                actual_diam = r * 2
-                placed = Point(pcx, pcy).buffer(r, resolution=32)
-                placed_buff = placed.buffer(-r * 0.15)
-                if placed_buff.is_empty:
-                    continue
-
-                bx, by = placed_buff.exterior.coords.xy
-                border_coords = GeometryProcessor.resample_coords(
-                    np.column_stack((bx, by)), target_n_points=25
-                )
-                id_group = next_id_group
-                next_id_group += 1
-                for border_pt in border_coords[1:]:
-                    self.vascular_cells.add_cell(Cell(
-                        type="phloem",
-                        x=border_pt[0], y=border_pt[1],
-                        diameter=actual_diam,
-                        id_cell=id_group, id_group=id_group,
-                        angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
-                        radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
-                        area=np.pi * r ** 2,
-                    ))
 
     # ------------------------------------------------------------------
     # Shared low-level rendering helper
@@ -428,45 +413,10 @@ class RootAnatomy(Organ):
         xylem_union=None,
     ) -> None:
         """Place cell seeds along a geometry (Polygon exterior or LineString/MultiLineString)."""
-        if isinstance(geometry, Polygon):
-            line_segs = [geometry.exterior]
-        elif hasattr(geometry, "geoms"):
-            line_segs = list(geometry.geoms)
-        else:
-            line_segs = [geometry]
-
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
-
-        for line_seg in line_segs:
-            raw_coords = np.array(line_seg.coords)
-            seg_length = line_seg.length
-            n_cells = max(2, int(np.ceil(seg_length / (cell_width or cell_diam))))
-            cells_coords = GeometryProcessor.resample_coords(raw_coords, n_cells)
-            if len(cells_coords) < 2:
-                continue
-
-            cell_borders = CellGenerator.cell_border(
-                cells_coords,
-                cell_width * 0.7 if cell_width else cell_diam * 0.7,
-                cell_diam  * 0.7 if cell_width else 0,
-            )
-
-            for i, _coord in enumerate(cells_coords[1:]):
-                if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
-                    next_id_group += 1
-                    continue
-                id_group = next_id_group
-                next_id_group += 1
-                for border_pt in cell_borders[i][1:]:
-                    self.vascular_cells.add_cell(Cell(
-                        type=cell_type,
-                        x=border_pt[0], y=border_pt[1],
-                        diameter=cell_diam,
-                        id_cell=id_group, id_group=id_group,
-                        angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
-                        radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
-                        area=np.pi * (cell_diam / 2) ** 2,
-                    ))
+        fill_along(
+            self.vascular_cells, geometry, cell_type, cell_diam, cell_width,
+            cx, cy, xylem_union=xylem_union,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -521,19 +471,40 @@ class MonocotRootAnatomy(RootAnatomy):
     # ------------------------------------------------------------------
 
     def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug: bool = False):
+        if self.vascular_params.get("n_vascular_bundles", 0) == 0:
+            return
+        # Build the monocot stele as an explicit, ordered recipe of tissue steps.
+        # remove_cells_in_polygon + extend_cells happens later in Organ.generate_cells().
+        self._vascular_recipe(polygon_for_vascular).build()
+
+    def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
+        """Declarative description of how a monocot stele is assembled.
+
+        Two variants share the same vocabulary; the build order is data, so the
+        sequence can be inspected via ``recipe.describe()`` and extended with
+        edit-verb steps (smooth/rotate/...) without touching the generators.
+        """
+        recipe = TissueRecipe()
         if self.vascular_params.get("xylem_shape", "default") == "star":
-            if self.vascular_params.get("n_vascular_bundles", 0) == 0:
-                return
-            self.fit_star_shapped_xylem(polygon_for_vascular)
-            self._remove_stele_seeds_near_xylem()
-            self.fit_phloem_elements(polygon_for_vascular, type="monocot")
+            recipe.add("xylem star",
+                       lambda: self.fit_star_shapped_xylem(polygon),
+                       produces=("xylem", "stele"))
+            recipe.add("clear stele under xylem",
+                       self._remove_stele_seeds_near_xylem)
+            recipe.add("phloem in valleys",
+                       lambda: self.fit_phloem_elements(polygon, type="monocot"),
+                       produces=("phloem",))
         else:
-            if self.vascular_params.get("n_vascular_bundles", 0) == 0:
-                return
-            self.fit_metaxylem_elements(polygon_for_vascular)
-            self.fit_metaxylem_sheath(polygon_for_vascular)
-            self.fit_phloem_protoxylem_elements(polygon_for_vascular)
-        # Note: remove_cells_in_polygon + extend_cells happens in Organ.generate_cells()
+            recipe.add("metaxylem ring",
+                       lambda: self.fit_metaxylem_elements(polygon),
+                       produces=("metaxylem",))
+            recipe.add("metaxylem sheath",
+                       lambda: self.fit_metaxylem_sheath(polygon),
+                       produces=("stele",))
+            recipe.add("phloem + protoxylem bundles",
+                       lambda: self.fit_phloem_protoxylem_elements(polygon),
+                       produces=("phloem", "protoxylem"))
+        return recipe
 
     # ------------------------------------------------------------------
     # Default ring-bundle methods
@@ -567,18 +538,23 @@ class MonocotRootAnatomy(RootAnatomy):
                 np.inf,
             ))
 
-            xylem_polygon = GeometryProcessor.fit_inner_ellipse(slice, xylem_diameter / 2)
-            xylem_polygon = xylem_polygon["polygon"]
-            xylem_polygon_buff = GeometryProcessor.buffer_polygon(xylem_polygon, -(xylem_diameter / 2) * 0.15)
+            # Region: a single metaxylem vessel inscribed in the pizza slice.
+            # (One big vessel per slice — its cells are seeded along the vessel
+            # border, a bespoke fill that does not map onto the packing verbs.)
+            metaxylem = Tissue(
+                "metaxylem",
+                GeometryProcessor.fit_inner_ellipse(slice, xylem_diameter / 2)["polygon"],
+            )
+            xylem_polygon_buff = GeometryProcessor.buffer_polygon(metaxylem.shape, -(xylem_diameter / 2) * 0.15)
             x, y = xylem_polygon_buff.exterior.coords.xy
-            center = xylem_polygon.centroid
+            center = metaxylem.shape.centroid
             coords = np.column_stack((x, y))
             coords = GeometryProcessor.resample_coords(coords, target_n_points=25)
 
             for cell_border_pts in coords[1:]:
                 i_cell += 1
                 cells_in_slices.add_cell(Cell(
-                    type="metaxylem",
+                    type=metaxylem.tag,
                     x=cell_border_pts[0], y=cell_border_pts[1],
                     diameter=xylem_diameter,
                     id_cell=i_slice, id_layer=i_slice, id_group=i_slice,
@@ -586,7 +562,7 @@ class MonocotRootAnatomy(RootAnatomy):
                     radius=np.sqrt((cell_border_pts[0] - center.x) ** 2 + (cell_border_pts[1] - center.y) ** 2),
                     area=np.pi * (xylem_diameter / 2) ** 2,
                 ))
-            list_xylem_polygons.append(xylem_polygon)
+            list_xylem_polygons.append(metaxylem.shape)
         return cells_in_slices, list_xylem_polygons
 
     def fit_metaxylem_sheath(self, stele_polygon: Polygon):
@@ -669,49 +645,23 @@ class MonocotRootAnatomy(RootAnatomy):
         raw = Point(0, 0).buffer(1, resolution=64)
         raw = affine_scale(raw, width / 2, height / 2)
         raw = rotate(raw, radial_angle_deg - 90, origin=(0, 0))
-        ellipse = translate(raw, bundle_cx, bundle_cy)
-        if ellipse.is_empty or ellipse.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
+        protoxylem = Tissue("protoxylem", translate(raw, bundle_cx, bundle_cy))
+        if protoxylem.is_empty or protoxylem.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
             return cells_in_slice, list_polygons
 
-        # Remove stele seeds inside this protoxylem region
-        self.all_cells.cells = [
-            c for c in self.all_cells.cells
-            if not (c.type == "stele" and ellipse.contains(Point(c.x, c.y)))
-        ]
-
-        packed = GeometryProcessor.pack_circles(
-            ellipse,
-            proportion=1.0,
-            direction=None,
-            diameter_max=diameter,
-            diameter_sd=p["protoxylem_diameter_sd"] * scale,
+        # No local stele removal here: the protoxylem region is appended to
+        # vascular_polygons below and the unified vascular mask in
+        # Organ.generate_cells() clears every layer seed inside it.
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        fill_by_packing(
+            cells_in_slice, protoxylem.shape, protoxylem.tag, rng=self.rng,
+            n_border=24, id_base=next_id_group, angle_center=None,
+            proportion=1.0, direction=None,
+            diameter_max=diameter, diameter_sd=p["protoxylem_diameter_sd"] * scale,
             gradient_function="normal",
-            rng=self.rng,
         )
 
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
-        for i_cell, (pcx, pcy, r) in enumerate(packed):
-            cell_diam   = r * 2
-            placed      = Point(pcx, pcy).buffer(r, resolution=32)
-            placed_buff = placed.buffer(-r * 0.15)
-            if placed_buff.is_empty:
-                continue
-            bx, by = placed_buff.exterior.coords.xy
-            border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=24)
-            center        = placed.centroid
-            cell_id_group = next_id_group + i_cell
-            for border_pt in border_coords[1:]:
-                cells_in_slice.add_cell(Cell(
-                    type="protoxylem",
-                    x=border_pt[0], y=border_pt[1],
-                    diameter=cell_diam,
-                    id_cell=cell_id_group, id_group=cell_id_group,
-                    angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
-                    radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
-                    area=np.pi * r ** 2,
-                ))
-
-        list_polygons.append(ellipse)
+        list_polygons.append(protoxylem.shape)
         return cells_in_slice, list_polygons
 
     def phloem_elements_in_slice(self, slice_poly: Polygon):
@@ -731,43 +681,20 @@ class MonocotRootAnatomy(RootAnatomy):
         raw = Point(0, 0).buffer(1, resolution=64)
         raw = affine_scale(raw, width / 2, height / 2)
         raw = rotate(raw, radial_angle_deg - 90, origin=(0, 0))
-        ellipse = translate(raw, bundle_cx, bundle_cy)
-        if ellipse.is_empty or ellipse.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
+        phloem = Tissue("phloem", translate(raw, bundle_cx, bundle_cy))
+        if phloem.is_empty or phloem.area < np.pi * (diameter / 2) ** 2 * (1 - 0.0015):
             return cells_in_slice, list_polygons
 
-        packed = GeometryProcessor.pack_circles(
-            ellipse,
-            proportion=1.0,
-            direction=None,
-            diameter_max=diameter,
-            diameter_sd=p["phloem_diameter_sd"] * scale,
+        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        fill_by_packing(
+            cells_in_slice, phloem.shape, phloem.tag, rng=self.rng,
+            n_border=24, id_base=next_id_group, angle_center=None,
+            proportion=1.0, direction=None,
+            diameter_max=diameter, diameter_sd=p["phloem_diameter_sd"] * scale,
             gradient_function="normal",
-            rng=self.rng,
         )
 
-        next_id_group = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
-        for i_cell, (pcx, pcy, r) in enumerate(packed):
-            cell_diam   = r * 2
-            placed      = Point(pcx, pcy).buffer(r, resolution=32)
-            placed_buff = placed.buffer(-r * 0.15)
-            if placed_buff.is_empty:
-                continue
-            bx, by = placed_buff.exterior.coords.xy
-            border_coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), target_n_points=24)
-            center        = placed.centroid
-            cell_id_group = next_id_group + i_cell
-            for border_pt in border_coords[1:]:
-                cells_in_slice.add_cell(Cell(
-                    type="phloem",
-                    x=border_pt[0], y=border_pt[1],
-                    diameter=cell_diam,
-                    id_cell=cell_id_group, id_group=cell_id_group,
-                    angle=np.arctan2(border_pt[1] - center.y, border_pt[0] - center.x),
-                    radius=np.sqrt((border_pt[0] - center.x) ** 2 + (border_pt[1] - center.y) ** 2),
-                    area=np.pi * r ** 2,
-                ))
-
-        list_polygons.append(ellipse)
+        list_polygons.append(phloem.shape)
         return cells_in_slice, list_polygons
 
 
@@ -876,15 +803,39 @@ class DicotRootAnatomy(RootAnatomy):
     def _create_vascular_tissue(self, polygon_for_vascular: Polygon, debug: bool = False):
         if self.vascular_params.get("n_vascular_peak", 0) == 0:
             return
-        self.fit_star_shapped_xylem(polygon_for_vascular)
-        self._remove_stele_seeds_near_xylem()
+        # Build the dicot stele as an explicit, ordered recipe of tissue steps.
+        # remove_cells_in_polygon + extend_cells happens later in Organ.generate_cells().
+        self._vascular_recipe(polygon_for_vascular).build()
+
+    def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
+        """Declarative description of how a dicot stele is assembled.
+
+        A shared prefix (star xylem + clearing the stele it engulfs) is followed
+        by either primary tissue (phloem + primary cambium) or, when
+        ``secondary_growth`` is on, secondary xylem + secondary phloem.  The
+        build order is data, so it can be inspected via ``recipe.describe()``.
+        """
+        recipe = TissueRecipe()
+        recipe.add("xylem star",
+                   lambda: self.fit_star_shapped_xylem(polygon),
+                   produces=("xylem", "stele"))
+        recipe.add("clear stele under xylem",
+                   self._remove_stele_seeds_near_xylem)
         if self.vascular_params.get("secondary_growth", False):
-            self.fit_secondary_xylem(polygon_for_vascular)
-            self.fit_secondary_phloem(polygon_for_vascular)
+            recipe.add("secondary xylem",
+                       lambda: self.fit_secondary_xylem(polygon),
+                       produces=("xylem", "stele", "cambium", "medullar_ray"))
+            recipe.add("secondary phloem",
+                       lambda: self.fit_secondary_phloem(polygon),
+                       produces=("phloem", "companion_cell", "stele"))
         else:
-            self.fit_phloem_elements(polygon_for_vascular, type="dicot")
-            self.fit_primary_cambium_elements(polygon_for_vascular)
-        # Note: remove_cells_in_polygon + extend_cells happens in Organ.generate_cells()
+            recipe.add("phloem in valleys",
+                       lambda: self.fit_phloem_elements(polygon, type="dicot"),
+                       produces=("phloem",))
+            recipe.add("primary cambium",
+                       lambda: self.fit_primary_cambium_elements(polygon),
+                       produces=("cambium",))
+        return recipe
 
     # ------------------------------------------------------------------
     # Primary cambium
@@ -910,18 +861,19 @@ class DicotRootAnatomy(RootAnatomy):
         star_coord = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
         )
-        star = Polygon(star_coord).buffer(0)
-        star = translate(star, cx, cy)
-        if star.is_empty:
+        # The cambium region is the star polygon; its cells are seeded along the
+        # visible arc of the star's exterior (a line fill, via _render_layer).
+        cambium = Tissue("cambium", Polygon(star_coord).buffer(0)).translate(cx, cy)
+        if cambium.is_empty:
             return
 
         clip_circle = Point(cx, cy).buffer(p["cambium_primary_visible_distance"])
-        visible_boundary = star.exterior.intersection(clip_circle)
+        visible_boundary = cambium.shape.exterior.intersection(clip_circle)
         if visible_boundary.is_empty:
             return
 
         self.cambium_star = visible_boundary
-        self.vascular_tissue_polygons.setdefault("cambium", []).append(
+        self.vascular_tissue_polygons.setdefault(cambium.tag, []).append(
             visible_boundary.buffer(p["cambium_cell_diameter"] / 2)
         )
 
@@ -951,7 +903,7 @@ class DicotRootAnatomy(RootAnatomy):
         ]
 
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None
-        self._render_layer(visible_boundary, "cambium", cell_diam, cell_width, cx, cy, xylem_union)
+        self._render_layer(visible_boundary, cambium.tag, cell_diam, cell_width, cx, cy, xylem_union)
 
     # ------------------------------------------------------------------
     # Secondary growth helpers
@@ -1081,48 +1033,10 @@ class DicotRootAnatomy(RootAnatomy):
         erosion_polygon=None,
     ) -> int:
         """Fill a polygon zone with parenchyma seeds on concentric inward rings."""
-        if fill_zone is None or fill_zone.is_empty:
-            return start_id
-        if fill_zone.area < np.pi * (cell_diameter / 2) ** 2:
-            return start_id
-
-        next_id  = start_id
-        space    = cell_diameter / 2
-        tang     = cell_width if cell_width else cell_diameter
-        current  = erosion_polygon if erosion_polygon is not None else fill_zone
-        filter_z = prep(fill_zone) if erosion_polygon is not None else None
-
-        while not current.is_empty and current.area > (cell_diameter / 2) ** 2 * np.pi:
-            current = current.buffer(-space - cell_diameter / 2, resolution=16)
-            if current.is_empty:
-                break
-            space = cell_diameter / 2
-
-            geoms = list(current.geoms) if hasattr(current, "geoms") else [current]
-            for geom in geoms:
-                if geom.is_empty or geom.geom_type != "Polygon":
-                    continue
-                seed_coords  = CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)
-                border_rings = CellGenerator.cell_border(seed_coords, tang * 0.7, cell_diameter * 0.7)
-                for pt, border_pts in zip(seed_coords[1:], border_rings[1:]):
-                    if filter_z is not None and not filter_z.contains(Point(pt[0], pt[1])):
-                        continue
-                    id_group    = next_id
-                    next_id    += 1
-                    cell_angle  = np.arctan2(pt[1] - cy, pt[0] - cx)
-                    cell_radius = np.sqrt((pt[0] - cx) ** 2 + (pt[1] - cy) ** 2)
-                    for border_pt in border_pts[1:]:
-                        if filter_z is not None and not filter_z.contains(Point(border_pt[0], border_pt[1])):
-                            continue
-                        self.vascular_cells.add_cell(Cell(
-                            type=cell_type,
-                            x=border_pt[0], y=border_pt[1],
-                            diameter=cell_diameter,
-                            id_cell=id_group, id_group=id_group,
-                            angle=cell_angle, radius=cell_radius,
-                            area=np.pi * (cell_diameter / 2) ** 2,
-                        ))
-        return next_id
+        return fill_by_rings(
+            self.vascular_cells, fill_zone, cell_diameter, cell_width, cell_type,
+            cx, cy, start_id, erosion_polygon=erosion_polygon,
+        )
 
     def _build_medullar_ray_polygons(
         self,

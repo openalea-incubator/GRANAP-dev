@@ -264,7 +264,7 @@ class Organ(AbstractNetwork, ABC):
             log.info("Vascular + organ tissues: %.3fs", time.time() - t_start)
 
             t_start = time.time()
-            vor = CellGenerator.voronoi_diagram(self.all_cells)
+            vor = CellGenerator.voronoi_diagram(self.all_cells, rng=self.rng)
             log.info("Voronoi diagram:         %.3fs", time.time() - t_start)
 
             t_start = time.time()

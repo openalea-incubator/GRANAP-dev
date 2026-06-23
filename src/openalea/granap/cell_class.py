@@ -27,11 +27,16 @@ class Cell:
     def point(self):
         return Point(self.x, self.y)
 
-    def jitter(self, shift: float = 0.0001):
-        """Jitter the cell position."""
+    def jitter(self, shift: float = 0.0001, rng=None):
+        """Jitter the cell position.
+
+        Uses ``rng`` (the organ's seeded generator) when supplied so the
+        perturbation is reproducible; falls back to the global ``np.random``.
+        """
         if shift != 0:
-            self.x += np.random.uniform(-shift, shift)*self.diameter
-            self.y += np.random.uniform(-shift, shift)*self.diameter
+            _rng = rng if rng is not None else np.random
+            self.x += _rng.uniform(-shift, shift)*self.diameter
+            self.y += _rng.uniform(-shift, shift)*self.diameter
             self.angle = np.arctan2(self.y, self.x)
             self.radius = np.sqrt(self.x**2 + self.y**2)
 
