@@ -10,9 +10,7 @@ sys.path.append(os.path.abspath('..'))
 from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 
-
 SEED = 0
-
 
 def make_root(n_medullar: int, allow_non_vascular: bool) -> RootAnatomy:
     data = OrganInputData.for_dicot_root()
@@ -24,8 +22,8 @@ def make_root(n_medullar: int, allow_non_vascular: bool) -> RootAnatomy:
 
 
 scenarios = [
-    {"n_medullar": 6, "allow_non_vascular": False},
-    {"n_medullar": 6, "allow_non_vascular": True},
+    {"n_medullar": 12, "allow_non_vascular": False},
+    {"n_medullar": 12, "allow_non_vascular": True},
     {"n_medullar": 3, "allow_non_vascular": False},
     {"n_medullar": 3, "allow_non_vascular": True},
 ]

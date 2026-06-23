@@ -151,11 +151,11 @@ class RootPhloemParams(BaseParams):
 # Dicotyledon-specific layers
 class SteleDicotParams(BaseParams):
     name                     : str                        = "stele"
-    thickness                : float                      = Field(default=0.5,        ge=0.00001,        title="Thickness")
+    thickness                : float                      = Field(default=0.65,        ge=0.00001,        title="Thickness")
     cell_diameter            : float                      = Field(default=0.015,      ge=0.00001,        title="Cell Diameter (edge)",        description="Cell diameter at the stele periphery (lower bound of the size gradient).")
     cell_diameter_center     : float                      = Field(default=0.03,       ge=0.00001,        title="Cell Diameter (center)",      description="Cell diameter at the stele center (upper bound). Set equal to cell_diameter to disable the gradient.")
     size_gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",                  title="Size Gradient Function",      description="Shape function used for the radial cell-size gradient.")
-    size_gradient_inflection : float                      = Field(default=0.3,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
+    size_gradient_inflection : float                      = Field(default=0.2,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
     size_gradient_steepness  : float                      = Field(default=3.0,        ge=0.1,            title="Size Gradient Steepness",     description="Hill coefficient — sharpness of the size transition. Used by five_pl.")
     size_gradient_asymmetry  : float                      = Field(default=1.0,        ge=0.1,            title="Size Gradient Asymmetry",     description="Asymmetry exponent of the size gradient. Used by five_pl.")
 
@@ -200,6 +200,18 @@ class DicotCambiumParams(BaseParams):
     arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
     arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
 
+# Dicotyledon-specific layers
+class DicotSecondarySteleParams(BaseParams):
+    name                     : str                        = "stele"
+    thickness                : float                      = Field(default=1,        ge=0.00001,        title="Thickness")
+    cell_diameter            : float                      = Field(default=0.015,      ge=0.00001,        title="Cell Diameter (edge)",        description="Cell diameter at the stele periphery (lower bound of the size gradient).")
+    cell_diameter_center     : float                      = Field(default=0.03,       ge=0.00001,        title="Cell Diameter (center)",      description="Cell diameter at the stele center (upper bound). Set equal to cell_diameter to disable the gradient.")
+    size_gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",                  title="Size Gradient Function",      description="Shape function used for the radial cell-size gradient.")
+    size_gradient_inflection : float                      = Field(default=0.2,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
+    size_gradient_steepness  : float                      = Field(default=3.0,        ge=0.1,            title="Size Gradient Steepness",     description="Hill coefficient — sharpness of the size transition. Used by five_pl.")
+    size_gradient_asymmetry  : float                      = Field(default=1.0,        ge=0.1,            title="Size Gradient Asymmetry",     description="Asymmetry exponent of the size gradient. Used by five_pl.")
+
+
 class DicotSecondaryGrowthParams(BaseParams):
     name         : str   = "secondary_growth"
     value        : bool  = True
@@ -217,7 +229,7 @@ class DicotSecondaryXylemParams(BaseParams):
     gradient_steepness  : float = Field(default=8.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",   description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     n_ring              : int   = Field(default=1,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
-    prop_vessel_ring    : float = Field(default=0.2,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
+    prop_vessel_ring    : float = Field(default=0.3,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
     must_be_adjacent    : bool  = Field(default=False, title="Must Be Adjacent",                         description="If True, each new vessel circle must be tangent to at least one already-placed circle (first circle is always placed freely).")
     parenchyma_diameter    : float = Field(default=0.025,  ge=0.00001, title="Parenchyma Diameter",      description="Mean cell diameter for ray parenchyma zones (angular gaps between pizza slices).")
     parenchyma_diameter_sd : float = Field(default=0.001, ge=0.0,     title="Parenchyma Diameter SD",   description="Standard deviation of ray parenchyma cell diameter.")
@@ -225,8 +237,35 @@ class DicotSecondaryXylemParams(BaseParams):
     parenchyma_width       : float = Field(default=0.015,  ge=0.00001, title="Parenchyma Width",         description="Buffer distance used to shape the transition zone near pizza-slice boundaries and as the tangential cell width near the outer cambium.")
 
 class DicotSecondaryPhloemParams(BaseParams):
-    name                : str   = "secondary_phloem"
-    pass
+    name: str = "secondary_phloem"
+
+    # ── Zone geometry ─────────────────────────────────────────────────────────
+    outer_distance: float = Field(default=0.48, ge=0.00001, title="Outer Distance",
+        description="Outer radius of the phloem zone from the stele centre. "
+                    "Inner boundary is flush with secondary_cambium.outer_distance.")
+    arc_top: Optional[float] = Field(default=0.05, ge=0.00001, title="Arc Length at Tip",
+        description="Arc length at outer_distance (narrow tip of each phloem arm). "
+                    "Set to None to use the full pizza-slice width (sector shape).")
+
+    # ── Alive sieve zone ──────────────────────────────────────────────────────
+    alive_distance: float = Field(default=0.1, ge=0.0, title="Alive Distance (mm)",
+        description="Radial distance from the cambium boundary within which sieve "
+                    "elements are alive and have companion cells. Beyond this they are dead.")
+
+    # ── Sieve elements (same size for living and dead) ────────────────────────
+    sieve_diameter:     float = Field(default=0.018, ge=0.00001, title="Sieve Diameter")
+    sieve_diameter_sd:  float = Field(default=0.001, ge=0.0,     title="Sieve Diameter SD")
+    sieve_diameter_min: float = Field(default=0.008, ge=0.00001, title="Sieve Diameter Min")
+    prop_sieve:         float = Field(default=0.35,  ge=0.0, le=1.0, title="Sieve Proportion",
+        description="Stop packing sieve circles when their area reaches this fraction of the zone.")
+
+    # ── Companion cells (one per living sieve element) ────────────────────────
+    companion_diameter: float = Field(default=0.008, ge=0.00001, title="Companion Cell Diameter")
+    companion_width:    float = Field(default=0.002, ge=0.00001, title="Companion Cell Width")
+
+    # ── Phloem parenchyma ─────────────────────────────────────────────────────
+    parenchyma_diameter: float = Field(default=0.012, ge=0.00001, title="Parenchyma Diameter")
+    parenchyma_width:    float = Field(default=0.012, ge=0.00001, title="Parenchyma Width")
 
 
 class DicotSecondaryCambiumParams(BaseParams):
@@ -234,7 +273,7 @@ class DicotSecondaryCambiumParams(BaseParams):
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of secondary cambium cells.")
     cell_width       : float = Field(default=0.02,  ge=0.00001, title="Cell Width",       description="Tangential width of secondary cambium cells.")
     # for secondary growth — must be larger than the primary cambium outer_distance
-    inner_distance : float = Field(default=0.42,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
+    inner_distance : float = Field(default=0.40,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
     outer_distance : float = Field(default=0.45,  ge=0.00001, title="Secondary Outer Distance", description="Outer radius of the secondary cambium star from the stele centre. Must be ≤ the stele radius.")
     arc_top        : float = Field(default=0.10,  ge=0.00001, title="Arc Length at Tip",   description="Arc length at outer_distance (tip width of each arm).")
     arc_bottom     : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Base",  description="Arc length at inner_distance (base width of each arm).")
@@ -585,6 +624,7 @@ class OrganInputData(BaseModel):
             DicotSecondaryGrowthParams(value=False),
             DicotSecondaryXylemParams(),
             DicotSecondaryCambiumParams(),
+            DicotSecondaryPhloemParams(),
             DicotMedularRaysParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),

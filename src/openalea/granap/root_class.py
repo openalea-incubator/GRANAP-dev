@@ -81,6 +81,7 @@ class RootAnatomy(Organ):
         # Initialise secondary-growth dicts so they always exist
         self.secondary_xylem_params: dict = {}
         self.secondary_cambium_params: dict = {}
+        self.secondary_phloem_params: dict = {}
         self.medullar_rays_params: dict = {}
 
         # Containers for vascular tissue building (populated by _create_vascular_tissue)
@@ -844,6 +845,21 @@ class DicotRootAnatomy(RootAnatomy):
                 "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
             }
 
+            sec_phloem = next((p for p in self.params if p["name"] == "secondary_phloem"), {})
+            self.secondary_phloem_params = {
+                "outer_distance":      float(sec_phloem.get("outer_distance",      0.55)),
+                "arc_top":             (float(sec_phloem["arc_top"]) if sec_phloem.get("arc_top") is not None else None),
+                "alive_distance":      float(sec_phloem.get("alive_distance",      0.05)),
+                "sieve_diameter":      float(sec_phloem.get("sieve_diameter",      0.015)),
+                "sieve_diameter_sd":   float(sec_phloem.get("sieve_diameter_sd",   0.001)),
+                "sieve_diameter_min":  float(sec_phloem.get("sieve_diameter_min",  0.008)),
+                "prop_sieve":          float(sec_phloem.get("prop_sieve",          0.35)),
+                "companion_diameter":  float(sec_phloem.get("companion_diameter",  0.008)),
+                "companion_width":     float(sec_phloem.get("companion_width",     0.008)),
+                "parenchyma_diameter": float(sec_phloem.get("parenchyma_diameter", 0.012)),
+                "parenchyma_width":    float(sec_phloem.get("parenchyma_width",    0.012)),
+            }
+
             med_rays = next((p for p in self.params if p["name"] == "medullar_rays"), {})
             self.medullar_rays_params = {
                 "n_medullar":         int(med_rays.get("n_medullar",         6)),
@@ -864,6 +880,7 @@ class DicotRootAnatomy(RootAnatomy):
         self._remove_stele_seeds_near_xylem()
         if self.vascular_params.get("secondary_growth", False):
             self.fit_secondary_xylem(polygon_for_vascular)
+            self.fit_secondary_phloem(polygon_for_vascular)
         else:
             self.fit_phloem_elements(polygon_for_vascular, type="dicot")
             self.fit_primary_cambium_elements(polygon_for_vascular)
@@ -975,6 +992,82 @@ class DicotRootAnatomy(RootAnatomy):
         )
         star = Polygon(star_coords).buffer(0)
         return translate(star, cx, cy).intersection(stele_polygon)
+
+    def _build_secondary_phloem_polygon(
+        self,
+        stele_polygon: Polygon,
+        secondary_cambium_polygon: Polygon,
+        cx: float,
+        cy: float,
+    ) -> Polygon:
+        """Build the phloem zone as one polygon per arm.
+
+        Arms sit at 2π(k+0.5)/n_peaks — the cambium valley centres, which are
+        the same angular positions as the secondary xylem vessel zones.
+
+        Base (inner boundary):
+            Pizza-slice half-angle = prop_stele × π/n_peaks, same as the xylem
+            vessel zones.  The secondary cambium polygon is subtracted to get the
+            real inner boundary from the cambium outer surface.
+
+        Tip (outer boundary):
+            sp["arc_top"] is None  →  full pizza-slice sector at sp["outer_distance"]
+            sp["arc_top"] is float →  explicit trapeze: outer arc narrowed to arc_top,
+                                       straight sides connecting to the pizza-slice base.
+        """
+        sp = self.secondary_phloem_params
+        sc = self.secondary_cambium_params
+        sx = self.secondary_xylem_params
+        p  = self.vascular_params
+        n_peaks = p["n_vascular_peak"]
+
+        r_inner = sc["inner_distance"]   # cambium valley radius (phloem base)
+        r_outer = sp["outer_distance"]
+        if r_outer <= r_inner:
+            return Polygon()
+
+        # Base half-angle: same pizza-slice width as the xylem vessel zones.
+        half_angle  = (np.pi / n_peaks) * sx["prop_stele"]
+        r_wedge     = r_outer * 1.5
+        arc_top     = sp["arc_top"]      # None or float
+        n_arc       = 50
+
+        arm_polys = []
+        for k in range(n_peaks):
+            theta = 2.0 * np.pi * (k + 0.5) / n_peaks
+
+            if arc_top is None:
+                # Full pizza-slice sector clipped to r_outer
+                arc_a    = np.linspace(theta - half_angle, theta + half_angle, n_arc)
+                wedge_pts = (
+                    [(cx, cy)]
+                    + [(cx + r_wedge * np.cos(a), cy + r_wedge * np.sin(a)) for a in arc_a]
+                )
+                arm = Polygon(wedge_pts).intersection(Point(cx, cy).buffer(r_outer))
+            else:
+                # Explicit trapeze: wide base (pizza-slice half-angle at r_inner),
+                # narrow tip (arc_top at r_outer), straight sides.
+                w_outer      = arc_top / r_outer
+                outer_angles = np.linspace(theta - w_outer, theta + w_outer, n_arc)
+                outer_pts    = np.column_stack([
+                    cx + r_outer * np.cos(outer_angles),
+                    cy + r_outer * np.sin(outer_angles),
+                ])
+                inner_angles = np.linspace(theta + half_angle, theta - half_angle, n_arc)
+                inner_pts    = np.column_stack([
+                    cx + r_inner * np.cos(inner_angles),
+                    cy + r_inner * np.sin(inner_angles),
+                ])
+                arm = Polygon(np.vstack([outer_pts, inner_pts])).buffer(0)
+            if not arm.is_empty:
+                arm_polys.append(arm)
+
+        if not arm_polys:
+            return Polygon()
+
+        # No stele_polygon intersection: phloem sits outside the secondary cambium
+        # and may extend beyond the stele polygon boundary.
+        return unary_union(arm_polys).difference(secondary_cambium_polygon)
 
     def _fill_zone_with_cells(
         self,
@@ -1411,8 +1504,6 @@ class DicotRootAnatomy(RootAnatomy):
                 if all_mr_geoms:
                     medullar_union = unary_union(all_mr_geoms)
                     # Remove cambium seeds that fall inside the medullar ray corridors.
-                    # Buffer outward so that border points on or just outside the
-                    # secondary cambium boundary ring are also caught.
                     mr_cambium_zone = prep(medullar_union.buffer(sc["cell_diameter"]))
                     self.vascular_cells.cells = [
                         c for c in self.vascular_cells.cells
@@ -1503,14 +1594,11 @@ class DicotRootAnatomy(RootAnatomy):
         ).difference(primary_cambium_polygon)
         # Only exclude medullar areas from the ray zone when they can extend
         # into the gap region (allow_non_vascular=True).  When False, medullar
-        # rays are fully inside the vessel pizza slices which _fill_ray_parenchyma
-        # already subtracts, so a second subtraction is unnecessary and can
-        # introduce floating-point artefacts that suppress ray parenchyma.
+        # rays are fully inside the vessel pizza slices
         if (medullar_union is not None and not medullar_union.is_empty
                 and mr_params.get("allow_non_vascular", False)):
             # Small outward buffer prevents ray-parenchyma seeds from landing
-            # right on the corridor wall, which would let their Voronoi cells
-            # crush the adjacent medullar-ray cells.
+            # right on the corridor wall
             mr_exclusion = medullar_union.buffer(mr_params.get("cell_diameter", 0.025) / 2.0)
             ray_annular_zone = ray_annular_zone.difference(mr_exclusion)
 
@@ -1524,3 +1612,153 @@ class DicotRootAnatomy(RootAnatomy):
             next_id = self._fill_medullar_rays(poly, theta_c, cx, cy, mr_params, next_id)
 
         self.vascular_polygons.extend(all_vessel_polys)
+
+    def fit_secondary_phloem(self, stele_polygon: Polygon) -> None:
+        """Build secondary phloem outside the secondary cambium.
+
+        Each arm sits at the cambium valley angles (same as the secondary xylem
+        vessel zones) and is divided radially into an alive sub-zone (sieve tubes
+        + companion cells + parenchyma) and a dead sub-zone (sieve tubes +
+        parenchyma).  No medullar-ray cells are placed inside the phloem arms —
+        the arm boundaries are already the medullar-ray / parenchyma-ray walls.
+        """
+        sp = self.secondary_phloem_params
+        sx = self.secondary_xylem_params
+        p  = self.vascular_params
+
+        cx, cy  = stele_polygon.centroid.x, stele_polygon.centroid.y
+        n_peaks = p["n_vascular_peak"]
+
+        secondary_cambium_polygon = self._build_secondary_cambium_polygon(stele_polygon, cx, cy)
+        if secondary_cambium_polygon is None or secondary_cambium_polygon.is_empty:
+            return
+
+        phloem_zone = self._build_secondary_phloem_polygon(
+            stele_polygon, secondary_cambium_polygon, cx, cy
+        )
+        if phloem_zone is None or phloem_zone.is_empty:
+            return
+
+        self.vascular_tissue_polygons.setdefault("secondary_phloem", []).append(phloem_zone)
+
+        # Radially split into alive (near cambium) and dead (outer) sub-zones.
+        alive_annulus = secondary_cambium_polygon.buffer(sp["alive_distance"])
+        alive_zone    = phloem_zone.intersection(alive_annulus)
+        dead_zone     = phloem_zone.difference(alive_annulus)
+
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+
+        next_id = self._fill_phloem_zone(alive_zone, alive=True,  cx=cx, cy=cy, sp=sp, start_id=next_id)
+        next_id = self._fill_phloem_zone(dead_zone,  alive=False, cx=cx, cy=cy, sp=sp, start_id=next_id)
+
+    def _fill_phloem_zone(
+        self,
+        zone,
+        alive: bool,
+        cx: float,
+        cy: float,
+        sp: dict,
+        start_id: int,
+    ) -> int:
+        """Pack sieve tubes (+ companion cells when alive=True) then fill parenchyma."""
+        if zone is None or zone.is_empty:
+            return start_id
+
+        sub_zones = (
+            [g for g in zone.geoms if g.geom_type == "Polygon" and not g.is_empty]
+            if hasattr(zone, "geoms")
+            else ([zone] if zone.geom_type == "Polygon" else [])
+        )
+
+        min_area = np.pi * (sp["sieve_diameter_min"] / 2) ** 2
+        next_id  = start_id
+
+        for arm_zone in sub_zones:
+            if arm_zone.is_empty or arm_zone.area < min_area:
+                continue
+
+            packed = GeometryProcessor.pack_circles(
+                arm_zone,
+                proportion=sp["prop_sieve"],
+                direction=None,
+                diameter_max=sp["sieve_diameter"],
+                diameter_min=sp["sieve_diameter_min"],
+                diameter_sd=sp["sieve_diameter_sd"],
+                gradient_function="normal",
+                rng=self.rng,
+            )
+
+            sieve_polys:    list = []
+            companion_polys: list = []
+
+            for pcx, pcy, r in packed:
+                actual_diam = r * 2
+                placed      = Point(pcx, pcy).buffer(r, resolution=32)
+                placed_buff = placed.buffer(-r * 0.15)
+                if placed_buff.is_empty:
+                    continue
+
+                bx, by = placed_buff.exterior.coords.xy
+                border_coords = GeometryProcessor.resample_coords(
+                    np.column_stack((bx, by)), target_n_points=25
+                )
+                id_group = next_id
+                next_id += 1
+                for border_pt in border_coords[1:]:
+                    self.vascular_cells.add_cell(Cell(
+                        type="phloem",
+                        x=border_pt[0], y=border_pt[1],
+                        diameter=actual_diam,
+                        id_cell=id_group, id_group=id_group,
+                        angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                        radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                        area=np.pi * r ** 2,
+                    ))
+                sieve_polys.append(placed)
+
+                if alive:
+                    # One companion cell placed tangentially adjacent to the sieve.
+                    comp_r    = sp["companion_diameter"] / 2
+                    theta_rad = np.arctan2(pcy - cy, pcx - cx)
+                    for side in (1, -1):
+                        ccx = pcx + (r + comp_r * 1.05) * np.cos(theta_rad + side * np.pi / 2)
+                        ccy = pcy + (r + comp_r * 1.05) * np.sin(theta_rad + side * np.pi / 2)
+                        comp_pt = Point(ccx, ccy)
+                        if not arm_zone.contains(comp_pt):
+                            continue
+                        comp_circle = comp_pt.buffer(comp_r)
+                        if any(comp_circle.intersects(c) for c in companion_polys):
+                            continue
+                        comp_buff = comp_circle.buffer(-comp_r * 0.15)
+                        if comp_buff.is_empty:
+                            continue
+                        bx, by = comp_buff.exterior.coords.xy
+                        border_c = GeometryProcessor.resample_coords(
+                            np.column_stack((bx, by)), target_n_points=16
+                        )
+                        id_group = next_id
+                        next_id += 1
+                        for border_pt in border_c[1:]:
+                            self.vascular_cells.add_cell(Cell(
+                                type="companion_cell",
+                                x=border_pt[0], y=border_pt[1],
+                                diameter=sp["companion_diameter"],
+                                id_cell=id_group, id_group=id_group,
+                                angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
+                                radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
+                                area=np.pi * (comp_r) ** 2,
+                            ))
+                        companion_polys.append(comp_circle)
+                        break   # one companion per sieve
+
+            placed_union = unary_union(sieve_polys + companion_polys) if (sieve_polys or companion_polys) else Polygon()
+            fill_zone    = arm_zone.difference(placed_union)
+            if not fill_zone.is_empty:
+                next_id = self._fill_zone_with_cells(
+                    fill_zone,
+                    sp["parenchyma_diameter"], sp["parenchyma_width"],
+                    "phloem_parenchyma", cx, cy, next_id,
+                    erosion_polygon=arm_zone,
+                )
+
+        return next_id
