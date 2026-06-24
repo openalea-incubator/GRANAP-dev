@@ -21,7 +21,7 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.cell_class import Cell
-from openalea.granap.tissue_builder import Tissue, retag_tissue
+from openalea.granap.tissue_builder import Tissue, TissueRecipe, retag_tissue
 
 SEED = 0
 
@@ -111,6 +111,70 @@ def test_retag_is_terminal_cell_verb():
 
 
 # ---------------------------------------------------------------------------
+# Recipe ergonomics: a step declares a region + fill strategy
+# ---------------------------------------------------------------------------
+
+def test_recipe_fill_packs_a_region():
+    cm = CellManager()
+    rng = np.random.default_rng(SEED)
+    region = Tissue("phloem", Point(0.0, 0.0).buffer(0.3))
+
+    recorded = []
+    recipe = (
+        TissueRecipe().bind(cm, rng)
+        .fill("phloem", region, strategy="packing",
+              record=lambda t, res: recorded.append((t.tag, len(res))),
+              proportion=1.0, diameter_max=0.1, diameter_min=0.1)
+    )
+    assert recipe.describe() == [("phloem", ("phloem",))]
+    recipe.build()
+    assert cm.cells                                  # cells were placed
+    assert all(c.type == "phloem" for c in cm.cells)
+    assert recorded and recorded[0][0] == "phloem"   # record hook ran
+
+
+def test_recipe_fill_each_and_lazy_target():
+    cm = CellManager()
+    rng = np.random.default_rng(SEED)
+    regions = [Tissue("xylem", Point(x, 0.0).buffer(0.2)) for x in (-1.0, 1.0)]
+
+    # bind a *callable* so the fill resolves the current manager at build time
+    holder = {"cm": cm}
+    recipe = (
+        TissueRecipe().bind(lambda: holder["cm"], rng)
+        .fill_each("xylem pair", regions, strategy="packing",
+                   proportion=1.0, diameter_max=0.08, diameter_min=0.08)
+    )
+    assert recipe.describe() == [("xylem pair", ("xylem",))]
+    recipe.build()
+    assert holder["cm"].cells
+    assert all(c.type == "xylem" for c in holder["cm"].cells)
+
+
+def test_recipe_empty_region_is_safe():
+    cm = CellManager()
+    recipe = (
+        TissueRecipe().bind(cm, np.random.default_rng(SEED))
+        .fill("nothing", Tissue("x", Polygon()), strategy="packing",
+              proportion=1.0, diameter_max=0.1)
+    )
+    recipe.build()                                   # must not raise
+    assert cm.cells == []
+
+
+def test_recipe_special_and_cleanup_order():
+    log = []
+    recipe = (
+        TissueRecipe()
+        .special("place", lambda: log.append("place"), produces=("a",))
+        .cleanup("clean", lambda: log.append("clean"))
+    )
+    assert recipe.describe() == [("place", ("a",)), ("clean", ())]
+    recipe.build()
+    assert log == ["place", "clean"]
+
+
+# ---------------------------------------------------------------------------
 # The phloem regions really are shape-first Tissues, built by region algebra
 # ---------------------------------------------------------------------------
 
@@ -164,6 +228,10 @@ if __name__ == "__main__":
     test_tissue_smooth_changes_boundary_keeps_centre()
     test_tissue_region_algebra()
     test_retag_is_terminal_cell_verb()
+    test_recipe_fill_packs_a_region()
+    test_recipe_fill_each_and_lazy_target()
+    test_recipe_empty_region_is_safe()
+    test_recipe_special_and_cleanup_order()
     test_phloem_valley_zones_are_tissue_regions()
     test_recipe_is_inspectable()
     test_monocot_baseline_unchanged()

@@ -222,13 +222,15 @@ class RootAnatomy(Organ):
     # AND DicotRootAnatomy)
     # ------------------------------------------------------------------
 
-    def fit_star_shapped_xylem(self, stele_polygon: Polygon):
-        """Build the star-shaped xylem *region*, then pack metaxylem vessels into it.
+    def _xylem_star_region(self, stele_polygon: Polygon) -> Tissue:
+        """Build the star-shaped xylem *region* (pure geometry).
 
-        Shape-first: the star is assembled and clipped by region algebra
-        (place at the stele centre, clip to the stele, subtract the pith), then
-        the region is filled by circle-packing with a diameter split into
-        wide vessels ("xylem") and the narrow interstitial cells ("stele").
+        Shape-first: the star is assembled and clipped by region algebra — placed
+        at the stele centre, clipped to the stele, with the pith subtracted.  Sets
+        ``self.xylem_star`` (the region later steps carve phloem out of) and
+        ``self.pith_polygon``.  Returns the xylem :class:`Tissue`; an *empty*
+        result (the star did not fit) leaves ``self.xylem_star`` unset, so the
+        downstream stele-clearing cleanup is skipped.
         """
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
@@ -254,7 +256,7 @@ class RootAnatomy(Organ):
             .intersection(stele_polygon)
         )
         if xylem.is_empty:
-            return
+            return xylem
 
         pith_r = p.get("pith_radius", 0.0)
         if pith_r and pith_r > 0.0:
@@ -264,11 +266,12 @@ class RootAnatomy(Organ):
             self.pith_polygon = None
 
         self.xylem_star = xylem.shape
+        return xylem
 
-        self.vascular_cells = CellManager()
-        self.vascular_polygons = []
-        placed_out = fill_by_packing(
-            self.vascular_cells, xylem.shape, xylem.tag, rng=self.rng,
+    def _xylem_pack_kwargs(self) -> dict:
+        """Circle-packing parameters for the star xylem fill (one source)."""
+        p = self.vascular_params
+        return dict(
             n_border=25, id_base=0, angle_center=None,
             min_diameter=p["xylem_diameter_min"], alt_type="stele",
             proportion=1.0, direction=p["xylem_direction"],
@@ -281,9 +284,32 @@ class RootAnatomy(Organ):
             gradient_asymmetry=p["xylem_gradient_asymmetry"],
             first_circle_shift=p["xylem_first_vessel_shift"],
         )
-        for placed, rtype, _gid in placed_out:
+
+    def _record_xylem_vessels(self, tissue: Tissue, placed) -> None:
+        """Record only the wide ("xylem") vessels in ``vascular_polygons``.
+
+        The packing splits one region into wide vessels ("xylem") and narrow
+        interstitial cells ("stele"); only the vessels feed the vascular mask and
+        the metaxylem sheath / stele-clearing logic.
+        """
+        for placed_poly, rtype, _gid in placed:
             if rtype == "xylem":
-                self.vascular_polygons.append(placed)
+                self.vascular_polygons.append(placed_poly)
+
+    def fit_star_shapped_xylem(self, stele_polygon: Polygon):
+        """Build the star xylem region and pack vessels into it (region + fill).
+
+        Thin wrapper kept for direct/test use; the recipes drive the same region
+        builder + fill declaratively (``recipe.fill(..., strategy="packing")``).
+        """
+        xylem = self._xylem_star_region(stele_polygon)
+        if xylem.is_empty:
+            return
+        placed = fill_by_packing(
+            self.vascular_cells, xylem.shape, xylem.tag, rng=self.rng,
+            **self._xylem_pack_kwargs(),
+        )
+        self._record_xylem_vessels(xylem, placed)
 
     def _remove_stele_seeds_near_xylem(self) -> None:
         """Remove stele parenchyma cells engulfed by xylem vessels.
@@ -341,10 +367,9 @@ class RootAnatomy(Organ):
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
         if type == "monocot":
             minimal_distance = min(p["inner_radius_xylem"], stele_r * 0.95)
-            adjustment = p.get("cell_diameter", 0.0)
         if type == "dicot":
             minimal_distance = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
-            adjustment = p.get("cambium_cell_diameter", 0.0)
+        adjustment = self._phloem_adjustment(type)
 
         r_center = (
             minimal_distance + adjustment + (height / 2)
@@ -371,32 +396,47 @@ class RootAnatomy(Organ):
 
         return tissues, adjustment
 
-    def fit_phloem_elements(self, stele_polygon: Polygon, type="monocot"):
-        """Place one phloem cluster per valley between the xylem peaks.
+    def _phloem_adjustment(self, type="monocot") -> float:
+        """Clearance buffer used when recording phloem regions for the stele mask.
 
-        Shape-first vocabulary: build the valley *regions*
-        (:meth:`_phloem_valley_zones`), then fill each region's shape by
-        circle-packing (:func:`fill_by_packing`).  No bespoke seeding loop here.
+        One source of truth for both the valley geometry (:meth:`_phloem_valley_zones`)
+        and the mask recording (:meth:`_add_phloem_step`).
+        """
+        p = self.vascular_params
+        if type == "dicot":
+            return p.get("cambium_cell_diameter", 0.0)
+        return p.get("cell_diameter", 0.0)
+
+    def _add_phloem_step(self, recipe: TissueRecipe, stele_polygon: Polygon, type="monocot") -> None:
+        """Declarative phloem step: valley *regions* filled by circle-packing.
+
+        Shape-first vocabulary — the regions (:meth:`_phloem_valley_zones`, built
+        lazily at recipe-build time because they are carved from the xylem star
+        placed by an earlier step) are filled by the recipe's ``packing``
+        strategy.  Each filled region is recorded (buffered by the phloem
+        clearance) so the unified vascular mask in ``generate_cells`` clears the
+        stele seeds underneath it.
         """
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
         cell_diam = p["phloem_diameter"]
         cell_sd   = p["phloem_diameter_sd"]
+        adjustment = self._phloem_adjustment(type)
 
-        tissues, adjustment = self._phloem_valley_zones(stele_polygon, type)
-        for tissue in tissues:
-            # Record the region so the systematic vascular mask in generate_cells()
-            # removes stele seeds with the correct clearance.
+        def record(tissue, _result, adj=adjustment):
             self.vascular_tissue_polygons.setdefault(tissue.tag, []).append(
-                GeometryProcessor.buffer_polygon(tissue.shape, adjustment / 2)
+                GeometryProcessor.buffer_polygon(tissue.shape, adj / 2)
             )
-            fill_by_packing(
-                self.vascular_cells, tissue.shape, tissue.tag, rng=self.rng,
-                n_border=25, angle_center=(cx, cy),
-                proportion=1.0, direction=None,
-                diameter_max=cell_diam, diameter_min=cell_diam,
-                diameter_sd=cell_sd, gradient_function="normal",
-            )
+
+        recipe.fill_each(
+            "phloem in valleys",
+            lambda: self._phloem_valley_zones(stele_polygon, type)[0],
+            strategy="packing", produces=("phloem",), record=record,
+            n_border=25, angle_center=(cx, cy),
+            proportion=1.0, direction=None,
+            diameter_max=cell_diam, diameter_min=cell_diam,
+            diameter_sd=cell_sd, gradient_function="normal",
+        )
 
     # ------------------------------------------------------------------
     # Shared low-level rendering helper
@@ -484,26 +524,27 @@ class MonocotRootAnatomy(RootAnatomy):
         sequence can be inspected via ``recipe.describe()`` and extended with
         edit-verb steps (smooth/rotate/...) without touching the generators.
         """
-        recipe = TissueRecipe()
+        recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
         if self.vascular_params.get("xylem_shape", "default") == "star":
-            recipe.add("xylem star",
-                       lambda: self.fit_star_shapped_xylem(polygon),
-                       produces=("xylem", "stele"))
-            recipe.add("clear stele under xylem",
-                       self._remove_stele_seeds_near_xylem)
-            recipe.add("phloem in valleys",
-                       lambda: self.fit_phloem_elements(polygon, type="monocot"),
-                       produces=("phloem",))
+            recipe.fill("xylem star", self._xylem_star_region(polygon),
+                        strategy="packing", produces=("xylem", "stele"),
+                        record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
+            recipe.cleanup("clear stele under xylem",
+                           self._remove_stele_seeds_near_xylem)
+            self._add_phloem_step(recipe, polygon, type="monocot")
         else:
-            recipe.add("metaxylem ring",
-                       lambda: self.fit_metaxylem_elements(polygon),
-                       produces=("metaxylem",))
-            recipe.add("metaxylem sheath",
-                       lambda: self.fit_metaxylem_sheath(polygon),
-                       produces=("stele",))
-            recipe.add("phloem + protoxylem bundles",
-                       lambda: self.fit_phloem_protoxylem_elements(polygon),
-                       produces=("phloem", "protoxylem"))
+            # Bespoke placements (a single-vessel border fill, a cell-relative
+            # sheath, and pizza-sliced bundles) — not plain region+fill, so they
+            # stay `special` steps rather than declarative `fill`s.
+            recipe.special("metaxylem ring",
+                           lambda: self.fit_metaxylem_elements(polygon),
+                           produces=("metaxylem",))
+            recipe.special("metaxylem sheath",
+                           lambda: self.fit_metaxylem_sheath(polygon),
+                           produces=("stele",))
+            recipe.special("phloem + protoxylem bundles",
+                           lambda: self.fit_phloem_protoxylem_elements(polygon),
+                           produces=("phloem", "protoxylem"))
         return recipe
 
     # ------------------------------------------------------------------
@@ -815,26 +856,27 @@ class DicotRootAnatomy(RootAnatomy):
         ``secondary_growth`` is on, secondary xylem + secondary phloem.  The
         build order is data, so it can be inspected via ``recipe.describe()``.
         """
-        recipe = TissueRecipe()
-        recipe.add("xylem star",
-                   lambda: self.fit_star_shapped_xylem(polygon),
-                   produces=("xylem", "stele"))
-        recipe.add("clear stele under xylem",
-                   self._remove_stele_seeds_near_xylem)
+        recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
+        recipe.fill("xylem star", self._xylem_star_region(polygon),
+                    strategy="packing", produces=("xylem", "stele"),
+                    record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
+        recipe.cleanup("clear stele under xylem",
+                       self._remove_stele_seeds_near_xylem)
         if self.vascular_params.get("secondary_growth", False):
-            recipe.add("secondary xylem",
-                       lambda: self.fit_secondary_xylem(polygon),
-                       produces=("xylem", "stele", "cambium", "medullar_ray"))
-            recipe.add("secondary phloem",
-                       lambda: self.fit_secondary_phloem(polygon),
-                       produces=("phloem", "companion_cell", "stele"))
+            # Secondary growth is bespoke (concentric ring fills + medullar rays +
+            # companion cells), kept as `special` steps; see _build_*_polygon.
+            recipe.special("secondary xylem",
+                           lambda: self.fit_secondary_xylem(polygon),
+                           produces=("xylem", "stele", "cambium", "medullar_ray"))
+            recipe.special("secondary phloem",
+                           lambda: self.fit_secondary_phloem(polygon),
+                           produces=("phloem", "companion_cell", "stele"))
         else:
-            recipe.add("phloem in valleys",
-                       lambda: self.fit_phloem_elements(polygon, type="dicot"),
-                       produces=("phloem",))
-            recipe.add("primary cambium",
-                       lambda: self.fit_primary_cambium_elements(polygon),
-                       produces=("cambium",))
+            self._add_phloem_step(recipe, polygon, type="dicot")
+            # Primary cambium is a line fill along the star's visible arc (bespoke).
+            recipe.special("primary cambium",
+                           lambda: self.fit_primary_cambium_elements(polygon),
+                           produces=("cambium",))
         return recipe
 
     # ------------------------------------------------------------------

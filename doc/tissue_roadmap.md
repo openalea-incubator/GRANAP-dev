@@ -44,35 +44,84 @@ The phases below build those out, organ by organ, behind the golden tests.
 
 ---
 
-## P0 — Safety net for needle  *(small, do first)*
+## P0 — Safety net for needle  *(DONE 2026-06-24)*
 
-Needle is about to be refactored but has no golden. Add a `needle_*` profile (and
-any meaningful variants: ducts on/off, stomata on/off) to
-`test_vascular_regression.py`, pinning the seed=0 census. Confirm reproducibility
-(two builds identical) — needle uses `recenter_cells` + stomata index math, so
-verify it is stable before touching it.
+Needle is about to be refactored but had no golden. **Done:** added two needle
+profiles to `test_vascular_regression.py`, pinning the seed=0 census, both
+verified reproducible (two builds identical):
 
-Deliverable: needle goldens. Risk: none (test only).
+- `needle_default` — `OrganInputData.for_needle()`. Census: Strasburger 38 /
+  air 312 / cambium 58 / duct 3 / endodermis 49 / epidermis 231 / guard 8 /
+  hypodermis 387 / mesophyll 228 / parenchyma 244 / phloem 310 / pore 4 /
+  resin duct 42 / transfusion 103 / xylem 270.
+- `needle_features` — resin_duct `n_files=2`, stomata `n_files=10` (matches
+  `test_needle`). Census differs in air 327 / duct 2 / epidermis 219 / guard 20 /
+  hypodermis 366 / mesophyll 230 / pore 10 / resin duct 28.
+
+Note: `n_files=0` is rejected by the pydantic params (`ge=1`), so "ducts/stomata
+off" variants aren't expressible; the two profiles above (default vs. denser
+ducts+stomata) are the meaningful anchors instead. The regression suite's golden
+builders now return a *constructed organ* (root **or** needle), not just an
+`OrganInputData`, so it spans both organ classes.
+
+Deliverable: needle goldens. Risk: none (test only). **Complete.**
 
 ---
 
-## P1 — Recipe ergonomics: region→fill as a first-class step  *(low risk)*
+## P1 — Recipe ergonomics: region→fill as a first-class step  *(DONE 2026-06-24)*
 
-Make `TissueRecipe` express "build region(s), fill them" directly so recipes stop
-wrapping `fit_*`.
+Made `TissueRecipe` express "build region(s), fill them" directly so recipes stop
+wrapping `fit_*`. All byte-identical against the goldens (incl. the new needle
+ones) + full battery green.
 
-- Add to `tissue_builder.py`: `recipe.fill(name, tissue, strategy=..., **kw)`,
-  `recipe.fill_each(name, tissues, ...)`, `recipe.cleanup(name, fn)`,
-  `recipe.special(name, fn, ...)`. `strategy` dispatches to the existing
-  `fill_by_packing` / `fill_by_rings` / `fill_along` (+ a `border` strategy for
-  the single-ellipse metaxylem border seeding).
-- Split each converted `fit_*` into a pure **region builder** (`*_region(s)`
-  returning `Tissue`) and let the recipe own the fill. The `fit_*` methods either
-  become thin shims or disappear.
-- Rewrite the **monocot** and **dicot** `_vascular_recipe` in the target style.
+**Done in `tissue_builder.py`:**
+
+- `recipe.fill(name, tissue, *, strategy="packing", produces=None, record=None, **kw)`,
+  `recipe.fill_each(name, tissues, ...)` (tissues may be an iterable **or** a
+  zero-arg callable, deferred to build time when the regions depend on an earlier
+  step — e.g. phloem valleys carved from the not-yet-built xylem star),
+  `recipe.cleanup(name, fn)`, `recipe.special(name, fn, produces=...)`.
+- `recipe.bind(cells, rng)` sets the fill target; `cells` may be a `CellManager`
+  **or a zero-arg callable** resolving the current manager at build time (the
+  star path replaces `self.vascular_cells` mid-build — `bind(lambda: self.vascular_cells, self.rng)`).
+- `_dispatch_fill(target, tissue, strategy, rng, **kw)` maps
+  `"packing"|"rings"|"line"` onto `fill_by_packing|fill_by_rings|fill_along`;
+  whatever the primitive returns is handed to the step's `record` hook.
+  (No `"border"` strategy: the single-ellipse metaxylem seeding stays a `special`
+  — it isn't a region+fill.)
+- `fill_by_packing` now no-ops on an empty/None zone (makes `recipe.fill` safe for
+  a star that didn't fit; previously the caller guarded).
+
+**Done in `root_class.py`:**
+
+- **Xylem star** split into a pure region builder `_xylem_star_region(stele) ->
+  Tissue` (sets `xylem_star`/`pith_polygon`) + `_xylem_pack_kwargs()` +
+  `_record_xylem_vessels()`. `fit_star_shapped_xylem` is now a thin shim
+  (region + fill) kept for direct/test use; both recipes drive it declaratively
+  via `recipe.fill("xylem star", self._xylem_star_region(polygon),
+  strategy="packing", record=self._record_xylem_vessels, **self._xylem_pack_kwargs())`.
+- **Phloem** `fit_phloem_elements` removed; replaced by `_add_phloem_step(recipe,
+  stele, type)` using `recipe.fill_each` over a *deferred* `_phloem_valley_zones`
+  callable, with a `record` hook that buffers each region by `_phloem_adjustment`
+  into `vascular_tissue_polygons`. Shared by monocot star + dicot primary.
+- Bespoke steps now use `recipe.special(...)` (semantic marker, identical
+  behaviour): monocot **metaxylem ring** (border fill), **metaxylem sheath**
+  (cell-relative), **phloem + protoxylem bundles** (pizza-slice); dicot
+  **secondary xylem/phloem** (ring fills) and **primary cambium** (line fill).
+- `clear stele under xylem` is now a `recipe.cleanup(...)`.
+
+Tests added: `test_recipe_fill_packs_a_region`,
+`test_recipe_fill_each_and_lazy_target`, `test_recipe_empty_region_is_safe`,
+`test_recipe_special_and_cleanup_order` in `test_recipe_vocabulary.py`.
+
+**Not converted (deliberate, matches doc/tissue_refactor.md):** the `special`
+steps above are bespoke fills (border / pizza-slice / rings / line + companion
+cells + sheath), not plain region+fill; converting them is P2/P3 work (special
+vocabulary) or out of scope. The two genuine region+fill cases (xylem star,
+phloem valleys) are now declarative — that's the P1 deliverable.
 
 Deliverable: monocot/dicot recipes read as region+fill declarations; goldens
-unchanged. Risk: low (mechanical, byte-identical).
+unchanged. Risk: low (mechanical, byte-identical). **Complete.**
 
 ---
 

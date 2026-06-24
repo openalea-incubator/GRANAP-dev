@@ -78,19 +78,39 @@ return `self` (chainable):
   inspectable list of build steps. An organ's stele is assembled by a recipe
   whose order is *data* (`recipe.describe()` returns `[(name, produces), ...]`),
   not control flow.
+- Recipes are written **declaratively**: `recipe.bind(cells, rng)` (cells may be
+  a callable, resolved at build time) then —
+  - `recipe.fill(name, tissue, strategy="packing"|"rings"|"line", record=…, **kw)`
+    — one region → cells via the matching `fill_*` primitive;
+  - `recipe.fill_each(name, tissues_or_callable, …)` — many regions (the iterable
+    may be a zero-arg callable, deferred to build time when the regions depend on
+    an earlier step, e.g. phloem valleys carved from the xylem star);
+  - `recipe.cleanup(name, fn)` — a cell/group-level cleanup (produces nothing);
+  - `recipe.special(name, fn, produces=…)` — a bespoke placement that isn't a
+    plain region+fill (border / pizza-slice / rings / sheath).
+  - `recipe.add(name, fn, produces=…)` — the low-level escape hatch (wrap any
+    callable). The `record` hook receives whatever the fill primitive returns,
+    for mask bookkeeping (e.g. recording placed vessels in `vascular_polygons`).
 
 ## How an organ uses it
 
 `MonocotRootAnatomy` / `DicotRootAnatomy` expose `_vascular_recipe(polygon)`
 returning a `TissueRecipe`; `_create_vascular_tissue` just guards then
-`recipe.build()`. Each step builds region(s) and fills them. Example already
-converted — phloem:
+`recipe.build()`. The two genuine region+fill steps are now declarative — the
+monocot star recipe reads:
 
 ```python
-tissue = Tissue("phloem", raw_ellipse).intersection(stele).difference(xylem_star)
-...
-fill_by_packing(self.vascular_cells, tissue.shape, tissue.tag, rng=self.rng, ...)
+recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
+recipe.fill("xylem star", self._xylem_star_region(polygon), strategy="packing",
+            record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
+recipe.cleanup("clear stele under xylem", self._remove_stele_seeds_near_xylem)
+self._add_phloem_step(recipe, polygon, type="monocot")   # fill_each over valley regions
 ```
+
+where the region builders are pure geometry, e.g. a phloem valley is
+`Tissue("phloem", raw_ellipse).intersection(stele).difference(xylem_star)`.
+Bespoke placements (metaxylem border, pizza-slice bundles, sheath, secondary
+growth, primary cambium) stay `recipe.special(...)`.
 
 ## The cells-first engine (unchanged, lives in `Organ.generate_cells`)
 
@@ -129,16 +149,26 @@ conda env `granap` (`mamba activate granap`); **no pytest** — run test modules
 scripts (call `test_*` functions directly, `MPLBACKEND=Agg`). Shape-first
 vocabulary tests: `test/test_recipe_vocabulary.py`. Golden census regression
 (the safety net for all of the above): `test/test_vascular_regression.py` — pins
-the exact `seed=0` cell-type counts for monocot default/star/star+pith and dicot
-primary/secondary. Treat a golden change as a deliberate update, not a fix.
+the exact `seed=0` cell-type counts for monocot default/star/star+pith, dicot
+primary/secondary, **and needle default/features** (added 2026-06-24, P0). The
+golden builders now return a constructed organ (root **or** needle). Treat a
+golden change as a deliberate update, not a fix.
+
+Run the env via `mamba run -n granap python <test>.py` (bash `conda run` is not
+configured in this checkout).
 
 ## Status
 
 **Done**
 
 - `tissue_builder.py`: fill trio + `place_packed_group`, `retag_tissue`,
-  `Tissue` (shape-first), `TissueStep`/`TissueRecipe`.
-- Monocot & dicot vascular construction expressed as inspectable recipes.
+  `Tissue` (shape-first), `TissueStep`/`TissueRecipe` + **declarative recipe
+  ergonomics** (`bind`/`fill`/`fill_each`/`cleanup`/`special`, strategy dispatch;
+  roadmap P1, 2026-06-24).
+- Monocot & dicot vascular construction expressed as inspectable recipes; the two
+  region+fill steps (xylem star, phloem valleys) are now declarative
+  `recipe.fill`/`fill_each`, the rest `recipe.special` (P1).
+- Needle golden regression anchors added (P0).
 - Converted to shape-first `Tissue` regions (region-build + fill, all
   byte-identical against the seed=0 anchors):
   - `fit_phloem_elements` (`_phloem_valley_zones` → `Tissue` via region algebra);

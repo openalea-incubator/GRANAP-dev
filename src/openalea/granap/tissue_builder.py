@@ -270,6 +270,8 @@ def fill_by_packing(
 
     Returns the :func:`place_packed_group` output.
     """
+    if zone is None or zone.is_empty:
+        return []
     if id_base is None:
         id_base = (target.get_last_id_group() + 1) if target.cells else 0
     packed = GeometryProcessor.pack_circles(zone, rng=rng, **pack_kwargs)
@@ -400,13 +402,140 @@ class TissueStep:
         return f"TissueStep({self.name!r}, produces=[{tags}])"
 
 
-class TissueRecipe:
-    """An ordered, inspectable sequence of :class:`TissueStep` objects."""
+def _dispatch_fill(target: CellManager, tissue: "Tissue", strategy: str, rng, **kw):
+    """Fill ``tissue.shape`` with ``tissue.tag`` cells using a named strategy.
 
-    def __init__(self, steps: Optional[List[TissueStep]] = None):
+    Maps a recipe's ``strategy=`` onto the underlying fill primitives so a recipe
+    step can declare *how* a region is filled without naming the function:
+
+    * ``"packing"`` -> :func:`fill_by_packing` (circle-pack the region, seed each)
+    * ``"rings"``   -> :func:`fill_by_rings`   (concentric inward rings)
+    * ``"line"``    -> :func:`fill_along`      (seeds along the region exterior)
+
+    ``**kw`` is forwarded verbatim to the chosen primitive, so each strategy
+    keeps its own parameters.  The strategies have different return types
+    (``packing`` returns the placed-circle list; ``rings`` the next free id;
+    ``line`` ``None``) — whatever the primitive returns is handed to the step's
+    ``record`` hook so the caller can do its own bookkeeping.
+    """
+    if strategy == "packing":
+        return fill_by_packing(target, tissue.shape, tissue.tag, rng=rng, **kw)
+    if strategy == "rings":
+        return fill_by_rings(target, tissue.shape, cell_type=tissue.tag, **kw)
+    if strategy == "line":
+        return fill_along(target, tissue.shape, tissue.tag, **kw)
+    raise ValueError(f"unknown fill strategy {strategy!r}")
+
+
+class TissueRecipe:
+    """An ordered, inspectable sequence of :class:`TissueStep` objects.
+
+    Beyond the low-level :meth:`add` (wrap an arbitrary callable), a recipe can
+    be expressed *declaratively* — a step names a region (:class:`Tissue`) and a
+    fill strategy, rather than wrapping a bespoke ``fit_*`` method:
+
+        recipe = TissueRecipe(cells=organ.vascular_cells, rng=organ.rng)
+        recipe.fill("xylem star", xylem_region, strategy="packing", **pack_kw)
+        recipe.cleanup("clear stele under xylem", organ.clear_stele)
+        recipe.fill_each("phloem valleys", valley_regions, strategy="packing", **pack_kw)
+
+    The bound ``cells`` / ``rng`` are read lazily at :meth:`build` time, so an
+    organ can replace ``organ.vascular_cells`` between steps and later fills still
+    land in the current manager (pass ``cells`` as the organ's attribute holder
+    via :meth:`bind`, or re-bind).
+    """
+
+    def __init__(
+        self,
+        steps: Optional[List[TissueStep]] = None,
+        *,
+        cells: Optional[CellManager] = None,
+        rng=None,
+    ):
         self.steps: List[TissueStep] = list(steps) if steps else []
+        self._cells = cells
+        self._rng = rng
+
+    def bind(self, cells, rng) -> "TissueRecipe":
+        """Set the target CellManager + rng used by :meth:`fill` / :meth:`fill_each`.
+
+        ``cells`` may be a :class:`CellManager` or a zero-arg callable returning
+        one — pass a callable when the organ replaces its manager between steps,
+        so each fill resolves the *current* manager at build time.
+        """
+        self._cells = cells
+        self._rng = rng
+        return self
+
+    def _target(self) -> CellManager:
+        return self._cells() if callable(self._cells) else self._cells
 
     def add(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()) -> "TissueRecipe":
+        self.steps.append(TissueStep(name, fn, produces=produces))
+        return self
+
+    # -- declarative steps ---------------------------------------------------
+    def fill(
+        self,
+        name: str,
+        tissue: "Tissue",
+        *,
+        strategy: str = "packing",
+        produces: Optional[Tuple[str, ...]] = None,
+        record: Optional[Callable[["Tissue", object], None]] = None,
+        **kw,
+    ) -> "TissueRecipe":
+        """Add a step that fills one region ``tissue`` by ``strategy``.
+
+        ``record(tissue, result)`` (optional) runs after the fill with whatever
+        the strategy returned, for mask / polygon bookkeeping.  ``produces``
+        defaults to ``(tissue.tag,)``.
+        """
+        def _run(tissue=tissue, record=record, strategy=strategy, kw=kw):
+            result = _dispatch_fill(self._target(), tissue, strategy, self._rng, **kw)
+            if record is not None:
+                record(tissue, result)
+
+        self.steps.append(TissueStep(
+            name, _run, produces=produces if produces is not None else (tissue.tag,)
+        ))
+        return self
+
+    def fill_each(
+        self,
+        name: str,
+        tissues,
+        *,
+        strategy: str = "packing",
+        produces: Optional[Tuple[str, ...]] = None,
+        record: Optional[Callable[["Tissue", object], None]] = None,
+        **kw,
+    ) -> "TissueRecipe":
+        """Add a step that fills several regions ``tissues`` by ``strategy``.
+
+        ``tissues`` may be an iterable or a zero-arg callable returning one
+        (deferred until build time, e.g. when the regions depend on an earlier
+        step).  ``produces`` defaults to the tags of the regions.
+        """
+        def _run(tissues=tissues, record=record, strategy=strategy, kw=kw):
+            seq = tissues() if callable(tissues) else tissues
+            for tissue in seq:
+                result = _dispatch_fill(self._target(), tissue, strategy, self._rng, **kw)
+                if record is not None:
+                    record(tissue, result)
+
+        if produces is None and not callable(tissues):
+            produces = tuple(dict.fromkeys(t.tag for t in tissues))
+        self.steps.append(TissueStep(name, _run, produces=produces or ()))
+        return self
+
+    def cleanup(self, name: str, fn: Callable[[], None]) -> "TissueRecipe":
+        """Add a cell/group-level cleanup step (produces nothing new)."""
+        self.steps.append(TissueStep(name, fn))
+        return self
+
+    def special(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()) -> "TissueRecipe":
+        """Add a bespoke placement step (sheath, bundles, ...) that isn't a plain fill."""
         self.steps.append(TissueStep(name, fn, produces=produces))
         return self
 

@@ -17,37 +17,55 @@ import sys
 sys.path.append(os.path.abspath(".."))
 
 from openalea.granap.root_class import RootAnatomy
+from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.input_data import OrganInputData
 
 SEED = 0
 
 
 # -- canonical configurations ------------------------------------------------
+#
+# Each builder returns a *constructed organ* (seeded), so the suite spans both
+# RootAnatomy and NeedleAnatomy.  Build a fresh organ every call — generation
+# mutates it.
 
-def monocot_default() -> OrganInputData:
-    return OrganInputData.for_root()
+def monocot_default() -> RootAnatomy:
+    return RootAnatomy(OrganInputData.for_root(), seed=SEED)
 
 
-def monocot_star() -> OrganInputData:
+def monocot_star() -> RootAnatomy:
     data = OrganInputData.for_root()
     data.set_value("xylem", "xylem_shape", "star")
-    return data
+    return RootAnatomy(data, seed=SEED)
 
 
-def monocot_star_pith() -> OrganInputData:
-    data = monocot_star()
+def monocot_star_pith() -> RootAnatomy:
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "xylem_shape", "star")
     data.set_value("xylem", "pith_radius", 0.05)
-    return data
+    return RootAnatomy(data, seed=SEED)
 
 
-def dicot_primary() -> OrganInputData:
-    return OrganInputData.for_dicot_root()
+def dicot_primary() -> RootAnatomy:
+    return RootAnatomy(OrganInputData.for_dicot_root(), seed=SEED)
 
 
-def dicot_secondary() -> OrganInputData:
+def dicot_secondary() -> RootAnatomy:
     data = OrganInputData.for_dicot_root()
     data.set_value("secondary_growth", "value", True)
-    return data
+    return RootAnatomy(data, seed=SEED)
+
+
+def needle_default() -> NeedleAnatomy:
+    return NeedleAnatomy(OrganInputData.for_needle(), seed=SEED)
+
+
+def needle_features() -> NeedleAnatomy:
+    """Needle with extra resin ducts and stomata (matches ``test_needle``)."""
+    data = OrganInputData.for_needle()
+    data.set_value("resin_duct", "n_files", 2)
+    data.set_value("stomata", "n_files", 10)
+    return NeedleAnatomy(data, seed=SEED)
 
 
 # -- golden census (seed=0) --------------------------------------------------
@@ -76,21 +94,33 @@ GOLDEN = {
         "epidermis": 247, "exodermis": 118, "medullar_ray": 48, "pericycle": 223,
         "phloem": 143, "phloem_parenchyma": 133, "stele": 425, "xylem": 48,
     }),
+    "needle_default": (needle_default, {
+        "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,
+        "endodermis": 49, "epidermis": 231, "guard cell": 8, "hypodermis": 387,
+        "mesophyll": 228, "parenchyma": 244, "phloem": 310, "pore": 4,
+        "resin duct": 42, "transfusion": 103, "xylem": 270,
+    }),
+    "needle_features": (needle_features, {
+        "Strasburger cell": 38, "air space": 327, "cambium": 58, "duct": 2,
+        "endodermis": 49, "epidermis": 219, "guard cell": 20, "hypodermis": 366,
+        "mesophyll": 230, "parenchyma": 244, "phloem": 310, "pore": 10,
+        "resin duct": 28, "transfusion": 103, "xylem": 270,
+    }),
 }
 
 
-def _census(make_input) -> dict:
-    root = RootAnatomy(make_input(), seed=SEED)
-    root.generate_cells()
+def _census(make_organ) -> dict:
+    organ = make_organ()
+    organ.generate_cells()
     counts: dict = {}
-    for cell in root.all_cells.cells:
+    for cell in organ.all_cells.cells:
         counts[cell.type] = counts.get(cell.type, 0) + 1
     return counts
 
 
 def _check(name: str) -> None:
-    make_input, expected = GOLDEN[name]
-    got = _census(make_input)
+    make_organ, expected = GOLDEN[name]
+    got = _census(make_organ)
     assert got == expected, (
         f"{name}: anatomy census drifted from golden.\n"
         f"  expected: {dict(sorted(expected.items()))}\n"
@@ -100,8 +130,8 @@ def _check(name: str) -> None:
 
 def test_seed0_reproducible():
     """Two builds of the same config must be identical (no global-RNG leakage)."""
-    for name, (make_input, _) in GOLDEN.items():
-        assert _census(make_input) == _census(make_input), f"{name} not reproducible"
+    for name, (make_organ, _) in GOLDEN.items():
+        assert _census(make_organ) == _census(make_organ), f"{name} not reproducible"
 
 
 def test_monocot_default_golden():
@@ -122,6 +152,14 @@ def test_dicot_primary_golden():
 
 def test_dicot_secondary_golden():
     _check("dicot_secondary")
+
+
+def test_needle_default_golden():
+    _check("needle_default")
+
+
+def test_needle_features_golden():
+    _check("needle_features")
 
 
 if __name__ == "__main__":
