@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 from collections import defaultdict
 from scipy.sparse import lil_matrix
 import time
@@ -628,11 +629,20 @@ class Organ(AbstractNetwork, ABC):
                 if ri != rj:
                     parent[ri] = rj
 
+            # Only test pairs whose bounding boxes overlap (an STRtree query);
+            # touching/intersecting polygons always have overlapping bboxes, so
+            # the resulting union-find partition is identical to the old O(n²)
+            # all-pairs scan.  ``touches or intersects`` collapses to just
+            # ``intersects`` (touches ⟹ intersects).
+            pool_polys = [c.polygon for c in merge_pool]
+            tree = STRtree(pool_polys)
             for i in range(n_pool):
-                for j in range(i + 1, n_pool):
-                    if cell_quadrants[i] != cell_quadrants[j]:
+                poly_i = pool_polys[i]
+                quad_i = cell_quadrants[i]
+                for j in tree.query(poly_i):
+                    if j <= i or cell_quadrants[j] != quad_i:
                         continue
-                    if merge_pool[i].polygon.touches(merge_pool[j].polygon) or merge_pool[i].polygon.intersects(merge_pool[j].polygon):
+                    if poly_i.intersects(pool_polys[j]):
                         _union(i, j)
 
             groups: dict = defaultdict(list)

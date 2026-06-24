@@ -497,30 +497,35 @@ class CellGenerator:
         coords_arr = np.array(all_raw_verts)
         kd_tree = cKDTree(coords_arr)
 
-        # Snap tolerance: 1 % of 5th-percentile edge length
-        edge_lengths = []
+        # Snap tolerance: 1 % of 5th-percentile edge length.  Edge lengths are
+        # computed vectorised per cell (one np.hypot over the whole ring) rather
+        # than scalar-by-scalar in a Python loop; the resulting set is identical.
+        edge_chunks = []
         for coords in raw_cell_data.values():
-            n = len(coords)
-            for k in range(n):
-                el = np.hypot(
-                    coords[(k + 1) % n][0] - coords[k][0],
-                    coords[(k + 1) % n][1] - coords[k][1],
-                )
-                if el > 0:
-                    edge_lengths.append(el)
+            pts = np.asarray(coords, dtype=float)
+            diffs = pts - np.roll(pts, -1, axis=0)
+            el = np.hypot(diffs[:, 0], diffs[:, 1])
+            edge_chunks.append(el[el > 0])
+        all_edges = (
+            np.concatenate(edge_chunks) if edge_chunks else np.empty(0)
+        )
         snap_tol = (
-            np.percentile(edge_lengths, 5) * 0.01
-            if edge_lengths
+            np.percentile(all_edges, 5) * 0.01
+            if all_edges.size
             else 1e-4
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate
+        # Cluster nearby vertices → canonical snapped coordinate.  All ball
+        # queries are issued in one parallel C batch; the greedy single-pass
+        # assignment below is byte-identical to querying point-by-point (each
+        # seed's cluster is still exactly the points within snap_tol of it).
+        neighbors = kd_tree.query_ball_point(coords_arr, snap_tol, workers=-1)
         canonical: List = [None] * len(all_raw_verts)
         visited_snap = [False] * len(all_raw_verts)
         for i in range(len(all_raw_verts)):
             if visited_snap[i]:
                 continue
-            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
+            cluster = neighbors[i]
             cx = float(np.mean(coords_arr[cluster, 0]))
             cy = float(np.mean(coords_arr[cluster, 1]))
             snapped = (round(cx, n_dec), round(cy, n_dec))

@@ -145,31 +145,29 @@ class GeometryProcessor:
             Smoothed coordinate array
         """
         coords = GeometryProcessor.resample_coords(coords, target_n_points=200)
-        
+
+        # Closedness is invariant across passes (a closed ring is re-closed each
+        # pass, an open one stays open), so test it once instead of per iteration.
+        is_closed = np.allclose(coords[0], coords[-1])
+
         for _ in range(iterations):
-            is_closed = np.allclose(coords[0], coords[-1])
-            
-            if is_closed:
-                pts = coords[:-1]
-            else:
-                pts = coords
-            
+            pts = coords[:-1] if is_closed else coords
             pts = pts.astype(float)
-            
+
             if len(pts) < 3:
                 return coords
-            
+
             prev_pts = np.roll(pts, 1, axis=0)
             next_pts = np.roll(pts, -1, axis=0)
-            
+
             smoothed_pts = (1 - smooth_factor) * pts + \
                           smooth_factor * (prev_pts + next_pts) / 2.0
-            
+
             if is_closed:
                 coords = np.vstack([smoothed_pts, smoothed_pts[0]])
             else:
                 coords = smoothed_pts
-        
+
         return coords
     
     @staticmethod
