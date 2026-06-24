@@ -125,76 +125,142 @@ unchanged. Risk: low (mechanical, byte-identical). **Complete.**
 
 ---
 
-## P2 — Special-function vocabulary  *(medium)*
+## P2 — Special-function vocabulary  *(DONE 2026-06-24; companion cells deferred)*
 
-Promote the organ-specific "special" placements into a shared, named library
-(new `special_tissues.py`, or a section of `tissue_builder.py`), parameterised
-and organ-agnostic where possible. These are the user's original "special
-functions":
+Promote the organ-specific "special" placements into a shared, named library —
+new **`special_tissues.py`**, parameterised and organ-agnostic. These are the
+user's original "special functions". The geometry of *where* a feature goes
+stays with the organ (it is organ-specific); the shared functions take that
+precomputed geometry and do the cell placement.
 
-- `add_stomata(...)`            ← from `NeedleAnatomy.add_stomata` / `_stomata_carve_polygons`
-- `add_resin_duct(...)`         ← from `NeedleAnatomy.add_canal` / `_duct_zone_data`
-- `add_companion_cells(tag, diameter, width)` ← dicot secondary phloem companion logic
-- `add_intercellular_space(...)`← generalise `Organ.add_intercellular`
-- `consider_as_cell(region, tag)` ← collapse a region/group into one cell
-  (the user's `consider_as_cell`; clarify exact semantics when implementing)
+**Done (byte-identical; needle goldens + `test_special_tissues.py` green):**
 
-Each becomes a step a recipe can call via `recipe.special(...)`. Keep the
-cell-relative ones (sheath, stomata) honest — they run after their reference
-cells exist (see `tissue_refactor.md` on cells-first ops).
+- `carve_and_insert(cell_manager, carve_polygons, new_cells, *, buffer=0, recalc=True)`
+  — the shared post-fill structural pattern (remove cells under a mask, insert
+  new cells, recompute) behind both needle features.
+- `place_resin_duct(cell_manager, duct_data, rdp, layer_index)` ← cell-placement
+  half of `NeedleAnatomy.add_canal`. `add_canal` now just computes geometry
+  (`_duct_zone_data`) then calls it. (`_CANAL_RESAMPLE_PTS` moved here.)
+- `place_stomata(cell_manager, stomata_geoms, sp, cell_diam)` ← cell-placement
+  half of `NeedleAnatomy.add_stomata`. `add_stomata` keeps the recenter +
+  triplet-index math (organ geometry) then calls it.
+- `consider_as_cell(cell_manager, region, tag, *, id_layer=0, replace=True)` —
+  collapse a region into a single cell whose polygon **is** the region (a fresh
+  polygon, not Voronoi-derived); `replace` first removes cells under it.
+  Semantics **confirmed by Dilhan 2026-06-24**.
+
+**Deferred (deliberate):**
+
+- `add_companion_cells` — the companion placement is interleaved *inside*
+  `_fill_phloem_zone`'s per-sieve packing loop (each companion is positioned
+  tangent to the sieve just placed). Extracting it cleanly is a real rewrite of
+  that loop with regression risk and little reuse — same call as secondary
+  growth in `tissue_refactor.md`. Convert only alongside a genuine simplification
+  of `_fill_phloem_zone`.
+- `add_intercellular_space` — already organ-agnostic on the `Organ` base
+  (`_apply_intercellular`); no extraction needed. Could be surfaced as a named
+  recipe verb later, but it runs in the engine's post-Voronoi phase, not the
+  vascular recipe.
+
+Each placed feature is recipe-callable via `recipe.special(...)`. The
+cell-relative ones (sheath, stomata, ducts) stay honest — they run after their
+reference cells exist (see `tissue_refactor.md` on cells-first ops).
 
 Deliverable: shared special-function API; needle's `add_canal`/`add_stomata`
-re-expressed on top of it (behind needle goldens). Risk: medium (API design;
-stomata index math is fiddly).
+re-expressed on top of it (behind needle goldens). **Largely complete** —
+companion cells deferred; `consider_as_cell` pending semantics confirmation.
 
 ---
 
-## P3 — Needle into the recipe model  *(medium–high)*
+## P3 — Needle into the recipe model  *(DONE 2026-06-24)*
 
-Bring `NeedleAnatomy` onto the same footing as root.
+Brought `NeedleAnatomy` onto the same footing as root. Byte-identical (needle
+goldens + needle network test green).
 
-- **Vascular**: `vascular_elements_in_ellipses` (~140 lines) → region builders
-  (the two ellipses from `two_ellipses` become `Tissue`s) + a fill. The xylem /
-  phloem / cambium / Strasburger grid is a bespoke fill — keep it as a named
-  fill strategy (it does not map onto packing); the *region* half still becomes
-  `Tissue` + algebra.
-- **Organ-specific**: a `NeedleAnatomy._organ_recipe` running `add_resin_duct`
-  and `add_stomata` from the P2 vocabulary.
-- Add `NeedleAnatomy._vascular_recipe` so `_create_vascular_tissue` is just
-  `recipe.build()`, matching root.
+- `NeedleAnatomy._vascular_recipe(polygon)` added; `_create_vascular_tissue` is
+  now just `recipe.build()`, matching root. The xylem / phloem / cambium /
+  Strasburger grid stays a single `recipe.special("vascular ellipse grid", ...)`
+  step — its "region" is two *oriented* ellipses carrying axis/angle metadata
+  that the grid loop consumes, so it does **not** map onto the shape-first
+  region+fill verbs (same call as root's metaxylem-border / pizza-bundle bespoke
+  fills). `two_ellipses` deliberately **not** wrapped in `Tissue`: it would strip
+  the axis/angle metadata for cosmetic churn + regression risk, the same lesson
+  as secondary growth in `tissue_refactor.md`.
+- `NeedleAnatomy._organ_recipe()` added; `_organ_specific_tissues` is now
+  `recipe.build()` over two `special` steps — `"resin ducts"` (→ `add_canal` →
+  `place_resin_duct`) and `"stomata"` (→ `add_stomata` → `place_stomata`), the P2
+  vocabulary.
+- Inspectable: `test_needle_recipes_are_inspectable` in `test_recipe_vocabulary.py`.
 
-Deliverable: needle expressed as recipes; needle goldens hold (or deliberate
-update). Risk: medium–high (bespoke grid + stomata geometry).
-
----
-
-## P4 — Unify the three recipes  *(medium)*
-
-With monocot, dicot, needle all on the recipe model, factor the shared shape and
-push toward a **declarative spec**:
-
-- Common recipe scaffold on `Organ` (or a mixin): the per-organ files supply only
-  region builders + the ordered list of `(region, fill, params)` / `special`
-  steps.
-- Optionally express a recipe as **data** (a list of tissue specs) that a
-  non-programmer can read/edit, with the engine interpreting it — the end state
-  of "simplified recipe."
-- `recipe.describe()` already gives inspection; extend it to render the full
-  region/fill/special plan for `plot_tissues` previews.
-
-Deliverable: three short, parallel, declarative organ recipes. Risk: medium
-(abstraction; resist over-generalising before all three are proven).
+Deliverable: needle expressed as recipes; needle goldens hold. **Complete.**
+(The ~140-line `vascular_elements_in_ellipses` grid itself is left as the bespoke
+fill it is — decomposing it further is out of P3's scope and has no golden-safe
+payoff.)
 
 ---
 
-## P5 — Optional layout/cleanup follow-ups  *(low priority)*
+## P4 — Unify the three recipes  *(DONE 2026-06-24)*
 
-- Central stele **subtract-then-fill** instead of fill-then-mask — needs the
-  pipeline reordered so vascular regions exist before stele seeding; low payoff
-  over the current unified mask (see `tissue_refactor.md`). Do only if a concrete
-  need appears.
-- Post-fill ops (intercellular / aerenchyma) stay cells-first by nature; leave as
-  engine steps below the tissue abstraction.
+With monocot, dicot, needle all on the recipe model, factored the shared shape.
+Byte-identical (all goldens + recipe/special/ROI suites green).
+
+**Common recipe scaffold on `Organ`:**
+
+- `Organ._create_vascular_tissue(polygon)` is now concrete:
+  `self._vascular_recipe(polygon).build()`. `Organ._organ_specific_tissues()` is
+  concrete: `self._organ_recipe().build()`.
+- `Organ._vascular_recipe(polygon)` and `Organ._organ_recipe()` are the single
+  overridable contract, each defaulting to an **empty** `TissueRecipe` (no longer
+  `@abstractmethod`). The per-organ files supply *only* their recipe.
+- Removed the duplicated `_create_vascular_tissue` from `MonocotRootAnatomy`,
+  `DicotRootAnatomy`, `NeedleAnatomy` and the `RootAnatomy` stub; removed
+  `_organ_specific_tissues` from `RootAnatomy` (now Organ's no-op default) and
+  `NeedleAnatomy`. The vascular guards (`n_vascular_bundles==0` /
+  `n_vascular_peak==0`) moved *into* each `_vascular_recipe` (return empty).
+  `RoiOrgan` keeps its explicit `pass` overrides (no vascular).
+
+**Inspection / preview (`recipe.describe()` extended):**
+
+- `TissueStep.kind` ∈ {fill, fill_each, cleanup, special, add}; set by each
+  recipe verb.
+- `recipe.plan()` → `[(name, kind, produces), ...]` (full plan; `describe()` kept
+  name+produces for back-compat). `recipe.format_plan()` renders an indented,
+  human-readable block (`[fill] xylem star -> xylem, stele` …); `TissueRecipe.__repr__`.
+- Tests: `test_recipe_plan_reports_kinds_and_renders`,
+  `test_organ_default_recipes_are_empty`, and `plan()` kind assertions added to
+  `test_recipe_is_inspectable`.
+
+**Deliberately NOT done — data-driven spec.** Expressing a recipe as a list of
+tissue-spec *data* interpreted by an engine is the roadmap's *optional* end state;
+skipped per "resist over-generalising before there's a concrete need." The three
+recipes are already short, parallel and declarative, and `plan()` gives the
+inspection a data spec would have fed. Revisit only when a non-programmer-editable
+spec is actually required.
+
+Deliverable: three short, parallel, declarative organ recipes on one shared
+scaffold, fully inspectable. **Complete.**
+
+---
+
+## P5 — Optional layout/cleanup follow-ups  *(CLOSED — not pursued, 2026-06-24)*
+
+Reviewed and **deliberately not done** (Dilhan's call): both items are explicitly
+optional, and the central-stele rework is not a transparent refactor.
+
+- Central stele **subtract-then-fill** instead of fill-then-mask — would need the
+  pipeline reordered so vascular regions exist before stele seeding. Decided
+  against because (a) it is **not byte-identical** — cutting the vascular regions
+  out of the stele polygon before seeding shifts where the remaining stele seeds
+  land, changing the seed=0 goldens (a behaviour change, not a cleanup); and
+  (b) the unified vascular mask in `Organ.generate_cells` already *is* the
+  region-algebra model (see `tissue_refactor.md`, mask-migration findings), so
+  the payoff is marginal. Revisit only if a concrete need appears.
+- Post-fill ops (intercellular / aerenchyma) stay cells-first by nature; left as
+  engine steps below the tissue abstraction — no action needed.
+
+**Roadmap status: P0–P4 complete; P5 closed.** The refactor's goal — each organ's
+anatomy as a short, declarative, inspectable recipe on a shared scaffold — is met
+for monocot, dicot and needle.
 
 ---
 

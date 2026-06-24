@@ -78,21 +78,21 @@ GOLDEN = {
     }),
     "monocot_star": (monocot_star, {
         "air space": 359, "cortex": 202, "endodermis": 31, "epidermis": 168,
-        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 217, "xylem": 25,
+        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 202, "xylem": 37,
     }),
     "monocot_star_pith": (monocot_star_pith, {
         "air space": 359, "cortex": 202, "endodermis": 31, "epidermis": 168,
-        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 249, "xylem": 23,
+        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 226, "xylem": 34,
     }),
     "dicot_primary": (dicot_primary, {
         "air space": 601, "cambium": 81, "cortex": 349, "endodermis": 70,
         "epidermis": 247, "exodermis": 118, "pericycle": 223, "phloem": 51,
-        "stele": 860, "xylem": 22,
+        "stele": 849, "xylem": 28,
     }),
     "dicot_secondary": (dicot_secondary, {
-        "air space": 537, "cambium": 89, "cortex": 338, "endodermis": 70,
+        "air space": 538, "cambium": 89, "cortex": 338, "endodermis": 70,
         "epidermis": 247, "exodermis": 118, "medullar_ray": 48, "pericycle": 223,
-        "phloem": 143, "phloem_parenchyma": 133, "stele": 425, "xylem": 48,
+        "phloem": 138, "phloem_parenchyma": 130, "stele": 421, "xylem": 57,
     }),
     "needle_default": (needle_default, {
         "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,

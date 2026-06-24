@@ -308,33 +308,29 @@ class GeometryProcessor:
     @staticmethod
     def _chebyshev_center(polygon, grid_n: int = 15) -> Tuple[float, float, float]:
         """
-        Pole of inaccessibility via grid search + Nelder-Mead refinement.
-        Returns (cx, cy, radius) of the largest inscribed circle.
+        Pole of inaccessibility (largest inscribed circle): ``(cx, cy, radius)``.
+
+        Computed by GEOS via :func:`shapely.maximum_inscribed_circle` — a single
+        C call returning the centre→boundary segment.  This replaced a Python
+        grid search + scipy Nelder-Mead refinement that ran once per packed
+        circle and dominated ``pack_circles``.  The result differs from the old
+        approximation at the tolerance level, so it is a deliberate, golden-
+        rebaselined change (not byte-identical).  ``grid_n`` is accepted for
+        backward compatibility but unused.
         """
+        if polygon.is_empty or polygon.area <= 0.0:
+            c = polygon.centroid
+            return c.x, c.y, 0.0
+
         minx, miny, maxx, maxy = polygon.bounds
-        best_r, best_xy = 0.0, (polygon.centroid.x, polygon.centroid.y)
-
-        for x in np.linspace(minx, maxx, grid_n):
-            for y in np.linspace(miny, maxy, grid_n):
-                p = sp.Point(x, y)
-                if polygon.contains(p):
-                    r = p.distance(polygon.boundary)
-                    if r > best_r:
-                        best_r, best_xy = r, (x, y)
-
-        def neg_r(xy):
-            p = sp.Point(xy)
-            return -p.distance(polygon.boundary) if polygon.contains(p) else 0.0
-
-        res = minimize(neg_r, best_xy, method='Nelder-Mead',
-                       options={'xatol': 1e-5, 'fatol': 1e-5, 'maxiter': 300})
-        cx, cy = res.x
-        p = sp.Point(cx, cy)
-        if polygon.contains(p):
-            r = p.distance(polygon.boundary)
-            if r >= best_r:
-                return cx, cy, r
-        return best_xy[0], best_xy[1], best_r
+        tolerance = max(maxx - minx, maxy - miny) * 1e-4 or 1e-6
+        try:
+            line = sp.maximum_inscribed_circle(polygon, tolerance=tolerance)
+            (cx, cy), _boundary_pt = line.coords
+            return cx, cy, line.length
+        except Exception:
+            c = polygon.centroid
+            return c.x, c.y, 0.0
 
     @staticmethod
     def pack_circles(

@@ -16,6 +16,8 @@ from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
+from openalea.granap.special_tissues import place_resin_duct, place_stomata
+from openalea.granap.tissue_builder import TissueRecipe
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------
@@ -32,9 +34,6 @@ _DUCT_RING_BUFFER_FACTOR: float = 1.2
 # inward by this fraction of cell_diameter (prevents ring cells from sitting
 # on the exact ellipse edge).
 _DUCT_RING_INNER_SHRINK: float = 0.15
-
-# Number of resampled points for the inner lumen (canal) polygon.
-_CANAL_RESAMPLE_PTS: int = 15
 
 # Fixed placement order for resin ducts within the 7 mesophyll slices.
 # Positions 3 and 6 are the edge positions (placed first, as in real anatomy);
@@ -312,15 +311,23 @@ class NeedleAnatomy(Organ):
         polygon_for_vascular = layers_polygons[layer_for_vascular]["polygon"]
         return polygon_for_vascular
     
-    def _create_vascular_tissue(self, polygon: Polygon):
-        """
-        Create vascular tissue.
+    def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
+        """Needle vascular tissue as an inspectable recipe.
 
-        The remove-mask + extend step is done once in Organ.generate_cells()
-        after this method returns, so we only need to populate vascular_cells
-        and vascular_polygons here.
+        Built and run by the shared ``Organ._create_vascular_tissue`` scaffold.
+
+        The xylem / phloem / cambium / Strasburger grid packed into the two
+        central ellipses is a **bespoke fill** — its "region" is two *oriented*
+        ellipses carrying axis/angle metadata that the grid loop consumes, so it
+        does not map onto the shape-first region+fill verbs.  It therefore stays a
+        single ``special`` step, mirroring root's bespoke steps (metaxylem border,
+        pizza-slice bundles).
         """
-        self.fit_vascular_elements(polygon)
+        recipe = TissueRecipe()
+        recipe.special("vascular ellipse grid",
+                       lambda: self.fit_vascular_elements(polygon),
+                       produces=("xylem", "phloem", "cambium", "Strasburger cell"))
+        return recipe
 
     def fit_vascular_elements(self, polygon):
         # from polygon, fit two ellipses
@@ -334,154 +341,101 @@ class NeedleAnatomy(Organ):
         self.vascular_polygons = list_ellipses_polygons
         
 
-    def vascular_elements_in_ellipses(self, ellipses, debug = False):
+    def vascular_elements_in_ellipses(self, ellipses, debug=False):
+        """Seed the rectangular xylem/phloem grid (with a central cambium row and
+        interstitial Strasburger files) into each of the two vascular ellipses.
 
-        # create a list of polygons for each ellipse
+        Each grid coordinate is built in the ellipse's local frame, then rotated
+        by the ellipse angle and translated to its centre (:func:`place`); cells
+        that land inside the ellipse are kept.  A bespoke fill — there is no
+        region to pack, the layout is an explicit grid.
+        """
         list_ellipses_polygons: List[Polygon] = []
-        # create a list of cells in all ellipses
         cells_in_ellipses: List[Cell] = []
-        
+
+        params_xylem   = next(p for p in self.params if p["name"] == "xylem")
+        params_phloem  = next(p for p in self.params if p["name"] == "phloem")
+        params_cambium = next(p for p in self.params if p["name"] == "cambium")
+        xylem_rows       = params_xylem["n_files"]
+        phloem_rows      = params_phloem["n_files"]
+        xylem_cell_width = params_xylem["cell_diameter"]
+        xylem_cluster_n  = int(params_xylem["n_clusters"])
+
         id_cell = 0
         for ellipse in ellipses:
-            # get ellipse parameters
             center = ellipse["polygon"].centroid
             rx, ry = ellipse["axes"]
-            angle = np.deg2rad(ellipse["angle"])-np.pi/2
+            angle  = np.deg2rad(ellipse["angle"]) - np.pi / 2
+            cos_a, sin_a = np.cos(angle), np.sin(angle)
 
-            # add rows of xylem cells in upper part of ellipse
-            params_xylem = [p for p in self.params if p["name"] == "xylem"]
-            xylem_rows = params_xylem[0]["n_files"] # cell files
-            xylem_cell_width = params_xylem[0]["cell_diameter"] # cell width
-    
-            # add rows of phloem cells in lower part of ellipse
-            params_phloem = [p for p in self.params if p["name"] == "phloem"]
-            phloem_rows = params_phloem[0]["n_files"]
-            phloem_cell_diameter = params_phloem[0]["cell_diameter"]
-            # add cambium cells between xylem and phloem
-            params_cambium = [p for p in self.params if p["name"] == "cambium"]
-    
-            xylem_cell_height = (rx-params_cambium[0]["cell_diameter"])/xylem_rows
-            phloem_cell_height = (rx-params_cambium[0]["cell_diameter"])/phloem_rows
-    
-            n_xylem_width = int(np.ceil(ry*2/xylem_cell_width)) # number of cells in width
-            xylem_cells = []
-            
-            xylem_cluster_n = int(params_xylem[0]["n_clusters"]) # number of clusters
-            xylem_cluster_size = int(params_xylem[0]["n_per_cluster"]) # number of cells per cluster in width
-    
-            # verify if there are enough cells for the clusters
-            cluster_width = xylem_cluster_size*xylem_cell_width
-            xylem_cluster_size = int(np.ceil((ry*2 - xylem_cell_width*(xylem_cluster_n-1))/(xylem_cell_width*xylem_cluster_n)))
-            
-            temp_cluster_id = xylem_cluster_size
-    
-            for i in range(n_xylem_width+1):
-                for j_xlm in range(xylem_rows+1):
-                    id_cell += 1
-                    xyl_coord = [i*xylem_cell_width - ry + xylem_cell_width/2,  # starting from left to right
-                                 j_xlm*xylem_cell_height - ry + xylem_cell_height/2] # starting from middle to top
-                    # tilt the cells
-                    xyl_coord = [xyl_coord[0]*np.cos(angle) - xyl_coord[1]*np.sin(angle), xyl_coord[0]*np.sin(angle) + xyl_coord[1]*np.cos(angle)] 
-                    # translate the cells
-                    xyl_coord = [xyl_coord[0] + center.x, xyl_coord[1] + center.y]
-                    
-                    if temp_cluster_id == 0:
-                        cell_type = "Strasburger cell"
-                    else:
-                        cell_type = "xylem"
-                    xylem_cell_diameter = (xylem_cell_width + xylem_cell_height)/2
-                    
-                    xylem_cell = Cell(
-                        id_cell=id_cell,
-                        id_group=id_cell,
-                        type=cell_type,
-                        x=xyl_coord[0],
-                        y=xyl_coord[1],
-                        diameter=xylem_cell_diameter,
-                        angle=np.arctan2(xyl_coord[1]-center.y, xyl_coord[0]-center.x),
-                        radius=np.sqrt((xyl_coord[0]-center.x)**2 + (xyl_coord[1]-center.y)**2),
-                        area=np.pi * (xylem_cell_diameter/2)**2,
-                    )
-    
-                    # is the point in ellipse
-                    if ellipse["polygon"].contains(Point(xyl_coord)):
-                        cells_in_ellipses.append(xylem_cell)   
-                
-                for j_phl in range(1, phloem_rows+1):
-                    id_cell += 1
-                    phlo_coord = [i*xylem_cell_width - ry + xylem_cell_width/2,  # starting from left to right
-                                 j_phl*phloem_cell_height + phloem_cell_height/2] # starting from middle to top
-                    # tilt the cells
-                    phlo_coord = [phlo_coord[0]*np.cos(angle) - phlo_coord[1]*np.sin(angle), phlo_coord[0]*np.sin(angle) + phlo_coord[1]*np.cos(angle)]
-                    phlo_coord = [phlo_coord[0] + center.x, phlo_coord[1] + center.y]
-                    phloem_cell_diameter = (xylem_cell_width + phloem_cell_height)/2
+            xylem_cell_height  = (rx - params_cambium["cell_diameter"]) / xylem_rows
+            phloem_cell_height = (rx - params_cambium["cell_diameter"]) / phloem_rows
+            xylem_cell_diameter  = (xylem_cell_width + xylem_cell_height) / 2
+            phloem_cell_diameter = (xylem_cell_width + phloem_cell_height) / 2
 
-                    phloem_cell = Cell(
-                        id_cell=id_cell,
-                        id_group=id_cell,
-                        type="phloem",
-                        x=phlo_coord[0],
-                        y=phlo_coord[1],
-                        diameter=phloem_cell_diameter,
-                        angle=np.arctan2(phlo_coord[1]-center.y, phlo_coord[0]-center.x),
-                        radius=np.sqrt((phlo_coord[0]-center.x)**2 + (phlo_coord[1]-center.y)**2),
-                        area=np.pi * (phloem_cell_diameter/2)**2,
-                    )
+            n_xylem_width      = int(np.ceil(ry * 2 / xylem_cell_width))
+            xylem_cluster_size = int(np.ceil(
+                (ry * 2 - xylem_cell_width * (xylem_cluster_n - 1)) / (xylem_cell_width * xylem_cluster_n)
+            ))
+            temp_cluster_id    = xylem_cluster_size
 
-                    # is the point in ellipse
-                    if ellipse["polygon"].contains(Point(phlo_coord)):
-                        cells_in_ellipses.append(phloem_cell)
-    
-                if temp_cluster_id == 0:
-                    temp_cluster_id = xylem_cluster_size+1
-                temp_cluster_id -= 1
-    
-                # cambium cell
+            def place(local_x, local_y, cell_type, cell_diameter):
+                """Tilt + translate a local grid coord; seed a cell if it lands in the ellipse."""
+                nonlocal id_cell
                 id_cell += 1
-    
-                xyl_coord = [i*xylem_cell_width - ry + xylem_cell_width/2,  # starting from left to right
-                            0] 
-                # tilt the cells
-                xyl_coord = [xyl_coord[0]*np.cos(angle) - xyl_coord[1]*np.sin(angle), xyl_coord[0]*np.sin(angle) + xyl_coord[1]*np.cos(angle)]  
-                xyl_coord = [xyl_coord[0] + center.x, xyl_coord[1] + center.y]
-                cambium_cell = Cell(
-                    id_cell=id_cell,
-                    id_group=id_cell,
-                    type="cambium",
-                    x=xyl_coord[0],
-                    y=xyl_coord[1],
-                    diameter=xylem_cell_diameter,
-                    angle=np.arctan2(xyl_coord[1]-center.y, xyl_coord[0]-center.x),
-                    radius=np.sqrt((xyl_coord[0]-center.x)**2 + (xyl_coord[1]-center.y)**2),
-                    area=np.pi * (xylem_cell_diameter/2)**2,
-                )
+                tx = local_x * cos_a - local_y * sin_a + center.x
+                ty = local_x * sin_a + local_y * cos_a + center.y
+                if ellipse["polygon"].contains(Point(tx, ty)):
+                    cells_in_ellipses.append(
+                        Cell.radial(cell_type, tx, ty, cell_diameter, id_cell, center)
+                    )
 
-                # is the point in ellipse
-                if ellipse["polygon"].contains(Point(xyl_coord)):
-                    cells_in_ellipses.append(cambium_cell)
-        
-            # create a list of polygons for each ellipse
+            for i in range(n_xylem_width + 1):
+                col_x = i * xylem_cell_width - ry + xylem_cell_width / 2
+
+                # xylem rows (upper part); interstitial cluster files are Strasburger cells
+                xylem_type = "Strasburger cell" if temp_cluster_id == 0 else "xylem"
+                for j in range(xylem_rows + 1):
+                    place(col_x, j * xylem_cell_height - ry + xylem_cell_height / 2,
+                          xylem_type, xylem_cell_diameter)
+
+                # phloem rows (lower part)
+                for j in range(1, phloem_rows + 1):
+                    place(col_x, j * phloem_cell_height + phloem_cell_height / 2,
+                          "phloem", phloem_cell_diameter)
+
+                if temp_cluster_id == 0:
+                    temp_cluster_id = xylem_cluster_size + 1
+                temp_cluster_id -= 1
+
+                # cambium cell on the ellipse mid-line
+                place(col_x, 0, "cambium", xylem_cell_diameter)
+
             list_ellipses_polygons.append(ellipse["polygon"])
-    
+
             if debug:
-                # plot the ellipse
                 color_map = {"Strasburger cell": "red", "xylem": "blue", "phloem": "green", "cambium": "yellow"}
                 plt.plot(ellipse["polygon"].exterior.xy[0], ellipse["polygon"].exterior.xy[1])
-                # plot the cells
                 for cell in cells_in_ellipses:
-                    plt.plot(cell.x, cell.y, "o", color = color_map[cell.type])
+                    plt.plot(cell.x, cell.y, "o", color=color_map[cell.type])
                 plt.show()
-            
+
         return cells_in_ellipses, list_ellipses_polygons
 
-    def _organ_specific_tissues(self):
-        """
-        Add organ specific tissues.
+    def _organ_recipe(self) -> TissueRecipe:
+        """Needle organ-specific tissues as a recipe of P2 special-tissue steps.
 
-        For needles, it adds resin ducts and stomata.
+        Both are cell-relative post-fill placements (carved into existing cells),
+        so they are ``special`` steps; the geometry is computed in ``add_canal`` /
+        ``add_stomata`` and placed by ``special_tissues.place_resin_duct`` /
+        ``place_stomata``.
         """
-        self.add_canal()
-        self.add_stomata()
+        recipe = TissueRecipe()
+        recipe.special("resin ducts", self.add_canal,
+                       produces=("resin duct", "duct"))
+        recipe.special("stomata", self.add_stomata,
+                       produces=("guard cell", "air space", "pore"))
+        return recipe
 
     # ------------------------------------------------------------------
     # Geometry helpers — pure computation, no cell placement
@@ -572,61 +526,17 @@ class NeedleAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def add_canal(self):
-        """Add resin ducts (parenchyma ring + inner lumen) to the mesophyll."""
+        """Add resin ducts (parenchyma ring + inner lumen) to the mesophyll.
+
+        Geometry is computed here (organ-specific); the cell placement is the
+        shared :func:`special_tissues.place_resin_duct`.
+        """
         duct_data, rdp = self._duct_zone_data(self._layers_polygons)
         if not duct_data:
             return
 
         layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
-        duct_cells = []
-        id_cell  = len(self.all_cells.cells) + 1
-        id_group = self.all_cells.get_last_id_group() + 1
-
-        for duct in duct_data:
-            ring_center = duct["ring_center"]
-
-            # resin-duct parenchyma cells along the ring
-            x, y   = duct["ring"].exterior.coords.xy
-            coords  = np.column_stack((x, y))
-            coords  = GeometryProcessor.resample_coords(
-                coords,
-                target_n_points=np.round(duct["ring"].length / rdp["cell_diameter"]).astype(int)
-            )
-            for border in CellGenerator.cell_border(coords, rdp["cell_diameter"], rdp["cell_diameter"])[1:]:
-                id_group += 1
-                for cell_coord in border:
-                    duct_cells.append(Cell(
-                        id_cell=id_cell, id_layer=layer_for_duct, id_group=id_group,
-                        type="resin duct",
-                        x=cell_coord[0], y=cell_coord[1],
-                        diameter=rdp["cell_diameter"],
-                        angle=np.arctan2(cell_coord[1] - ring_center.y, cell_coord[0] - ring_center.x),
-                        radius=np.sqrt((cell_coord[0] - ring_center.x)**2 + (cell_coord[1] - ring_center.y)**2),
-                        area=np.pi * (rdp["cell_diameter"] / 2)**2,
-                    ))
-                    id_cell += 1
-
-            # inner lumen cells along the canal
-            canal_center = duct["canal"].centroid
-            x, y  = duct["canal"].exterior.coords.xy
-            coords = GeometryProcessor.resample_coords(np.column_stack((x, y)), target_n_points=_CANAL_RESAMPLE_PTS)
-            id_group += 1
-            for coord in coords[1:]:
-                duct_cells.append(Cell(
-                    id_cell=id_cell, id_layer=layer_for_duct, id_group=id_group,
-                    type="duct",
-                    x=coord[0], y=coord[1],
-                    diameter=rdp["diameter"],
-                    angle=np.arctan2(coord[1] - canal_center.y, coord[0] - canal_center.x),
-                    radius=np.sqrt((coord[0] - canal_center.x)**2 + (coord[1] - canal_center.y)**2),
-                    area=np.pi * (rdp["diameter"] / 2)**2,
-                ))
-                id_cell += 1
-
-        for duct in duct_data:
-            self.all_cells.remove_cells_by_polygon(duct["outer"])
-        self.all_cells.extend_cells(duct_cells)
-        self.all_cells.recalculate_cell_properties()
+        place_resin_duct(self.all_cells, duct_data, rdp, layer_for_duct)
 
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         return float(n_files ** 1.12 + 1)
@@ -668,51 +578,9 @@ class NeedleAnatomy(Organ):
 
         stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
 
-        organ_specific_cells = CellManager()
-        stomata_carve_polys  = []
-        id_stomata = len(self.all_cells.cells) + 1
-        i_cell     = id_stomata
-
-        for carve_poly, gc1, gc2, chamber, pore in stomata_geoms:
-            stomata_carve_polys.append(carve_poly)
-
-            for raw_poly, cell_type, n_pts in [
-                (gc1,     "guard cell", 20),
-                (gc2,     "guard cell", 20),
-                (chamber, "air space",  10),
-            ]:
-                poly   = raw_poly.buffer(-cell_diam / 5)
-                coords = GeometryProcessor.resample_coords(
-                    np.column_stack(poly.exterior.coords.xy), n_pts
-                )
-                id_stomata += 1
-                for i_coord in coords:
-                    i_cell += 1
-                    organ_specific_cells.cells.append(Cell(
-                        x=i_coord[0], y=i_coord[1],
-                        diameter=np.sqrt(poly.area / np.pi) * 2,
-                        id_cell=i_cell, id_group=id_stomata,
-                        type=cell_type,
-                    ))
-
-            poly   = pore.buffer(-sp["width"] / 4)
-            coords = GeometryProcessor.resample_coords(
-                np.column_stack(poly.exterior.coords.xy), 10
-            )
-            id_stomata += 1
-            for i_coord in coords:
-                i_cell += 1
-                organ_specific_cells.cells.append(Cell(
-                    x=i_coord[0], y=i_coord[1],
-                    diameter=np.sqrt(poly.area / np.pi) * 2,
-                    id_cell=i_cell, id_group=id_stomata,
-                    type="pore",
-                ))
-
-        for carve in stomata_carve_polys:
-            self.all_cells.remove_cells_by_polygon(carve.buffer(cell_diam / 5))
-        self.all_cells.extend_cells(organ_specific_cells.cells)
-        self.all_cells.recalculate_cell_properties()
+        # Cell placement (guard cells + chamber + pore, carved into the
+        # epidermis) is the shared special-tissue function.
+        place_stomata(self.all_cells, stomata_geoms, sp, cell_diam)
 
     # ------------------------------------------------------------------
     # Visualization hook

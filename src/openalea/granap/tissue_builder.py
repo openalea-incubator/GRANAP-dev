@@ -109,14 +109,8 @@ def place_packed_group(
 
         gid = id_base + i
         for border_pt in border_coords[1:]:
-            target.add_cell(Cell(
-                type=rtype,
-                x=border_pt[0], y=border_pt[1],
-                diameter=actual_diam,
-                id_cell=gid, id_group=gid,
-                angle=np.arctan2(border_pt[1] - acy, border_pt[0] - acx),
-                radius=np.sqrt((border_pt[0] - acx) ** 2 + (border_pt[1] - acy) ** 2),
-                area=np.pi * r ** 2,
+            target.add_cell(Cell.radial(
+                rtype, border_pt[0], border_pt[1], actual_diam, gid, (acx, acy),
             ))
         placed_out.append((placed, rtype, gid))
 
@@ -170,14 +164,8 @@ def fill_along(
             id_group = next_id_group
             next_id_group += 1
             for border_pt in cell_borders[i][1:]:
-                target.add_cell(Cell(
-                    type=cell_type,
-                    x=border_pt[0], y=border_pt[1],
-                    diameter=cell_diam,
-                    id_cell=id_group, id_group=id_group,
-                    angle=np.arctan2(border_pt[1] - cy, border_pt[0] - cx),
-                    radius=np.sqrt((border_pt[0] - cx) ** 2 + (border_pt[1] - cy) ** 2),
-                    area=np.pi * (cell_diam / 2) ** 2,
+                target.add_cell(Cell.radial(
+                    cell_type, border_pt[0], border_pt[1], cell_diam, id_group, (cx, cy),
                 ))
 
 
@@ -239,7 +227,6 @@ def fill_by_rings(
                         diameter=cell_diameter,
                         id_cell=id_group, id_group=id_group,
                         angle=cell_angle, radius=cell_radius,
-                        area=np.pi * (cell_diameter / 2) ** 2,
                     ))
     return next_id
 
@@ -389,17 +376,25 @@ class TissueStep:
     edit-verb steps without touching the generators.
     """
 
-    def __init__(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()):
+    def __init__(
+        self,
+        name: str,
+        fn: Callable[[], None],
+        *,
+        produces: Tuple[str, ...] = (),
+        kind: str = "step",
+    ):
         self.name = name
         self.fn = fn
         self.produces = tuple(produces)
+        self.kind = kind          # "fill" | "fill_each" | "cleanup" | "special" | "add"
 
     def run(self) -> None:
         self.fn()
 
     def __repr__(self) -> str:
         tags = ", ".join(self.produces)
-        return f"TissueStep({self.name!r}, produces=[{tags}])"
+        return f"TissueStep({self.name!r}, kind={self.kind!r}, produces=[{tags}])"
 
 
 def _dispatch_fill(target: CellManager, tissue: "Tissue", strategy: str, rng, **kw):
@@ -471,7 +466,7 @@ class TissueRecipe:
         return self._cells() if callable(self._cells) else self._cells
 
     def add(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()) -> "TissueRecipe":
-        self.steps.append(TissueStep(name, fn, produces=produces))
+        self.steps.append(TissueStep(name, fn, produces=produces, kind="add"))
         return self
 
     # -- declarative steps ---------------------------------------------------
@@ -497,7 +492,8 @@ class TissueRecipe:
                 record(tissue, result)
 
         self.steps.append(TissueStep(
-            name, _run, produces=produces if produces is not None else (tissue.tag,)
+            name, _run, produces=produces if produces is not None else (tissue.tag,),
+            kind="fill",
         ))
         return self
 
@@ -526,17 +522,17 @@ class TissueRecipe:
 
         if produces is None and not callable(tissues):
             produces = tuple(dict.fromkeys(t.tag for t in tissues))
-        self.steps.append(TissueStep(name, _run, produces=produces or ()))
+        self.steps.append(TissueStep(name, _run, produces=produces or (), kind="fill_each"))
         return self
 
     def cleanup(self, name: str, fn: Callable[[], None]) -> "TissueRecipe":
         """Add a cell/group-level cleanup step (produces nothing new)."""
-        self.steps.append(TissueStep(name, fn))
+        self.steps.append(TissueStep(name, fn, kind="cleanup"))
         return self
 
     def special(self, name: str, fn: Callable[[], None], *, produces: Tuple[str, ...] = ()) -> "TissueRecipe":
         """Add a bespoke placement step (sheath, bundles, ...) that isn't a plain fill."""
-        self.steps.append(TissueStep(name, fn, produces=produces))
+        self.steps.append(TissueStep(name, fn, produces=produces, kind="special"))
         return self
 
     def build(self) -> None:
@@ -547,6 +543,26 @@ class TissueRecipe:
     def describe(self) -> List[Tuple[str, Tuple[str, ...]]]:
         """Return ``(name, produces)`` for each step, for inspection / preview."""
         return [(s.name, s.produces) for s in self.steps]
+
+    def plan(self) -> List[Tuple[str, str, Tuple[str, ...]]]:
+        """Return ``(name, kind, produces)`` for each step — the full plan.
+
+        Richer than :meth:`describe` (which is kept name+produces for
+        back-compat); ``kind`` distinguishes fill / fill_each / cleanup / special
+        / add so a preview can render *how* each tissue is produced.
+        """
+        return [(s.name, s.kind, s.produces) for s in self.steps]
+
+    def format_plan(self) -> str:
+        """Render the plan as an indented, human-readable block."""
+        lines = []
+        for s in self.steps:
+            tags = (" -> " + ", ".join(s.produces)) if s.produces else ""
+            lines.append(f"  [{s.kind}] {s.name}{tags}")
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return f"TissueRecipe({len(self.steps)} steps)"
 
     def __iter__(self):
         return iter(self.steps)

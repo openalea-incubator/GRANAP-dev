@@ -211,6 +211,47 @@ def test_recipe_is_inspectable():
     names = [name for name, _ in recipe.describe()]
     assert names == ["xylem star", "clear stele under xylem", "phloem in valleys"]
     assert dict(recipe.describe())["phloem in valleys"] == ("phloem",)
+    # plan() additionally reports each step's kind
+    assert [kind for _, kind, _ in recipe.plan()] == ["fill", "cleanup", "fill_each"]
+
+
+def test_recipe_plan_reports_kinds_and_renders():
+    cm = CellManager()
+    region = Tissue("phloem", Point(0.0, 0.0).buffer(0.3))
+    recipe = (
+        TissueRecipe().bind(cm, np.random.default_rng(SEED))
+        .fill("a", region, strategy="packing", proportion=1.0, diameter_max=0.1)
+        .cleanup("b", lambda: None)
+        .special("c", lambda: None, produces=("x",))
+    )
+    assert recipe.plan() == [("a", "fill", ("phloem",)),
+                             ("b", "cleanup", ()),
+                             ("c", "special", ("x",))]
+    txt = recipe.format_plan()
+    assert "[fill] a -> phloem" in txt
+    assert "[cleanup] b" in txt
+    assert "[special] c -> x" in txt
+
+
+def test_organ_default_recipes_are_empty():
+    # The base Organ scaffold gives a no-op recipe; root organs have no
+    # organ-specific tissue, monocot default has no vascular bundles -> empty.
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "n_vascular_bundles", 0)
+    root = RootAnatomy(data, seed=SEED)
+    assert len(root._vascular_recipe(Polygon())) == 0
+    assert len(root._organ_recipe()) == 0
+
+
+def test_needle_recipes_are_inspectable():
+    from openalea.granap.needle_class import NeedleAnatomy
+    needle = NeedleAnatomy(seed=SEED)
+
+    vrec = needle._vascular_recipe(Polygon())          # lambda not run until build()
+    assert [name for name, _ in vrec.describe()] == ["vascular ellipse grid"]
+
+    orec = needle._organ_recipe()
+    assert [name for name, _ in orec.describe()] == ["resin ducts", "stomata"]
 
 
 def test_monocot_baseline_unchanged():
@@ -232,6 +273,7 @@ if __name__ == "__main__":
     test_recipe_fill_each_and_lazy_target()
     test_recipe_empty_region_is_safe()
     test_recipe_special_and_cleanup_order()
+    test_needle_recipes_are_inspectable()
     test_phloem_valley_zones_are_tissue_regions()
     test_recipe_is_inspectable()
     test_monocot_baseline_unchanged()

@@ -5,6 +5,7 @@ from shapely.geometry import Polygon, Point, MultiPoint
 from scipy.spatial import Delaunay
 from shapely.affinity import translate
 import numpy as np
+import shapely
 
 class CellManager:
     def __init__(self):
@@ -70,23 +71,30 @@ class CellManager:
         return [cell.polygon for cell in self.cells if cell.polygon is not None]
     
     def remove_cells_by_polygon(self, polygon: Polygon):
+        """Drop every cell that intersects ``polygon``.
+
+        A cell's footprint is its Voronoi polygon if it has one, else its seed
+        point.  Both predicates are evaluated in bulk (vectorised shapely) rather
+        than one shapely call per cell — same result, far fewer Python-level
+        shapely dispatches.
+        """
         if not self.cells:
             return
 
-        # Check the first cell to decide strategy, assuming homogeneity
-        # Or better, handle both cases robustly
-        
-        cells_to_keep = []
-        for cell in self.cells:
-            if cell.polygon is not None:
-                if not cell.polygon.intersects(polygon):
-                    cells_to_keep.append(cell)
-            else:
-                point = Point(cell.x, cell.y)
-                if not point.intersects(polygon):
-                    cells_to_keep.append(cell)
-        
-        self.cells = cells_to_keep
+        remove = np.zeros(len(self.cells), dtype=bool)
+
+        poly_idx  = [i for i, c in enumerate(self.cells) if c.polygon is not None]
+        point_idx = [i for i, c in enumerate(self.cells) if c.polygon is None]
+
+        if poly_idx:
+            polys = np.array([self.cells[i].polygon for i in poly_idx], dtype=object)
+            remove[poly_idx] = shapely.intersects(polys, polygon)
+        if point_idx:
+            xs = np.array([self.cells[i].x for i in point_idx], dtype=float)
+            ys = np.array([self.cells[i].y for i in point_idx], dtype=float)
+            remove[point_idx] = shapely.intersects_xy(polygon, xs, ys)
+
+        self.cells = [c for c, drop in zip(self.cells, remove) if not drop]
     
     def recalculate_cell_properties(self):
         """Recalculate the properties of all cells in the list."""
@@ -102,9 +110,13 @@ class CellManager:
             cell.id_cell = i
 
     def remove_cells_in_polygon(self, polygon: Polygon):
-        # Filter cells that do not intersect the polygon
-        # This creates a new list, avoiding modification during iteration
-        self.cells = [cell for cell in self.cells if not cell.point.intersects(polygon)]
+        """Drop every cell whose seed point intersects ``polygon`` (bulk predicate)."""
+        if not self.cells:
+            return
+        xs = np.fromiter((c.x for c in self.cells), dtype=float, count=len(self.cells))
+        ys = np.fromiter((c.y for c in self.cells), dtype=float, count=len(self.cells))
+        remove = shapely.intersects_xy(polygon, xs, ys)
+        self.cells = [c for c, drop in zip(self.cells, remove) if not drop]
 
     def remove_cells_by_ids(self, ids: []):
         # filter cells

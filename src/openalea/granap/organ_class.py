@@ -23,6 +23,7 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.input_data import OrganInputData
+from openalea.granap.tissue_builder import TissueRecipe
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -342,24 +343,35 @@ class Organ(AbstractNetwork, ABC):
         """
         pass
 
-    @abstractmethod
     def _create_vascular_tissue(self, polygon: Polygon):
-        """
-        Create vascular tissue.
-        
-        Args:
-            polygon: Polygon boundary
-        """
-        pass
+        """Create vascular tissue by building this organ's vascular recipe.
 
-    @abstractmethod
+        Shared scaffold for every organ: each subclass supplies only
+        :meth:`_vascular_recipe`; the remove-mask + extend step runs once in
+        :meth:`generate_cells` after this returns.
+        """
+        self._vascular_recipe(polygon).build()
+
+    def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
+        """Return the ordered recipe that builds this organ's vascular tissue.
+
+        Default: an empty recipe (no vascular tissue).  Monocot / dicot / needle
+        override this; the build order is data, inspectable via
+        ``recipe.describe()`` / ``recipe.plan()``.
+        """
+        return TissueRecipe()
+
     def _organ_specific_tissues(self):
-        """
-        Add organ specific tissues.
+        """Add organ-specific tissues by building this organ's organ recipe."""
+        self._organ_recipe().build()
 
-        Returns:
+    def _organ_recipe(self) -> TissueRecipe:
+        """Return the recipe of organ-specific (post-fill) tissues.
+
+        Default: empty (root organs have none).  Needle overrides it with resin
+        ducts + stomata.
         """
-        pass
+        return TissueRecipe()
 
     def _extra_tissue_polygons(self, layers_polygons: List[LayerPolygon]) -> Dict[str, list]:
         """Return extra tissue polygons for visualization without placing cells.

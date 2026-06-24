@@ -43,10 +43,15 @@ engine** that stays, because two things are inherently global / post-fill:
    the engine.
 2. **Some operations are genuinely post-fill / cell-relative** — intercellular
    spaces and aerenchyma are carved from cell polygons after they exist; the
-   metaxylem *sheath* is defined relative to already-placed vessels. These stay
-   cells-first, below the tissue abstraction.
+   metaxylem *sheath* is defined relative to already-placed vessels; resin ducts
+   and stomata are carved into existing needle cells. These stay cells-first,
+   below the tissue abstraction, and live in **`special_tissues.py`** (the
+   organ-agnostic "special function" vocabulary — `carve_and_insert`,
+   `place_resin_duct`, `place_stomata`, `consider_as_cell`). An organ's recipe
+   invokes them via `recipe.special(...)`; the geometry of *where* the feature
+   goes stays with the organ, the shared function does the cell placement.
 
-So: **shape-first for layout, cells-first engine beneath it.**
+So: **shape-first for layout, cells-first engine (+ special_tissues) beneath it.**
 
 ## The vocabulary (`openalea/granap/tissue_builder.py`)
 
@@ -91,6 +96,14 @@ return `self` (chainable):
   - `recipe.add(name, fn, produces=…)` — the low-level escape hatch (wrap any
     callable). The `record` hook receives whatever the fill primitive returns,
     for mask bookkeeping (e.g. recording placed vessels in `vascular_polygons`).
+- Every step carries a `kind` (fill / fill_each / cleanup / special / add).
+  `recipe.describe()` → `[(name, produces), …]` (back-compat); `recipe.plan()` →
+  `[(name, kind, produces), …]`; `recipe.format_plan()` renders the plan as text.
+- **Shared scaffold (`Organ`):** `Organ._create_vascular_tissue` /
+  `_organ_specific_tissues` are concrete (`self._vascular_recipe(...).build()` /
+  `self._organ_recipe().build()`); each organ overrides only `_vascular_recipe` /
+  `_organ_recipe` (both default to an empty recipe). Vascular guards live inside
+  each `_vascular_recipe`.
 
 ## How an organ uses it
 
@@ -111,6 +124,12 @@ where the region builders are pure geometry, e.g. a phloem valley is
 `Tissue("phloem", raw_ellipse).intersection(stele).difference(xylem_star)`.
 Bespoke placements (metaxylem border, pizza-slice bundles, sheath, secondary
 growth, primary cambium) stay `recipe.special(...)`.
+
+**All three organs are now on the recipe model.** `NeedleAnatomy` too exposes
+`_vascular_recipe(polygon)` (one `special` step: the bespoke xylem/phloem/
+cambium/Strasburger ellipse grid) and `_organ_recipe()` (`special` steps for
+resin ducts + stomata, placed via `special_tissues`); `_create_vascular_tissue`
+and `_organ_specific_tissues` are just `recipe.build()`.
 
 ## The cells-first engine (unchanged, lives in `Organ.generate_cells`)
 
@@ -147,7 +166,8 @@ region before seeding stele).
 
 conda env `granap` (`mamba activate granap`); **no pytest** — run test modules as
 scripts (call `test_*` functions directly, `MPLBACKEND=Agg`). Shape-first
-vocabulary tests: `test/test_recipe_vocabulary.py`. Golden census regression
+vocabulary tests: `test/test_recipe_vocabulary.py`. Special-tissue vocabulary:
+`test/test_special_tissues.py`. Golden census regression
 (the safety net for all of the above): `test/test_vascular_regression.py` — pins
 the exact `seed=0` cell-type counts for monocot default/star/star+pith, dicot
 primary/secondary, **and needle default/features** (added 2026-06-24, P0). The
@@ -157,6 +177,18 @@ golden change as a deliberate update, not a fix.
 Run the env via `mamba run -n granap python <test>.py` (bash `conda run` is not
 configured in this checkout).
 
+## The seeding idiom: `Cell.radial`
+
+Almost every seed is built the same way — a cell at `(x, y)` whose polar
+attributes are taken relative to a tissue centre, with `area` a disc of its
+diameter. `Cell.radial(type, x, y, diameter, id_group, center, *, id_cell=None,
+id_layer=-1)` (in `cell_class.py`) captures exactly that: `angle =
+arctan2(y-cy, x-cx)`, `radius = hypot`, `area = π(d/2)²`, `id_cell` defaulting to
+`id_group`. It replaced ~40 hand-written 8-line `Cell(...)` blocks across
+`tissue_builder`, `special_tissues`, `root_class` and `needle_class` (byte-identical;
+the few sites with *shared* (non per-point) angle/radius or a non-disc area —
+medullar rays — keep the explicit form). Tested in `test_special_tissues.py`.
+
 ## Status
 
 **Done**
@@ -165,6 +197,16 @@ configured in this checkout).
   `Tissue` (shape-first), `TissueStep`/`TissueRecipe` + **declarative recipe
   ergonomics** (`bind`/`fill`/`fill_each`/`cleanup`/`special`, strategy dispatch;
   roadmap P1, 2026-06-24).
+- **File simplification (2026-06-24):** `Cell.radial` factory applied everywhere;
+  needle `vascular_elements_in_ellipses` grid rewritten (3 duplicated tilt/build
+  blocks → one `place()` closure, dead vars dropped) ~140→75 lines. All byte-identical.
+- **Secondary-growth de-duplication (2026-06-24):** the angular-wedge construction
+  (built identically for vessel slices and medullar-ray corridors) extracted to
+  `DicotRootAnatomy._angular_wedge(...)`; the secondary-xylem vessel pack-and-seed
+  loop replaced by the shared `place_packed_group` verb. Census-identical
+  (id_group numbering shifts, but grouping/positions are preserved — golden is a
+  census). The secondary-phloem **sieve** loop is left inline because its
+  companion-cell placement is interleaved per sieve (companion extraction deferred).
 - Monocot & dicot vascular construction expressed as inspectable recipes; the two
   region+fill steps (xylem star, phloem valleys) are now declarative
   `recipe.fill`/`fill_each`, the rest `recipe.special` (P1).
