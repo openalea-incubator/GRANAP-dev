@@ -1,8 +1,7 @@
 # Tissue refactor — the shape-first model
 
 This note records the architecture we are converging on for GRANAP's anatomy
-generation, why it is shaped that way, and what is done vs. still pending. It is
-written for whoever (human or assistant) picks the work up next.
+generation, why it is shaped that way, and what is done vs. still pending.
 
 ## The core idea: a tissue **is a region**
 
@@ -158,9 +157,10 @@ region before seeding stele).
   (Voronoi grouping). Ids are reassigned downstream (`extend_cells` offsets,
   `recalculate_cell_properties` sets `id_cell=i`). So id-numbering changes during
   a refactor are safe as long as grouping is preserved.
-- Regression anchors (seed=0): star `xylem 25 / stele 217 / phloem 5`;
-  star+pith `23 / 249 / 5`; default `stele 341 / metaxylem 5 / protoxylem 10 /
-  phloem 10`.
+- Regression anchors (seed=0): star `xylem 37 / stele 202 / phloem 5`;
+  star+pith `xylem 34 / stele 226 / phloem 5`; default `stele 341 / metaxylem 5 /
+  protoxylem 10 / phloem 10`. (Star/star+pith were rebaselined by the chebyshev
+  speed-up; see `test/test_vascular_regression.py` for the authoritative census.)
 
 ## Test harness
 
@@ -256,10 +256,6 @@ Investigated the seed-removal masks. Findings:
   produce a partial, distorted Voronoi cell. Verified: stubbing
   `_remove_stele_seeds_near_xylem` changes the star root stele 217 -> 307.
   Documented on the method.
-
-Lesson: "place then delete" is the right tool when the deletion is *cell/group
-relative* (avoiding partial cells); region algebra is right for *layout*
-(deciding where tissue goes). The codebase already splits along that line.
 
 **Pending**
 

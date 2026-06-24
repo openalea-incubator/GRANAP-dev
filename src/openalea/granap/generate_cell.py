@@ -144,6 +144,7 @@ class CellGenerator:
                 tp_d = layer["tp_diameter"]
                 p_tt = layer["p_tt"]
                 layer_poly = layer["polygon"]
+                sp.prepare(layer_poly)  # speeds the repeated covers() queries below
 
                 for i, cell_coord in enumerate(cells_coords[1:]):
                     seed_type = (
@@ -163,8 +164,12 @@ class CellGenerator:
                         (cell_coord[0] - center.x) ** 2
                         + (cell_coord[1] - center.y) ** 2
                     )
-                    for border_point in border_pts[1:]:
-                        if not layer_poly.covers(Point(border_point[0], border_point[1])):
+                    # Vectorised covers(): one C call for the whole ring of border
+                    # points instead of constructing a shapely Point per point.
+                    ring = border_pts[1:]
+                    covered = sp.covers(layer_poly, sp.points(ring[:, 0], ring[:, 1]))
+                    for border_point, is_covered in zip(ring, covered):
+                        if not is_covered:
                             continue
                         new_cell = Cell(
                             type=seed_type,
@@ -196,6 +201,16 @@ class CellGenerator:
                     layer["cell_width"] * 0.7,
                 )
 
+            # The next-inner layer polygon is loop-invariant — fetch and prepare
+            # it once (prepared geometry speeds the per-group contains() queries).
+            next_inner = (
+                layers_polygons[i_layer + 1]["polygon"]
+                if i_layer + 1 < len(layers_polygons)
+                else None
+            )
+            if next_inner is not None:
+                sp.prepare(next_inner)
+
             for i, cell_coord in enumerate(cells_coords[1:]):
                 if layer["name"] == "parenchyma":
                     new_cell = Cell(
@@ -217,18 +232,16 @@ class CellGenerator:
                     id_group += 1
                 else:
                     cell_border_points = layer_cell_borders[i]
-                    # Pre-fetch the next-inner layer polygon once per cell group
-                    next_inner = (
-                        layers_polygons[i_layer + 1]["polygon"]
-                        if i_layer + 1 < len(layers_polygons)
-                        else None
-                    )
-                    for border_point in cell_border_points[1:]:
-                        # Discard border points that bleed into the next inner layer —
-                        # they would create seeds inside the wrong tissue zone.
-                        if next_inner is not None and next_inner.contains(
-                            Point(border_point[0], border_point[1])
-                        ):
+                    ring = cell_border_points[1:]
+                    # Discard border points that bleed into the next inner layer —
+                    # they would create seeds inside the wrong tissue zone.  One
+                    # vectorised contains_xy() call replaces a shapely Point per point.
+                    if next_inner is not None and len(ring):
+                        bleeds = sp.contains_xy(next_inner, ring[:, 0], ring[:, 1])
+                    else:
+                        bleeds = np.zeros(len(ring), dtype=bool)
+                    for border_point, bleed in zip(ring, bleeds):
+                        if bleed:
                             continue
                         new_cell = Cell(
                             type=layer["name"],
@@ -314,21 +327,26 @@ class CellGenerator:
         tree = STRtree(polys)
 
         ids_to_remove: set = set()
+        cells = all_cells.cells
         for i, high in enumerate(valid_groups):
             high_poly = polys[i]
+            sp.prepare(high_poly)  # repeated contains() queries below
             # query returns indices whose bounding boxes overlap high_poly
             for j in tree.query(high_poly):
                 if j <= i:          # only lower-priority groups
                     continue
-                low = valid_groups[j]
                 if not high_poly.intersects(polys[j]):
                     continue
-                for idx in low["indices"]:
-                    if idx in ids_to_remove:
-                        continue
-                    cell = all_cells.cells[idx]
-                    if high_poly.contains(Point(cell.x, cell.y)):
-                        ids_to_remove.add(idx)
+                idxs = [idx for idx in valid_groups[j]["indices"]
+                        if idx not in ids_to_remove]
+                if not idxs:
+                    continue
+                # One vectorised contains_xy() for the whole low group instead of
+                # constructing a shapely Point per candidate cell.
+                xs = np.fromiter((cells[idx].x for idx in idxs), float, len(idxs))
+                ys = np.fromiter((cells[idx].y for idx in idxs), float, len(idxs))
+                inside = sp.contains_xy(high_poly, xs, ys)
+                ids_to_remove.update(idx for idx, ins in zip(idxs, inside) if ins)
 
         if ids_to_remove:
             all_cells.cells = [

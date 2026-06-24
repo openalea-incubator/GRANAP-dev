@@ -258,8 +258,10 @@ def test_monocot_baseline_unchanged():
     root = make_star_root()
     root.generate_cells()
     counts = cell_type_counts(root)
-    assert counts["xylem"] == 25
-    assert counts["stele"] == 217
+    # Anchors match the authoritative monocot_star golden in
+    # test_vascular_regression.py (rebaselined by the chebyshev speed-up).
+    assert counts["xylem"] == 37
+    assert counts["stele"] == 202
     assert counts["phloem"] == 5
 
 
