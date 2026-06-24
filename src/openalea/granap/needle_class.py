@@ -78,7 +78,7 @@ class NeedleAnatomy(Organ):
 
         # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
-        self.aerenchyma_params = next((p for p in self.params if p["name"] == "aerenchyma"), {})
+        self.aerenchyma_params = self._get_param("aerenchyma")
 
         # 4. Extract layer definitions (any param with 'order' that is not a vascular zone)
         self.layers = [param for param in self.params if "order" in param]

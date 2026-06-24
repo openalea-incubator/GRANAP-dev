@@ -107,9 +107,9 @@ class RootAnatomy(Organ):
 
     def _parse_shared_params(self) -> None:
         """Parse the parameters that are common to all root types."""
-        self.global_params = next((p for p in self.params if p["name"] == "planttype"), {})
+        self.global_params = self._get_param("planttype")
 
-        stele = next((p for p in self.params if p["name"] == "stele"), {})
+        stele = self._get_param("stele")
         self.vascular_params = {
             "thickness":                stele["thickness"],
             "cell_diameter":            stele["cell_diameter"],
@@ -121,7 +121,7 @@ class RootAnatomy(Organ):
         }
 
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
-        self.aerenchyma_params = next((p for p in self.params if p["name"] == "aerenchyma"), {})
+        self.aerenchyma_params = self._get_param("aerenchyma")
 
         self.layers = [
             p for p in self.params
@@ -460,8 +460,8 @@ class MonocotRootAnatomy(RootAnatomy):
     """Monocot root: ring of metaxylem vessels or star-shaped xylem."""
 
     def _parse_vascular_params(self) -> None:
-        xylem  = next((p for p in self.params if p["name"] == "xylem"),  {})
-        phloem = next((p for p in self.params if p["name"] == "phloem"), {})
+        xylem  = self._get_param("xylem")
+        phloem = self._get_param("phloem")
 
         self.vascular_params.update({
             "xylem_diameter":         float(xylem.get("vessel_diameter",        0.06)),
@@ -724,9 +724,9 @@ class DicotRootAnatomy(RootAnatomy):
     """Dicot root: star-shaped xylem with cambium and phloem; optional secondary growth."""
 
     def _parse_vascular_params(self) -> None:
-        xylem   = next((p for p in self.params if p["name"] == "xylem"),   {})
-        phloem  = next((p for p in self.params if p["name"] == "phloem"),  {})
-        cambium = next((p for p in self.params if p["name"] == "cambium"), {})
+        xylem   = self._get_param("xylem")
+        phloem  = self._get_param("phloem")
+        cambium = self._get_param("cambium")
 
         self.vascular_params.update({
             "xylem_diameter_max":        float(xylem.get("vessel_diameter",      0.09)),
@@ -758,12 +758,12 @@ class DicotRootAnatomy(RootAnatomy):
             "cambium_primary_arc_bottom": float(cambium.get("arc_bottom", 0.07)),
         })
 
-        sec_growth = next((p for p in self.params if p["name"] == "secondary_growth"), {})
+        sec_growth = self._get_param("secondary_growth")
         self.vascular_params["secondary_growth"] = bool(sec_growth.get("value", False))
 
         if self.vascular_params["secondary_growth"]:
-            sec_xylem = next((p for p in self.params if p["name"] == "secondary_xylem"), {})
-            sec_cam   = next((p for p in self.params if p["name"] == "secondary_cambium"), {})
+            sec_xylem = self._get_param("secondary_xylem")
+            sec_cam   = self._get_param("secondary_cambium")
             self.secondary_xylem_params = {
                 "prop_stele":             float(sec_xylem.get("prop_stele",             0.5)),
                 "cell_diameter":          float(sec_xylem.get("cell_diameter",          0.01)),
@@ -790,7 +790,7 @@ class DicotRootAnatomy(RootAnatomy):
                 "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
             }
 
-            sec_phloem = next((p for p in self.params if p["name"] == "secondary_phloem"), {})
+            sec_phloem = self._get_param("secondary_phloem")
             self.secondary_phloem_params = {
                 "outer_distance":      float(sec_phloem.get("outer_distance",      0.55)),
                 "arc_top":             (float(sec_phloem["arc_top"]) if sec_phloem.get("arc_top") is not None else None),
@@ -805,7 +805,7 @@ class DicotRootAnatomy(RootAnatomy):
                 "parenchyma_width":    float(sec_phloem.get("parenchyma_width",    0.012)),
             }
 
-            med_rays = next((p for p in self.params if p["name"] == "medullar_rays"), {})
+            med_rays = self._get_param("medullar_rays")
             self.medullar_rays_params = {
                 "n_medullar":         int(med_rays.get("n_medullar",         6)),
                 "base_width":         float(med_rays.get("base_width",       0.005)),

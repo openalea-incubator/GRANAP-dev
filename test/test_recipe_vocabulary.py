@@ -235,10 +235,12 @@ def test_recipe_plan_reports_kinds_and_renders():
 
 def test_organ_default_recipes_are_empty():
     # The base Organ scaffold gives a no-op recipe; root organs have no
-    # organ-specific tissue, monocot default has no vascular bundles -> empty.
+    # organ-specific tissue, and a stele with no vascular bundles -> empty
+    # vascular recipe.  n_vascular_bundles=0 is not settable through the pydantic
+    # params (ge=1), so trigger the guard directly on the parsed vascular_params.
     data = OrganInputData.for_root()
-    data.set_value("xylem", "n_vascular_bundles", 0)
     root = RootAnatomy(data, seed=SEED)
+    root.vascular_params["n_vascular_bundles"] = 0
     assert len(root._vascular_recipe(Polygon())) == 0
     assert len(root._organ_recipe()) == 0
 
@@ -278,5 +280,7 @@ if __name__ == "__main__":
     test_needle_recipes_are_inspectable()
     test_phloem_valley_zones_are_tissue_regions()
     test_recipe_is_inspectable()
+    test_recipe_plan_reports_kinds_and_renders()
+    test_organ_default_recipes_are_empty()
     test_monocot_baseline_unchanged()
     print("ALL SHAPE-FIRST TISSUE TESTS PASSED")
