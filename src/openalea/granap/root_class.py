@@ -21,7 +21,7 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
-from openalea.granap.tissue_builder import (
+from openalea.granap.tissue_class import (
     place_packed_group, fill_by_packing, fill_along, fill_by_rings,
     TissueRecipe, Tissue,
 )

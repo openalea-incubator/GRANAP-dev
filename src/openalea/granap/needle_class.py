@@ -17,7 +17,7 @@ from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.special_tissues import place_resin_duct, place_stomata
-from openalea.granap.tissue_builder import TissueRecipe
+from openalea.granap.tissue_class import TissueRecipe
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------

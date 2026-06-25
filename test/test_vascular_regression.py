@@ -92,7 +92,7 @@ GOLDEN = {
     "dicot_secondary": (dicot_secondary, {
         "air space": 538, "cambium": 89, "cortex": 338, "endodermis": 70,
         "epidermis": 247, "exodermis": 118, "medullar_ray": 48, "pericycle": 223,
-        "phloem": 138, "phloem_parenchyma": 130, "stele": 421, "xylem": 57,
+        "phloem": 138, "phloem_parenchyma": 130, "stele": 422, "xylem": 57,
     }),
     "needle_default": (needle_default, {
         "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,

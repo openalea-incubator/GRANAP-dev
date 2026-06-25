@@ -24,7 +24,7 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.input_data import OrganInputData
-from openalea.granap.tissue_builder import TissueRecipe
+from openalea.granap.tissue_class import TissueRecipe
 
 class Organ(AbstractNetwork, ABC):
     """

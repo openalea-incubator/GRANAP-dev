@@ -3,7 +3,7 @@
 Some anatomical features are *cell-relative* / post-fill: they are carved into or
 seeded around cells that already exist (resin ducts, stomata, the metaxylem
 sheath, companion cells, intercellular spaces).  They do not fit the shape-first
-"region then fill" model in :mod:`tissue_builder` — there is no region to fill,
+"region then fill" model in :mod:`tissue_class` — there is no region to fill,
 only existing cells to add to or replace.
 
 This module collects those placements as **named, parameterised functions** so an

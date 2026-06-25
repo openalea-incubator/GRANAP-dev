@@ -21,7 +21,7 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.cell_class import Cell
-from openalea.granap.tissue_builder import Tissue, TissueRecipe, retag_tissue
+from openalea.granap.tissue_class import Tissue, TissueRecipe, retag_tissue
 
 SEED = 0
 
