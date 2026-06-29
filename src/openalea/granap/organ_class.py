@@ -493,6 +493,7 @@ class Organ(AbstractNetwork, ABC):
             return
 
         tissue = self.aerenchyma_params.get("tissue")
+        tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
         n_files = int(self.aerenchyma_params.get("n_files", 1))
         aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
 
@@ -509,10 +510,13 @@ class Organ(AbstractNetwork, ABC):
             print("Aerenchyma proportion is greater than 1, setting it to 1")
             aerenchyma_prop = 1
 
-        tissue_cells = self.all_cells.get_cells_by_type(tissue)
+        tissue_cells = [c for t in tissues for c in self.all_cells.get_cells_by_type(t)]
         if not tissue_cells:
             return
 
+        # id_layer grows radially inward, so the single global max is the
+        # innermost ring of the combined region: listed tissues act as one
+        # contiguous band and only that inner boundary ring is preserved.
         max_tissue_layer = max(c.id_layer for c in tissue_cells)
         candidates = [c for c in tissue_cells if c.id_layer < max_tissue_layer]
         candidates.extend(self.all_cells.get_cells_by_type("air space"))
@@ -581,8 +585,12 @@ class Organ(AbstractNetwork, ABC):
                         changed = True
                         break
 
-        tissue = self.aerenchyma_params.get("tissue")
-        total_tissue_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type(tissue) if c.polygon is not None)
+        total_tissue_area = sum(
+            c.polygon.area
+            for t in tissues
+            for c in self.all_cells.get_cells_by_type(t)
+            if c.polygon is not None
+        )
         total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
         log.debug("Actual aerenchyma proportion: %.3f", total_air_area / (total_tissue_area + total_air_area))
 

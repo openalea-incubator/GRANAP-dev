@@ -70,7 +70,7 @@ class InterCellularSpacesParams(BaseParams):
 
 class AerenchymaParams(BaseParams):
     name                  : str   = "aerenchyma"
-    tissue                : str   = "cortex"
+    tissue                : Union[str, List[str]] = Field(default="cortex", title="Tissue", description="One or more tissue names to convert to aerenchyma. A list is treated as a single contiguous region (only the innermost ring of that combined region is preserved).")
     aerenchyma_proportion : float = Field(default=0.01, ge=0.0, le=1.0, title = "Aerenchyma Proportion", description = "Proportion of aerenchyma from 0 to 1")
     aerenchyma_type       : int   = Field(default=1, ge=1, le=2, title = "Aerenchyma Type", description = "Type of aerenchyma to generate (1 or 2)")
     n_files               : int   = Field(default=2,   ge=1, title = "Number of Files", description = "Number of files to generate aerenchyma from")
@@ -405,7 +405,7 @@ class NeedleInterCellularSpacesParams(BaseParams):
 
 class NeedleAerenchymaParams(BaseParams):
     name                 : str   = "aerenchyma"
-    tissue               : str   = "mesophyll"
+    tissue               : Union[str, List[str]] = Field(default="mesophyll", title="Tissue", description="One or more tissue names to convert to aerenchyma. A list is treated as a single contiguous region (only the innermost ring of that combined region is preserved).")
     aerenchyma_proportion: float = Field(default=0.0, ge=0.0, le=1.0, title = "Aerenchyma Proportion", description = "Proportion of aerenchyma in the mesophyll")
     aerenchyma_type      : int   = 1
     n_files              : int   = Field(default=2,   ge=1, title = "Number of Aerenchyma", description = "Number of aerenchyma to generate")
@@ -694,8 +694,6 @@ class OrganInputData(BaseModel):
         data.set_value("secondary_phloem", "height",         0.15)
         data.set_value("secondary_phloem", "top_width",      0.04)
         data.set_value("secondary_phloem", "alive_distance", 0.10)
-
-        
 
         return data
 

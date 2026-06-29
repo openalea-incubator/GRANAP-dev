@@ -1,4 +1,4 @@
-"""Build a dicot root from the ``for_dicot_root`` preset and plot it.
+"""Build a dicot root from the ``for_dicot_root`` preset, update to renoncule cytomine data and plot it
 
 Configuration model: an organ is configured through its ``OrganInputData`` and
 then **built once** — construction snapshots the params and parses the vascular
@@ -102,7 +102,7 @@ def main(show=True):
     root.retag_cells("outer_cortex", "cortex")
 
     fig, ax = plt.subplots(figsize=(9, 9))
-    root.plot_cells(show=False, ax=ax, title="for_dicot_root")
+    root.plot_cells(show=False, ax=ax, title="Renoncule root cross section")
     plt.tight_layout()
     if show:
         plt.show()

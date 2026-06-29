@@ -224,7 +224,7 @@ class RootAnatomy(Organ):
                 break
 
             current_polygon = GeometryProcessor.buffer_polygon(
-                current_polygon, -space_increment - cell_diameter / 2, smooth_factor=0.6,
+                current_polygon, -space_increment - cell_diameter / 2, smooth_factor=0.0,
             )
             space_increment = cell_diameter / 2
 
