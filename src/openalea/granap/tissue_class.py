@@ -199,6 +199,16 @@ def fill_by_rings(
     current  = erosion_polygon if erosion_polygon is not None else fill_zone
     filter_z = prep(fill_zone) if erosion_polygon is not None else None
 
+    # Reject a seed that coincides with an already-placed one.  Where an eroded
+    # ring pinches to a thin sliver (a tapering tip, or a zone thinner than a
+    # cell), ``cells_on_layer`` seeds both near-touching edges, producing two
+    # cells whose border rings overlap — i.e. a Voronoi cell nested inside
+    # another.  Legitimate neighbours sit >= cell_width / cell_diameter apart, so
+    # a threshold below that drops only the pinch duplicates.
+    placed_x: List[float] = []
+    placed_y: List[float] = []
+    min_spacing2 = (0.7 * min(cell_diameter, tang)) ** 2
+
     while not current.is_empty and current.area > (cell_diameter / 2) ** 2 * np.pi:
         current = current.buffer(-space - cell_diameter / 2, resolution=16)
         if current.is_empty:
@@ -214,6 +224,13 @@ def fill_by_rings(
             for pt, border_pts in zip(seed_coords[1:], border_rings[1:]):
                 if filter_z is not None and not filter_z.contains(Point(pt[0], pt[1])):
                     continue
+                if placed_x:
+                    dx = np.asarray(placed_x) - pt[0]
+                    dy = np.asarray(placed_y) - pt[1]
+                    if np.min(dx * dx + dy * dy) < min_spacing2:
+                        continue
+                placed_x.append(pt[0])
+                placed_y.append(pt[1])
                 id_group    = next_id
                 next_id    += 1
                 cell_angle  = np.arctan2(pt[1] - cy, pt[0] - cx)

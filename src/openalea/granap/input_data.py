@@ -35,6 +35,22 @@ class PlantTypeParams(BaseParams):
     value : int = 1
     organ : str = "root"
 
+class BaseShapeParams(BaseParams):
+    name         : str = "base_shape"
+    shape        : Literal["circle", "ellipse", "square", "rectangle", "triangle", "star"] = Field(
+        default="circle", title="Base Shape",
+        description="Outline of the organ cross-section. 'circle' (default) is auto-sized from the layers; box shapes use width/height; 'star' uses the inner/outer radius and arc parameters below.")
+    width        : float = Field(default=0.0, ge=0.0, title="Width",
+        description="Total width (x extent). 0 = auto (match the default circle's diameter). Used by ellipse/square/rectangle/triangle.")
+    height       : float = Field(default=0.0, ge=0.0, title="Height",
+        description="Total height (y extent). 0 = auto (match the default circle's diameter). Used by ellipse/rectangle/triangle.")
+    # Star outline (mirrors the xylem star parameters).
+    n_peaks      : int   = Field(default=5,    ge=2,       title="Star Peaks",        description="Number of star arms. Only used when shape='star'.")
+    inner_radius : float = Field(default=0.4,  ge=0.00001, title="Star Inner Radius", description="Valley radius between arms. Only used when shape='star'.")
+    outer_radius : float = Field(default=0.6,  ge=0.00001, title="Star Outer Radius", description="Tip radius of each arm. Only used when shape='star'.")
+    arc_top      : float = Field(default=0.05, ge=0.00001, title="Star Arc at Tip",   description="Arc length of each arm at outer_radius. Only used when shape='star'.")
+    arc_bottom   : float = Field(default=0.10, ge=0.00001, title="Star Arc at Neck",  description="Arc length of each arm at inner_radius. Only used when shape='star'.")
+
 class InterCellularSpacesParams(BaseParams):
     name      : str             = "inter_cellular_spaces"
     tissue    : List[str]       = Field(default=["cortex", "exodermis"], title="Tissue", description="One or more tissue names to apply intercellular spaces to. Adjacent tissues in the list will have spaces generated at their shared boundary.")
@@ -63,6 +79,7 @@ class AerenchymaParams(BaseParams):
 class EpidermisParams(BaseParams):
     name         : str   = "epidermis"
     cell_diameter: float = Field(default=0.015, ge=0.00001, title = "Cell Diameter", description = "Diameter of the epidermal cells")
+    cell_width: float = Field(default=0.015, ge=0.00001, title = "Cell Width", description = "Width of the pidermal cells")
     n_layers     : int   = Field(default=1,     ge=1, title = "Number of Layers", description = "Number of epidermal layers")
     shift        : float = Field(default=0.5, ge=0.0, le=1.0, title = "Shift", description = "Shift of the epidermal cells from 0 to 1")
     order        : int   = Field(default=6, ge=0, title = "Order", description = "Order of the epidermal cells")
@@ -71,6 +88,7 @@ class EpidermisParams(BaseParams):
 class ExodermisParams(BaseParams):
     name         : str   = "exodermis"
     cell_diameter: float = Field(default=0.03, ge=0.00001, title = "Cell Diameter", description = "Diameter of the exodermal cells")
+    cell_width: float = Field(default=0.03, ge=0.00001, title = "Cell Width", description = "Width of the exodermal cells")
     n_layers     : int   = Field(default=1,    ge=1, title = "Number of Layers", description = "Number of exodermal layers")
     shift        : float = Field(default=0.0, ge=0.0, le=1.0, title = "Shift", description = "Shift of the exodermal cells from 0 to 1")
     order        : int   = Field(default=5, ge=0, title = "Order", description = "Order of the exodermal cells")
@@ -79,6 +97,7 @@ class ExodermisParams(BaseParams):
 class CortexParams(BaseParams):
     name         : str   = "cortex"
     cell_diameter: float = Field(default=0.04, ge=0.00001, title = "Cell Diameter", description = "Diameter of the cortical cells")
+    cell_width: float = Field(default=0.04, ge=0.00001, title = "Cell Width", description = "Width of the cortical cells")
     n_layers     : int   = Field(default=5,    ge=1, title = "Number of Layers", description = "Number of cortical layers")
     shift        : float = Field(default=0.0, ge=0.0, le=1.0, title = "Shift", description = "Shift of the cortical cells from 0 to 1")
     order        : int   = Field(default=4, ge=0, title = "Order", description = "Order of the cortical cells")
@@ -218,7 +237,7 @@ class DicotSecondaryGrowthParams(BaseParams):
 
 class DicotSecondaryXylemParams(BaseParams):
     name                : str   = "secondary_xylem"
-    prop_stele          : float = Field(default=0.7,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
+    prop_stele          : float = Field(default=0.8,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
     cell_diameter       : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
     cell_width          : float = Field(default=0.015,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
     vessel_diameter     : float = Field(default=0.1,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
@@ -228,7 +247,8 @@ class DicotSecondaryXylemParams(BaseParams):
     gradient_inflection : float = Field(default=0.5,   ge=0.001, le=1.0,  title="Gradient Inflection",  description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
     gradient_steepness  : float = Field(default=8.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",   description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
-    n_ring              : int   = Field(default=1,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
+    n_ring              : int   = Field(default=1
+                                        ,     ge=1,       title="Number of Rings",              description="Number of secondary xylem growth rings to generate.")
     prop_vessel_ring    : float = Field(default=0.3,   ge=0.0, le=1.0, title="Proportion of Vessel Ring", description="Stop packing vessels when (total vessel area) / (pizza-slice zone area) reaches this fraction.")
     must_be_adjacent    : bool  = Field(default=False, title="Must Be Adjacent",                         description="If True, each new vessel circle must be tangent to at least one already-placed circle (first circle is always placed freely).")
     parenchyma_diameter    : float = Field(default=0.025,  ge=0.00001, title="Parenchyma Diameter",      description="Mean cell diameter for ray parenchyma zones (angular gaps between pizza slices).")
@@ -240,12 +260,16 @@ class DicotSecondaryPhloemParams(BaseParams):
     name: str = "secondary_phloem"
 
     # ── Zone geometry ─────────────────────────────────────────────────────────
-    outer_distance: float = Field(default=0.48, ge=0.00001, title="Outer Distance",
-        description="Outer radius of the phloem zone from the stele centre. "
-                    "Inner boundary is flush with secondary_cambium.outer_distance.")
-    arc_top: Optional[float] = Field(default=0.05, ge=0.00001, title="Arc Length at Tip",
-        description="Arc length at outer_distance (narrow tip of each phloem arm). "
-                    "Set to None to use the full pizza-slice width (sector shape).")
+    height: float = Field(default=0.15, ge=0.00001, title="Phloem Height",
+        description="Radial thickness of the secondary phloem band, measured outward "
+                    "from the secondary cambium contour. The band is the secondary "
+                    "cambium polygon buffered outward by this height; the medullar and "
+                    "parenchyma rays carve it into trapezes.")
+    top_width: float = Field(default=0.04, ge=0.00001, title="Phloem Tip Width",
+        description="Tangential arc length of each phloem trapeze at its outer (top) "
+                    "edge. Smaller than the vessel-zone base width makes the arm taper "
+                    "inward toward the outside; set close to the base width for a "
+                    "near-rectangular arm.")
 
     # ── Alive sieve zone ──────────────────────────────────────────────────────
     alive_distance: float = Field(default=0.1, ge=0.0, title="Alive Distance (mm)",
@@ -253,14 +277,14 @@ class DicotSecondaryPhloemParams(BaseParams):
                     "elements are alive and have companion cells. Beyond this they are dead.")
 
     # ── Sieve elements (same size for living and dead) ────────────────────────
-    sieve_diameter:     float = Field(default=0.018, ge=0.00001, title="Sieve Diameter")
+    sieve_diameter:     float = Field(default=0.022, ge=0.00001, title="Sieve Diameter")
     sieve_diameter_sd:  float = Field(default=0.001, ge=0.0,     title="Sieve Diameter SD")
-    sieve_diameter_min: float = Field(default=0.008, ge=0.00001, title="Sieve Diameter Min")
-    prop_sieve:         float = Field(default=0.35,  ge=0.0, le=1.0, title="Sieve Proportion",
+    sieve_diameter_min: float = Field(default=0.020, ge=0.00001, title="Sieve Diameter Min")
+    prop_sieve:         float = Field(default=0.3,  ge=0.0, le=1.0, title="Sieve Proportion",
         description="Stop packing sieve circles when their area reaches this fraction of the zone.")
 
     # ── Companion cells (one per living sieve element) ────────────────────────
-    companion_diameter: float = Field(default=0.008, ge=0.00001, title="Companion Cell Diameter")
+    companion_diameter: float = Field(default=0.01, ge=0.00001, title="Companion Cell Diameter")
     companion_width:    float = Field(default=0.002, ge=0.00001, title="Companion Cell Width")
 
     # ── Phloem parenchyma ─────────────────────────────────────────────────────
@@ -272,6 +296,7 @@ class DicotSecondaryCambiumParams(BaseParams):
     name             : str   = "secondary_cambium"
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of secondary cambium cells.")
     cell_width       : float = Field(default=0.02,  ge=0.00001, title="Cell Width",       description="Tangential width of secondary cambium cells.")
+    n_layers         : int   = Field(default=1,     ge=1,       title="Number of Layers", description="Number of concentric cambium cell files (the cambial zone). 1 = a single ring; higher values add rings buffered inward by one cell diameter each.")
     # for secondary growth — must be larger than the primary cambium outer_distance
     inner_distance : float = Field(default=0.40,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
     outer_distance : float = Field(default=0.45,  ge=0.00001, title="Secondary Outer Distance", description="Outer radius of the secondary cambium star from the stele centre. Must be ≤ the stele radius.")
@@ -500,6 +525,7 @@ class OrganInputData(BaseModel):
         # Map param name to Pydantic model that holds its defaults
         _DEFAULTS_BY_NAME: Dict[str, BaseParams] = {
             "planttype":             PlantTypeParams(),
+            "base_shape":            BaseShapeParams(),
             "stele":                 SteleParams(),
             "xylem":                 RootXylemParams(),
             "phloem":                RootPhloemParams(),
@@ -615,7 +641,7 @@ class OrganInputData(BaseModel):
         increase the stele thickness (SteleDicotParams.thickness ≥ 1.0 is recommended
         so that the secondary cambium fits within the stele boundary).
         """
-        return cls(params=[
+        data = cls(params=[
             PlantTypeParams(value=2),
             SteleDicotParams(),
             DicotXylemParams(),
@@ -625,7 +651,6 @@ class OrganInputData(BaseModel):
             DicotSecondaryXylemParams(),
             DicotSecondaryCambiumParams(),
             DicotSecondaryPhloemParams(),
-            DicotMedularRaysParams(),
             InterCellularSpacesParams(),
             AerenchymaParams(),
             EpidermisParams(),
@@ -634,6 +659,63 @@ class OrganInputData(BaseModel):
             EndodermisParams(),
             PericycleParams(),
         ])
+
+        return data
+
+    @classmethod
+    def for_dicot_secondary(cls) -> "OrganInputData":
+        """Dicot root preset with secondary growth enabled (single growth ring).
+
+        Convenience over :meth:`for_dicot_root` — the schema is unchanged; this
+        bundles the ``set_value`` calls that make secondary growth fit and look
+        sensible (the growth *case* is a choice of values, not a new param set).
+        """
+        data = cls.for_dicot_root()
+        data.set_value("secondary_growth", "value", True)
+
+        # Wider stele so the secondary cambium + xylem + phloem fit inside it.
+        data.set_value("stele", "thickness", 1.2)
+
+        # Secondary cambium ring (must enclose the primary cambium: inner_distance
+        # > primary cambium outer_distance, outer_distance <= stele radius).
+        data.set_value("secondary_cambium", "inner_distance", 0.40)
+        data.set_value("secondary_cambium", "outer_distance", 0.45)
+        data.set_value("secondary_cambium", "arc_bottom",     0.20)
+        data.set_value("secondary_cambium", "arc_top",        0.10)
+
+        # Secondary xylem vessels (large near the centre -> small near the cambium).
+        data.set_value("secondary_xylem", "prop_stele",          0.8)
+        data.set_value("secondary_xylem", "vessel_diameter",     0.10)
+        data.set_value("secondary_xylem", "vessel_diameter_min", 0.03)
+        data.set_value("secondary_xylem", "vessel_diameter_sd",  0.005)
+        data.set_value("secondary_xylem", "prop_vessel_ring",    0.3)
+
+        # Secondary phloem band (trapezes outside the cambium).
+        data.set_value("secondary_phloem", "height",         0.15)
+        data.set_value("secondary_phloem", "top_width",      0.04)
+        data.set_value("secondary_phloem", "alive_distance", 0.10)
+
+        
+
+        return data
+
+    @classmethod
+    def for_dicot_annual(cls) -> "OrganInputData":
+        """Dicot root preset with secondary growth.
+
+        Builds on :meth:`for_dicot_secondary`; ``n_ring`` divides the secondary
+        xylem into that many radial growth rings (large→small vessels each).  The
+        vessel gradient is tuned a touch crisper so the rings read clearly.
+        """
+        data = cls.for_dicot_secondary()
+        data.set_value("secondary_xylem", "n_ring", 3)
+
+        # Crisper rings: wider size range, less per-vessel noise, fuller packing.
+        data.set_value("secondary_xylem", "vessel_diameter",     0.09)
+        data.set_value("secondary_xylem", "vessel_diameter_min", 0.02)
+        data.set_value("secondary_xylem", "vessel_diameter_sd",  0.003)
+        data.set_value("secondary_xylem", "prop_vessel_ring",    0.4)
+        return data
 
     @classmethod
     def for_needle(cls) -> "OrganInputData":

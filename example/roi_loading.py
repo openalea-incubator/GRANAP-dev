@@ -16,7 +16,7 @@ wall_details = {
     "outerwall": 4,     # um
 }
 
-def test_manual_roi_loading(show=False):
+def main(show=False):
     """
     Manual testing script for RoiOrgan behavior.
     Update the folder_path to point to a local directory with .roi files.
@@ -91,4 +91,4 @@ def test_manual_roi_loading(show=False):
 
 
 if __name__ == "__main__":
-    test_manual_roi_loading(show=True)
+    main(show=True)

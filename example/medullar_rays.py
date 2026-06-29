@@ -1,4 +1,4 @@
-"""Visualisation test for medullar ray placement (n_medullar × allow_non_vascular)."""
+"""Visualisation demo for medullar ray placement (n_medullar × allow_non_vascular)."""
 
 import sys
 import os
@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath('..'))
 
 from openalea.granap.root_class import RootAnatomy
-from openalea.granap.input_data import OrganInputData
+from openalea.granap.input_data import OrganInputData, DicotMedularRaysParams
 
 SEED = 0
 
@@ -16,8 +16,12 @@ def make_root(n_medullar: int, allow_non_vascular: bool) -> RootAnatomy:
     data = OrganInputData.for_dicot_root()
     data.set_value("secondary_growth",   "value",              True)
     data.set_value("stele",              "thickness",          1.0)
-    data.set_value("medullar_rays",      "n_medullar",         n_medullar)
-    data.set_value("medullar_rays",      "allow_non_vascular", allow_non_vascular)
+    # for_dicot_root has no medullar_rays entry by default — add one so the
+    # overrides below have something to write to.
+    data.params.append(DicotMedularRaysParams(
+        n_medullar=n_medullar,
+        allow_non_vascular=allow_non_vascular,
+    ))
     return RootAnatomy(data, seed=SEED)
 
 
@@ -29,7 +33,7 @@ scenarios = [
 ]
 
 
-def test_medullar_rays(show=False):
+def main(show=False):
     fig, axs = plt.subplots(1, 4, figsize=(20, 5))
 
     for ax, s in zip(axs, scenarios):
@@ -66,4 +70,4 @@ def test_medullar_rays(show=False):
 
 
 if __name__ == "__main__":
-    test_medullar_rays(show=True)
+    main(show=True)

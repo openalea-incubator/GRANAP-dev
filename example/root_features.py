@@ -12,7 +12,7 @@ from openalea.granap.root_class import RootAnatomy
 SEED = 0
 
 
-def test_root_features(show=False):
+def main(show=False):
     t_start = time.time()
     # Create a root anatomy
     root = RootAnatomy(seed=SEED)
@@ -53,4 +53,4 @@ def test_root_features(show=False):
 
 
 if __name__ == "__main__":
-    test_root_features(show=True)
+    main(show=True)

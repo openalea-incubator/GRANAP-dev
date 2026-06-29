@@ -96,9 +96,39 @@ class GeometryProcessor:
 
         return sp.Polygon(np.vstack(segments))
 
+    @staticmethod
+    def rectangle_polygon(width: float, height: float) -> Polygon:
+        """
+        Generate an axis-aligned rectangle centred on the origin.
+
+        Args:
+            width:  Total width  (x extent)
+            height: Total height (y extent)
+
+        Returns:
+            Shapely Polygon for the rectangle (a square when width == height)
+        """
+        w, h = width / 2.0, height / 2.0
+        return sp.Polygon([(-w, -h), (w, -h), (w, h), (-w, h)])
 
     @staticmethod
-    def resample_coords(coords: np.ndarray, target_n_points: int = 200, 
+    def triangle_polygon(width: float, height: float) -> Polygon:
+        """
+        Generate an upward-pointing isosceles triangle centred on the origin.
+
+        Args:
+            width:  Base length (x extent)
+            height: Apex height (y extent)
+
+        Returns:
+            Shapely Polygon for the triangle
+        """
+        w, h = width / 2.0, height / 2.0
+        return sp.Polygon([(-w, -h), (w, -h), (0.0, h)])
+
+
+    @staticmethod
+    def resample_coords(coords: np.ndarray, target_n_points: int = 200,
                         shift_distance: float = 0) -> np.ndarray:
         """
         Resample coordinates to have uniform spacing.
@@ -331,6 +361,7 @@ class GeometryProcessor:
         first_circle_shift:  float                       = 0.0,
         adjacent:            bool                        = False,
         gradient_center:     Optional[Tuple[float, float]] = None,
+        gradient_radial_range: Optional[Tuple[float, float]] = None,
         rng                                              = None,
     ) -> List[Tuple[float, float, float]]:
         """
@@ -437,7 +468,16 @@ class GeometryProcessor:
                 else:
                     target_diam = diameter_max
             else:
-                t = min(np.hypot(cx - ref_cx, cy - ref_cy) / max_dist, 1.0)
+                dist = np.hypot(cx - ref_cx, cy - ref_cy)
+                if gradient_radial_range is not None:
+                    # Gradient measured within a band [r0, r1] (e.g. one annual
+                    # ring) rather than across the whole region, so the size
+                    # gradient resets per band: large at r0, small at r1.
+                    r0, r1 = gradient_radial_range
+                    t = (dist - r0) / (r1 - r0) if r1 > r0 else 0.0
+                    t = min(max(t, 0.0), 1.0)
+                else:
+                    t = min(dist / max_dist, 1.0)
                 if direction == "edge":
                     t = 1.0 - t
                 elif direction == "middle":
@@ -496,8 +536,12 @@ class GeometryProcessor:
         """
         # convert to numpy array of points
         points = np.array(polygon.exterior.coords.xy).T
+        # fitEllipse needs >= 5 points; low-vertex polygons (e.g. a triangular
+        # or square stele slice) are densified along their boundary first.
+        if len(points) < 6:
+            points = GeometryProcessor.resample_coords(points, target_n_points=50)
         points = points.reshape(-1, 1, 2).astype(np.float32)
-    
+
         # fit ellipse to get orientation and aspect ratio
         (cx_fit, cy_fit), (major, minor), angle = fitEllipse(points)
         

@@ -11,7 +11,7 @@ from openalea.granap.input_data import OrganInputData
 SEED = 0
 
 
-def test_primary_cambium(show=False):
+def main(show=False):
     data = OrganInputData.for_dicot_root()
     root = RootAnatomy(data, seed=SEED)
     root.generate_cells()
@@ -26,4 +26,4 @@ def test_primary_cambium(show=False):
 
 
 if __name__ == "__main__":
-    test_primary_cambium(show=True)
+    main(show=True)

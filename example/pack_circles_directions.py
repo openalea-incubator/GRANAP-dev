@@ -18,7 +18,7 @@ scenarios = [
 SEED = 0
 
 
-def test_pack_circles_directions(show=False):
+def main(show=False):
     fig, axs = plt.subplots(1, len(scenarios), figsize=(5 * len(scenarios), 5))
 
     for ax, s in zip(axs, scenarios):
@@ -44,4 +44,4 @@ def test_pack_circles_directions(show=False):
 
 
 if __name__ == "__main__":
-    test_pack_circles_directions(show=True)
+    main(show=True)

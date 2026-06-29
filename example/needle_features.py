@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath('..'))
 from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.visualization import plot_layers_simple, plot_section
 
-def test_needle(show=False):
+def main(show=False):
 # Create a needle anatomy
     needle = NeedleAnatomy()
 
@@ -22,4 +22,4 @@ def test_needle(show=False):
     needle.plot_network(show=show, title="Needle Network")
 
 if __name__ == "__main__":
-    test_needle(show=True)
+    main(show=True)

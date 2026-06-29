@@ -44,7 +44,7 @@ scenarios = [
 ]
 
 
-def test_secondary_xylem(show=False):
+def main(show=False):
     roots = []
     for s in scenarios:
         print(f"\n=== {s['label'].replace(chr(10), ' | ')} ===")
@@ -85,4 +85,4 @@ def test_secondary_xylem(show=False):
 
 
 if __name__ == "__main__":
-    test_secondary_xylem(show=True)
+    main(show=True)

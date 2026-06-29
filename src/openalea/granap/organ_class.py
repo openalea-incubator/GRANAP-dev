@@ -24,7 +24,7 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.input_data import OrganInputData
-from openalea.granap.tissue_class import TissueRecipe
+from openalea.granap.tissue_class import TissueRecipe, retag_tissue
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -34,7 +34,12 @@ class Organ(AbstractNetwork, ABC):
     cross-sectional anatomy of different plant types.
     Inherits from AbstractNetwork for hydraulic network construction.
     """
-    
+
+    #: Smoothing applied when peeling each concentric layer ring in
+    #: :meth:`_build_layer_polygons`. Subclasses override per organ shape
+    #: (e.g. roots use 0.0 to keep ring thickness exact; needles round corners).
+    LAYER_SMOOTH_FACTOR: float = 0.5
+
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
@@ -197,11 +202,14 @@ class Organ(AbstractNetwork, ABC):
                     id_layer=i_layer,
                 ))
 
-            # Add the layer polygon
+            # Add the layer polygon.  Keep smoothing light: smoothing_polygon
+            # corner-cuts slightly *past* the requested buffer distance, so a high
+            # factor applied once per peeled ring accumulates and shrinks the
+            # innermost region (the stele) well below its nominal thickness.
             polygon = GeometryProcessor.buffer_polygon(
                 polygon,
                 -space_increment - layer["cell_diameter"] / 2,
-                smooth_factor=0.5,
+                smooth_factor=self.LAYER_SMOOTH_FACTOR,
             )
 
             space_increment = layer["cell_diameter"] / 2
@@ -302,7 +310,20 @@ class Organ(AbstractNetwork, ABC):
             log.info("GeoDataFrame export:     %.3fs", time.time() - t_start)
         
         return self._cells_gdf
-    
+
+    def retag_cells(self, old_tag: str, new_tag: str) -> int:
+        """Rename every cell tagged ``old_tag`` to ``new_tag``.
+
+        Retags the live cells in ``all_cells`` and, when the cells have
+        already been materialised, the cached ``_cells_gdf`` too — so plots
+        and exports reflect the new tag without a full regeneration.
+        Returns the number of cells retagged.
+        """
+        n = retag_tissue(self.all_cells, old_tag, new_tag)
+        if self._cells_gdf is not None and "type" in self._cells_gdf.columns:
+            self._cells_gdf.loc[self._cells_gdf["type"] == old_tag, "type"] = new_tag
+        return n
+
     @abstractmethod
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
