@@ -102,35 +102,7 @@ class Organ(AbstractNetwork, ABC):
         """
         self.layer_manager.add_layer(layer, position)
         self._invalidate_geometry()
-    
-    def update_params(self, param_name: str, attribute: str, value: Any) -> None:
-        """
-        Update a parameter of the organ.
-    
-        self.params = [{"name": "param_name_1", "attribute_1": 0.0, "attribute_2": 0.0, ...},
-                       {"name": "param_name_2", "attribute_1": 0.0, "attribute_2": 0.0, ...},
-                       ...]
-    
-        Args:
-            param_name: Name of the parameter to update
-            attribute: Name of the attribute to update
-            value: New value of the parameter
-        """
-        for p in self.params:
-            if p["name"] == param_name:
-                p[attribute] = value
-                # Sync the corresponding Layer object in layer_manager if one exists
-                layer = self.layer_manager.get_layer(param_name)
-                if layer is not None:
-                    if hasattr(layer, attribute):
-                        setattr(layer, attribute, value)
-                    else:
-                        layer.additional_params[attribute] = value
-                self._invalidate_geometry()
-                return
-        raise ValueError(f"Parameter '{param_name}' not found in params.")
 
-    
     def remove_layer(self, name: str) -> Layer:
         """
         Remove a tissue layer by name.
