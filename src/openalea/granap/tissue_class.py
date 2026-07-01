@@ -85,10 +85,20 @@ def place_packed_group(
     """
     placed_out: List[Tuple[Polygon, str, int]] = []
 
-    for i, (pcx, pcy, r) in enumerate(packed):
-        actual_diam = r * 2
-        placed = Point(pcx, pcy).buffer(r, resolution=32)
-        placed_buff = placed.buffer(-r * 0.15)
+    for i, rec in enumerate(packed):
+        # A record is a circle (cx, cy, r) or an ellipse (cx, cy, a, b, angle);
+        # see GeometryProcessor.pack_circles(allow_ellipse=...).
+        if len(rec) == 3:
+            pcx, pcy, r = rec
+            placed = Point(pcx, pcy).buffer(r, resolution=32)
+            actual_diam = r * 2
+            inset = r * 0.15
+        else:
+            pcx, pcy, a_ax, b_ax, ang = rec
+            placed = GeometryProcessor.ellipse_to_polygon(pcx, pcy, a_ax, b_ax, ang)
+            actual_diam = 2.0 * np.sqrt(a_ax * b_ax)   # area-equivalent diameter
+            inset = min(a_ax, b_ax) * 0.15
+        placed_buff = placed.buffer(-inset)
         if placed_buff.is_empty:
             continue
 

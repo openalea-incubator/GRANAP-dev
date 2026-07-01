@@ -277,11 +277,215 @@ class GeometryProcessor:
         Create a polygon for an ellipse 
         """
         circle = sp.Point(0, 0).buffer(1)
-        ellipse = sp.affinity.scale(circle, rx, ry, origin=(0, 0))   
+        ellipse = sp.affinity.scale(circle, rx, ry, origin=(0, 0))
         ellipse = sp.affinity.rotate(ellipse, angle, origin=(0, 0))
         ellipse = sp.affinity.translate(ellipse, cx, cy)
-        
+
         return ellipse
+
+    @staticmethod
+    def egg_polygon(cx, cy, a_out, a_in, b, angle, n=28):
+        """Teardrop / 'violin' shape: an asymmetric oval whose widest point (half
+        width ``b``) is NOT at the middle of the major axis.  Two half-ellipses
+        share that waist — an ``a_out`` lobe on the +major side and an ``a_in``
+        lobe on the -major side.  Its area is ``pi*b*(a_out+a_in)/2`` (independent
+        of the split), i.e. the same as a symmetric ellipse of semi-major
+        ``(a_out+a_in)/2`` — so the waist can be offset without changing area.
+
+        ``angle`` (degrees) orients the +major (the ``a_out`` lobe) direction."""
+        xo = np.linspace(0.0, a_out, n)
+        yo = b * np.sqrt(np.clip(1.0 - (xo / max(a_out, 1e-9)) ** 2, 0.0, 1.0))
+        xi = np.linspace(-a_in, 0.0, n)[:-1]
+        yi = b * np.sqrt(np.clip(1.0 - (xi / max(a_in, 1e-9)) ** 2, 0.0, 1.0))
+        ux = np.concatenate([xi, xo]); uy = np.concatenate([yi, yo])
+        X = np.concatenate([ux, ux[::-1]])
+        Y = np.concatenate([uy, -uy[::-1]])
+        th = np.radians(angle)
+        c, s = np.cos(th), np.sin(th)
+        return sp.Polygon(np.column_stack([
+            cx + c * X - s * Y, cy + s * X + c * Y]))
+
+    @staticmethod
+    def _fit_target_ellipse(region, cx, cy, r_ins, target_r, max_aspect):
+        """Largest ellipse (up to the target circle's area, aspect-capped) that
+        fits inside *region*, centred at ``(cx, cy)`` and elongated along the
+        region's long axis.
+
+        Used as a fallback when the inscribed circle (radius ``r_ins``) is too
+        narrow to reach ``target_r`` in a tight, elongated region (e.g. a star
+        arm): the semi-minor axis fills the available width (``r_ins``) while the
+        semi-major grows along the region until the area matches the target
+        circle ``pi*target_r**2`` or the aspect cap ``max_aspect`` is hit, then
+        shrinks until it fits.
+
+        Returns ``(semi_major, semi_minor, angle_deg)`` or ``None`` when an
+        ellipse offers no meaningful gain over the inscribed circle.
+        """
+        if r_ins <= 0.0:
+            return None
+        b_ax = r_ins                                   # semi-minor fills the width
+        target_area = np.pi * target_r * target_r
+        a_ax = min(target_area / (np.pi * b_ax), max_aspect * b_ax)
+        if a_ax <= b_ax * 1.02:                        # no meaningful elongation
+            return None
+
+        # Orientation: the long edge of the region's minimum rotated rectangle.
+        try:
+            xs, ys = region.minimum_rotated_rectangle.exterior.coords.xy
+            p0 = np.array([xs[0], ys[0]]); p1 = np.array([xs[1], ys[1]]); p2 = np.array([xs[2], ys[2]])
+            e1, e2 = p1 - p0, p2 - p1
+            long_edge = e1 if e1.dot(e1) >= e2.dot(e2) else e2
+            angle = float(np.degrees(np.arctan2(long_edge[1], long_edge[0])))
+        except Exception:
+            return None
+
+        # Shrink the major axis until the ellipse fits inside the region.
+        for _ in range(8):
+            ell = GeometryProcessor.ellipse_to_polygon(cx, cy, a_ax, b_ax, angle)
+            if region.contains(ell):
+                return (a_ax, b_ax, angle)
+            a_ax *= 0.9
+            if a_ax <= b_ax * 1.02:
+                break
+        return None
+
+    @staticmethod
+    def _fit_radial_ellipse(region, px, py, target_r, theta_rad, max_aspect):
+        """Ellipse of the target circle's area, oriented **radially** (major axis
+        along ``theta_rad`` from the gradient centre), that fits inside *region*.
+
+        Trades tangential width for radial length while preserving the area
+        ``pi*target_r**2``: the semi-minor (tangential) shrinks from ``target_r``
+        and the semi-major (radial) grows to compensate, up to ``max_aspect``,
+        until the ellipse fits.  Returns ``(semi_major, semi_minor, angle_deg)``
+        or ``None``.
+        """
+        ang = float(np.degrees(theta_rad))
+        # Semi-minor (tangential) = local clearance to the boundary, so the
+        # ellipse just fits across the arm; the major then grows radially.
+        clear = region.boundary.distance(sp.Point(px, py)) * 0.98
+        if clear <= 0.0:
+            return None
+        b_ax = min(clear, target_r)
+        target_area = np.pi * target_r * target_r
+        a_ax = min(target_area / (np.pi * b_ax), max_aspect * b_ax)
+        if a_ax <= b_ax * 1.02:                 # no meaningful elongation
+            return None
+        # Shrink the radial major until the ellipse fits (e.g. it would otherwise
+        # overshoot the pith / arm ends).
+        for _ in range(8):
+            ell = GeometryProcessor.ellipse_to_polygon(px, py, a_ax, b_ax, ang)
+            if region.contains(ell):
+                return (a_ax, b_ax, ang)
+            a_ax *= 0.9
+            if a_ax <= b_ax * 1.02:
+                break
+        return None
+
+    @staticmethod
+    def _pack_targets_radial(region, base_fn, cx, cy, radial_range, direction,
+                             diameter_min, diameter_max, allow_ellipse,
+                             ellipse_max_aspect, proportion, poly_area, rng,
+                             enforce_gradient_min=0.0):
+        """Size-first, gradient-driven radial packing.
+
+        Marches outward in radius over ``radial_range = (r0, r1)``; at each radius
+        the gradient prescribes the vessel diameter ``D``, and a ring of D-circles
+        is placed where it fits (one per arm / spaced ~D around the circumference).
+        Where a circle is too wide for the local (tangential) space, a radial
+        ellipse of the same area is used instead (when ``allow_ellipse``).  This
+        is the "fit the big vessel first, ellipse if needed, then go on (to
+        smaller radii)" behaviour.
+
+        ``enforce_gradient_min``: within the enforced band (gradient position
+        ``tt <= enforce_gradient_min``) the vessel diameter is the gradient target
+        itself (never clamped up to ``diameter_min``), so a spot that cannot hold
+        a full-target vessel (as a circle or radial ellipse) is left empty rather
+        than filled with a shrunken circle — "big vessels only, gaps empty".
+
+        Returns ``(placed_records, total_area, remaining_pieces)`` — the leftover
+        pieces are handed to the space-first packer for the small interstitial
+        fill (hybrid).
+        """
+        r0, r1 = radial_range
+        placed: List[Tuple] = []
+        total_area = 0.0
+        if r1 <= r0:
+            return placed, total_area, [region]
+        _rng = rng if rng is not None else np.random
+        budget = proportion * poly_area
+        remaining = region
+
+        r = r0
+        guard = 0
+        while r < r1 and total_area < budget and guard < 10000:
+            guard += 1
+            t = (r - r0) / (r1 - r0)
+            if direction == "edge":
+                tt = 1.0 - t
+            elif direction == "middle":
+                tt = 2.0 * abs(t - 0.5)
+            else:
+                tt = t
+            # In the enforced band the vessel keeps the gradient target size (no
+            # clamp up to diameter_min): a spot too tight for the full target is
+            # left empty below, not filled with a shrunken circle.
+            enforced = tt <= enforce_gradient_min
+            D = float(base_fn(tt)) if enforced else max(float(base_fn(tt)), diameter_min)
+            if D <= 0.0:
+                r += diameter_min
+                continue
+
+            circumference = 2.0 * np.pi * r
+            # Oversample angularly so arms at arbitrary angles are hit; the
+            # carve-and-recheck below dedups any overlapping candidates.
+            n_pos = max(48, int(np.ceil(circumference / (0.3 * D))))
+            theta0 = _rng.uniform(0.0, 2.0 * np.pi / n_pos)
+            placed_here = False
+            for k in range(n_pos):
+                if total_area >= budget:
+                    break
+                theta = theta0 + 2.0 * np.pi * k / n_pos
+                px = cx + r * np.cos(theta)
+                py = cy + r * np.sin(theta)
+                if not remaining.contains(sp.Point(px, py)):
+                    continue
+                circ = sp.Point(px, py).buffer(D / 2, resolution=32)
+                if remaining.contains(circ):
+                    geom = circ
+                    rec = (px, py, D / 2)
+                    area = np.pi * (D / 2) ** 2
+                elif allow_ellipse:
+                    fit = GeometryProcessor._fit_radial_ellipse(
+                        remaining, px, py, D / 2, theta, ellipse_max_aspect)
+                    if fit is None:
+                        continue
+                    a_ax, b_ax, ang = fit
+                    geom = GeometryProcessor.ellipse_to_polygon(px, py, a_ax, b_ax, ang)
+                    rec = (px, py, a_ax, b_ax, ang)
+                    area = np.pi * a_ax * b_ax
+                else:
+                    continue
+                placed.append(rec)
+                placed_here = True
+                total_area += area
+                remaining = remaining.difference(geom)
+            # A full ring of D-vessels was laid down at this radius -> the next
+            # non-overlapping ring is a whole diameter out.  But when nothing fit
+            # (e.g. this radius is jammed against the pith or a zone edge), step
+            # out by a small increment instead of a full D so the march doesn't
+            # leap over the radii where the big vessels *would* fit — which
+            # otherwise leaves the whole ring to the interstitial space-fill and
+            # no radial ellipse ever gets a chance.  The carve-and-recheck above
+            # dedups any overlap the finer stepping might revisit.
+            r += D if placed_here else max(diameter_min, 0.25 * D)
+
+        if remaining.is_empty:
+            pieces: List = []
+        else:
+            pieces = (list(remaining.geoms) if hasattr(remaining, "geoms") else [remaining])
+            pieces = [g for g in pieces if not g.is_empty]
+        return placed, total_area, pieces
 
     @staticmethod
     def get_chebyshev_center(polygon):
@@ -362,6 +566,10 @@ class GeometryProcessor:
         adjacent:            bool                        = False,
         gradient_center:     Optional[Tuple[float, float]] = None,
         gradient_radial_range: Optional[Tuple[float, float]] = None,
+        enforce_gradient_min: float                      = 0.0,
+        allow_ellipse:       bool                        = False,
+        ellipse_max_aspect:  float                       = 2.0,
+        pack_strategy:       str                         = "space",
         rng                                              = None,
     ) -> List[Tuple[float, float, float]]:
         """
@@ -394,9 +602,37 @@ class GeometryProcessor:
                                  sub-region (e.g. a pizza-slice zone) so that t reflects
                                  radial distance from the true anatomical centre rather than
                                  from the zone centroid.
+            enforce_gradient_min: Radial extent in [0, 1] (gradient-position space, same
+                                 axis as ``gradient_inflection``) over which the gradient
+                                 minimum is enforced.  Where the local gradient position
+                                 ``t <= enforce_gradient_min``, no circle smaller than the
+                                 gradient-prescribed target is placed — a spot too tight
+                                 for the local target is left empty instead of being filled
+                                 with a shrunken circle.  Beyond it (or with the default
+                                 ``0.0``) the global ``diameter_min`` applies as usual, so
+                                 ``0.0`` disables the constraint and ``1.0`` enforces it
+                                 everywhere.  Only active for spatial gradients
+                                 (``direction`` in "center"/"edge"/"middle").
+            allow_ellipse:       If True, when the inscribed circle is too narrow to reach
+                                 the target diameter in an elongated region, fit an
+                                 area-matched ellipse (elongated along the region) instead
+                                 of shrinking the circle.  Such placements are returned as
+                                 5-tuples ``(cx, cy, semi_major, semi_minor, angle_deg)``;
+                                 circles remain 3-tuples ``(cx, cy, r)``.
+            ellipse_max_aspect:  Maximum major/minor axis ratio for ellipse fallbacks, so
+                                 vessels don't become slivers (default 2.0).
+            pack_strategy:       Packing order.  "space" (default) is the space-first
+                                 Apollonian fill (largest inscribed circle first, sized by
+                                 the gradient at that spot).  "target" is a size-first,
+                                 gradient-driven *radial* pass — it places the big vessels
+                                 first at the radius the gradient assigns (ellipse if the
+                                 arm is too narrow), then fills the leftover space with the
+                                 space-first packer for the small interstitial cells
+                                 (hybrid).  "target" requires a spatial gradient.
 
         Returns:
-            List of (cx, cy, radius) tuples for each placed circle.
+            List of records, each a circle ``(cx, cy, r)`` or, for ellipse
+            placements, ``(cx, cy, semi_major, semi_minor, angle_deg)``.
         """
         if gradient_function == "gaussian":
             gradient_function = "normal"
@@ -436,9 +672,28 @@ class GeometryProcessor:
         poly_area = polygon.area
         _rng = rng if rng is not None else np.random
 
-        placed: List[Tuple[float, float, float]] = []
+        # Each record is a circle ``(cx, cy, r)`` or, when allow_ellipse fits one,
+        # an ellipse ``(cx, cy, semi_major, semi_minor, angle_deg)``.
+        placed: List[Tuple] = []
         total_area = 0.0
-        stack = [polygon]
+
+        # Size-first pass (gradient-driven radial): place the big vessels first,
+        # then hand the leftover pieces to the space-first packer below (hybrid).
+        if pack_strategy == "target" and base_fn is not None:
+            radial_range = gradient_radial_range or (0.0, max_dist)
+            placed, total_area, stack = GeometryProcessor._pack_targets_radial(
+                polygon, base_fn, ref_cx, ref_cy, radial_range, direction,
+                diameter_min, diameter_max, allow_ellipse, ellipse_max_aspect,
+                proportion, poly_area, _rng, enforce_gradient_min,
+            )
+        else:
+            stack = [polygon]
+
+        def _center_r(rec):
+            """(x, y, area-equivalent radius) of a placed circle or ellipse."""
+            if len(rec) == 3:
+                return rec[0], rec[1], rec[2]
+            return rec[0], rec[1], np.sqrt(rec[2] * rec[3])
 
         while stack:
             region = stack.pop()
@@ -457,6 +712,7 @@ class GeometryProcessor:
                     if new_r_ins >= diameter_min / 2:
                         cx, cy, r_ins = new_cx, new_cy, new_r_ins
 
+            gradient_t = None
             if direction is None or base_fn is None:
                 if gradient_function == "normal":
                     mean_diam   = (diameter_max + diameter_min) / 2.0
@@ -482,6 +738,7 @@ class GeometryProcessor:
                     t = 1.0 - t
                 elif direction == "middle":
                     t = 2.0 * abs(t - 0.5)
+                gradient_t = t
                 target_diam = base_fn(t)
                 if diameter_sd > 0.0:
                     target_diam = float(np.clip(
@@ -489,37 +746,91 @@ class GeometryProcessor:
                     ))
 
             r = min(r_ins, target_diam / 2)
-            if r * 2 < diameter_min * (1 - 0.001):
+
+            # Ellipse fallback: when the inscribed circle cannot reach the target
+            # diameter because the region is narrow/elongated, fit an area-matched
+            # (aspect-capped) ellipse along the region instead of shrinking.
+            ell = None
+            if allow_ellipse and r_ins < (target_diam / 2) * (1 - 0.001):
+                ell = GeometryProcessor._fit_target_ellipse(
+                    region, cx, cy, r_ins, target_diam / 2, ellipse_max_aspect)
+
+            if ell is not None:
+                a_ax, b_ax, ang = ell
+                geom = GeometryProcessor.ellipse_to_polygon(cx, cy, a_ax, b_ax, ang)
+                geom_area = np.pi * a_ax * b_ax
+                eff_r = np.sqrt(a_ax * b_ax)            # area-equivalent radius
+            else:
+                geom = sp.Point(cx, cy).buffer(r, resolution=32)
+                geom_area = np.pi * r ** 2
+                eff_r = r
+
+            # Within the inner gradient zone (t <= enforce_gradient_min) the local
+            # floor is the gradient target, so a spot too tight for the prescribed
+            # diameter is left empty rather than filled with a shrunken circle.
+            # Outside that zone (or with enforce_gradient_min <= 0) the global
+            # diameter_min applies as usual.  (An ellipse already meets the target
+            # area, so it passes this check.)
+            if (enforce_gradient_min > 0.0 and gradient_t is not None
+                    and gradient_t <= enforce_gradient_min):
+                local_min = target_diam
+            else:
+                local_min = diameter_min
+            if eff_r * 2 < local_min * (1 - 0.001):
+                # Refused by the gradient-min constraint (the spot could hold a
+                # circle, just not one as large as the local target): leave this
+                # spot empty but carve it out and keep exploring the rest of the
+                # region, so zones outside the enforced band still get packed.
+                # (Without this, dropping the region would also discard the outer
+                # part of a region that straddles the enforced band.)
+                if local_min > diameter_min and eff_r * 2 >= diameter_min * (1 - 0.001):
+                    remaining = region.difference(sp.Point(cx, cy).buffer(r_ins, resolution=32))
+                    if not remaining.is_empty:
+                        geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
+                        stack.extend(g for g in geoms if not g.is_empty)
                 continue
 
             if adjacent and placed:
                 tol = diameter_min * 0.1
-                if not any(np.hypot(cx - px, cy - py) <= r + pr + tol for px, py, pr in placed):
-                    remaining = region.difference(sp.Point(cx, cy).buffer(r, resolution=32))
+                near = any(
+                    np.hypot(cx - px, cy - py) <= eff_r + pr + tol
+                    for px, py, pr in (_center_r(rec) for rec in placed)
+                )
+                if not near:
+                    remaining = region.difference(geom)
                     if not remaining.is_empty:
                         geoms = list(remaining.geoms) if hasattr(remaining, 'geoms') else [remaining]
                         stack.extend(g for g in geoms if not g.is_empty)
                     continue
 
-            # Budget check: if placing r would overshoot the proportion target, shrink it
-            # to exactly consume the remaining budget. If even diameter_min won't fit in
-            # the budget, stop entirely.
+            # Budget check: if placing this shape would overshoot the proportion
+            # target, scale it down to exactly consume the remaining budget. If
+            # even diameter_min won't fit in the budget, stop entirely.
             budget = proportion * poly_area - total_area
             if budget <= 0.0:
                 break
             at_limit = False
-            if np.pi * r ** 2 > budget:
-                r_budget = np.sqrt(budget / np.pi)
-                if r_budget >= diameter_min / 2:
-                    r = r_budget
+            if geom_area > budget:
+                s = np.sqrt(budget / geom_area)
+                if eff_r * s >= diameter_min / 2:
+                    geom = sp.affinity.scale(geom, s, s, origin=(cx, cy))
+                    eff_r *= s
+                    geom_area = budget
+                    if ell is not None:
+                        a_ax, b_ax = a_ax * s, b_ax * s
+                    else:
+                        r *= s
                     at_limit = True
                 else:
                     break
 
-            placed.append((cx, cy, r))
-            total_area += np.pi * r ** 2
+            if ell is not None:
+                placed.append((cx, cy, a_ax, b_ax, ang))
+            else:
+                placed.append((cx, cy, eff_r))
+            total_area += geom_area
 
-            remaining = region.difference(sp.Point(cx, cy).buffer(r, resolution=32))
+            remaining = region.difference(geom)
             if remaining.is_empty or at_limit:
                 if at_limit:
                     break

@@ -273,6 +273,14 @@ class RootAnatomy(Organ):
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
         outer_r = min(p["outer_radius_xylem"], stele_r)
         inner_r = min(p["inner_radius_xylem"], stele_r)
+        pith_r  = max(0.0, min(p.get("pith_radius", 0.0), outer_r))
+
+        # The size gradient runs radially from the stele centre, normalized over
+        # [pith_r, outer_r] (i.e. outer_radius -> centre when there is no pith,
+        # outer_radius -> pith_radius otherwise) so the innermost vessels reach
+        # the full target diameter regardless of the pith.
+        self._xylem_gradient_center = (cx, cy)
+        self._xylem_gradient_radial_range = (pith_r, outer_r)
 
         raw_star = GeometryProcessor.star_polygon(
             n_branches=p["n_vascular_peak"],
@@ -282,7 +290,7 @@ class RootAnatomy(Organ):
             arc_top=p["arc_top_xylem"],
         )
         star_coord = GeometryProcessor.smoothing_polygon(
-            np.column_stack(raw_star.exterior.xy), smooth_factor=0.6, iterations=3,
+            np.column_stack(raw_star.exterior.xy), smooth_factor=0.1, iterations=3,
         )
 
         xylem = (
@@ -293,8 +301,7 @@ class RootAnatomy(Organ):
         if xylem.is_empty:
             return xylem
 
-        pith_r = p.get("pith_radius", 0.0)
-        if pith_r and pith_r > 0.0:
+        if pith_r > 0.0:
             self.pith_polygon = Point(cx, cy).buffer(pith_r)
             xylem.difference(self.pith_polygon)
         else:
@@ -317,7 +324,15 @@ class RootAnatomy(Organ):
             gradient_inflection=p["xylem_gradient_inflection"],
             gradient_steepness=p["xylem_gradient_steepness"],
             gradient_asymmetry=p["xylem_gradient_asymmetry"],
+            enforce_gradient_min=p["xylem_enforce_gradient_min"],
+            allow_ellipse=p["xylem_allow_ellipse"],
+            ellipse_max_aspect=p["xylem_ellipse_max_aspect"],
+            pack_strategy=p["xylem_packing_strategy"],
             first_circle_shift=p["xylem_first_vessel_shift"],
+            # Measure the gradient from the stele centre over [pith_r, outer_r]
+            # so the pith is accounted for (set in _xylem_star_region).
+            gradient_center=getattr(self, "_xylem_gradient_center", None),
+            gradient_radial_range=getattr(self, "_xylem_gradient_radial_range", None),
         )
 
     def _record_xylem_vessels(self, tissue: Tissue, placed) -> None:
@@ -331,20 +346,264 @@ class RootAnatomy(Organ):
             if rtype == "xylem":
                 self.vascular_polygons.append(placed_poly)
 
-    def fit_star_shapped_xylem(self, stele_polygon: Polygon):
-        """Build the star xylem region and pack vessels into it (region + fill).
+    # ------------------------------------------------------------------
+    # Arch mode: one metaxylem per arm + graded protoxylem chain per arm
+    # ------------------------------------------------------------------
 
-        Thin wrapper kept for direct/test use; the recipes drive the same region
-        builder + fill declaratively (``recipe.fill(..., strategy="packing")``).
-        """
-        xylem = self._xylem_star_region(stele_polygon)
-        if xylem.is_empty:
+    def _arch_split_radius(self):
+        """Radius separating the inner metaxylem zone from the outer protoxylem
+        band, plus ``(pith_r, outer_r)``.  The band depth is measured inward from
+        the pericycle side (``outer_r``); 0 defaults to 35%% of the radial span."""
+        pith_r, outer_r = self._xylem_gradient_radial_range
+        depth = self.vascular_params.get("protoxylem_band_depth", 0.0)
+        if depth <= 0.0:
+            depth = 0.35 * (outer_r - pith_r)
+        return max(pith_r, outer_r - depth), pith_r, outer_r
+
+    @staticmethod
+    def _largest_polygon(geom):
+        """Largest Polygon piece of a (possibly Multi)Polygon, or None."""
+        if geom.is_empty:
+            return None
+        pieces = [g for g in (geom.geoms if hasattr(geom, "geoms") else [geom])
+                  if g.geom_type == "Polygon" and not g.is_empty]
+        return max(pieces, key=lambda g: g.area) if pieces else None
+
+    def _fit_arch_metaxylem(self, polygon: Polygon) -> None:
+        """Place ``n_metaxylem`` metaxylem **evenly spaced** in a central ring,
+        independent of the protoxylem poles.
+
+        The metaxylem live in a solid annulus ``[pith_r, r_split]`` (clipped to
+        the stele), sliced into ``n_metaxylem`` equal sectors.  In each sector a
+        vessel of ``vessel_diameter`` (+/- ``vessel_diameter_sd``) is placed as a
+        circle when it fits, or — when the sector is too tight for the vessels to
+        fit side by side — an aspect-capped **radial ellipse** (falling back to
+        the largest inscribed circle).  So the count is exactly ``n_metaxylem``,
+        regularly spaced, and never tied to which arm has a protoxylem pole.
+        ``n_metaxylem == 0`` defaults to ``n_vascular_peak`` sectors."""
+        p = self.vascular_params
+        cx, cy = polygon.centroid.x, polygon.centroid.y
+        _, _, stele_r = GeometryProcessor._chebyshev_center(polygon)
+        outer_r = min(p["outer_radius_xylem"], stele_r)
+        pith_r = max(0.0, min(p.get("pith_radius", 0.0), outer_r))
+        self._xylem_gradient_center = (cx, cy)
+        self._xylem_gradient_radial_range = (pith_r, outer_r)
+        r_split, _, _ = self._arch_split_radius()
+        # The vascular region is simply the stele clipped to outer_r (no star
+        # outline): metaxylem fill the inner annulus [pith_r, r_split], protoxylem
+        # and phloem the outer band [r_split, outer_r].
+        self._arch_star = polygon.intersection(Point(cx, cy).buffer(outer_r, resolution=64))
+        self._arch_split_r = r_split
+
+        n_meta = p.get("n_metaxylem", 0) or p["n_vascular_peak"]
+
+        # Solid metaxylem ring [pith_r, r_split], clipped to the stele.
+        ring = (Point(cx, cy).buffer(r_split, resolution=64)
+                .difference(Point(cx, cy).buffer(pith_r, resolution=64)))
+        meta_region = polygon.intersection(ring)
+        if meta_region.is_empty:
             return
-        placed = fill_by_packing(
-            self.vascular_cells, xylem.shape, xylem.tag, rng=self.rng,
-            **self._xylem_pack_kwargs(),
-        )
-        self._record_xylem_vessels(xylem, placed)
+
+        d_meta, d_sd = p["xylem_diameter_max"], p["xylem_diameter_sd"]
+        d_floor = p["xylem_diameter_min"]
+        allow_ell = p["xylem_allow_ellipse"]
+        max_aspect = p["xylem_ellipse_max_aspect"] if allow_ell else 1.0
+        cell_d = self.vascular_params.get("cell_diameter", 0.0)
+
+        # Waist of the egg/teardrop, as a fraction of the major length measured
+        # from the OUTER tip -> the widest point sits toward the band, tapering
+        # inward.  (Area is independent of this split.)
+        waist = 0.35
+
+        eggs = []
+        for j in range(n_meta):
+            theta = 2.0 * np.pi * j / n_meta
+            target_r = 0.5 * float(np.clip(self.rng.normal(d_meta, d_sd), d_floor, np.inf))
+
+            # Full circle if it fits with a gap; otherwise elongate radially,
+            # KEEPING the area (a*b = target_r**2), just enough to open the gap,
+            # but never past ellipse_max_aspect.  If the cap is reached and the
+            # vessels still touch, they are placed at the cap (area kept).  Two
+            # passes converge (spacing depends on the ring radius).
+            a_ax = b_ax = target_r
+            for _ in range(2):
+                r_ring = max(r_split - a_ax, cell_d) 
+                tang_half = max(np.pi * r_ring / n_meta - (cell_d/8), 1e-6)
+                if target_r <= tang_half or not allow_ell:
+                    a_ax = b_ax = min(target_r, tang_half)
+                else:
+                    b_ax = tang_half  
+                    a_ax = min(target_r * target_r / b_ax, max_aspect * b_ax) 
+                    a_ax = max(a_ax, b_ax)  
+
+            # Teardrop: total major = 2*a_ax, waist offset toward the band; outer
+            # tip pinned at r_split.  A circle is just the symmetric case.
+            major = 2.0 * a_ax
+            a_out = max(waist * major, b_ax) if a_ax > b_ax * 1.02 else b_ax
+            a_in = major - a_out
+            r_widest = r_split - a_out
+            wx, wy = cx + r_widest * np.cos(theta), cy + r_widest * np.sin(theta)
+            if not polygon.contains(Point(wx, wy)):
+                continue
+            egg = GeometryProcessor.egg_polygon(wx, wy, a_out, a_in, b_ax, np.degrees(theta))
+            egg = self._largest_polygon(egg.intersection(polygon))
+            if egg is not None:
+                eggs.append(egg)
+
+        # Seed each vessel's border (bespoke shapes -> not place_packed_group).
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        self._arch_meta_polys, self._arch_meta_centers = [], []
+        for i, egg in enumerate(eggs):
+            eff_d = 2.0 * np.sqrt(egg.area / np.pi)
+            inner = egg.buffer(-eff_d * 0.12)
+            border_poly = inner if (inner.geom_type == "Polygon" and not inner.is_empty) else egg
+            bx, by = border_poly.exterior.coords.xy
+            coords = GeometryProcessor.resample_coords(np.column_stack((bx, by)), 28)
+            gid = next_id + i
+            for pt in coords[1:]:
+                self.vascular_cells.add_cell(Cell.radial(
+                    "metaxylem", pt[0], pt[1], eff_d, gid, (cx, cy)))
+            ctr = egg.centroid
+            self._arch_meta_polys.append(egg)
+            self._arch_meta_centers.append((ctr.x, ctr.y))
+            self.vascular_polygons.append(egg)
+
+    def _fit_arch_protoxylem(self) -> None:
+        """Pack a graded protoxylem chain at each of the ``n_vascular_peak`` poles,
+        each **directed to its nearest metaxylem**.
+
+        Metaxylem and protoxylem are *not* forced onto the same arm.  For every
+        pole (a peak tip at the pericycle) the nearest metaxylem centre is found
+        and the protoxylem is packed into a straight **corridor** from that
+        metaxylem out to the pole tip — so an aligned pole gets a radial file and
+        an orphan pole (no metaxylem in its own arm) leans across to connect to
+        the closest one.  Within the corridor the size gradient runs over
+        ``[r_split, outer_r]`` (largest inner, smallest at the pericycle) and the
+        cells are oriented toward that metaxylem."""
+        if not hasattr(self, "_arch_star"):
+            return
+        cx, cy = self._xylem_gradient_center
+        r_split = self._arch_split_r
+        _, pith_r, outer_r = self._arch_split_radius()
+
+        disc = Point(cx, cy).buffer(r_split, resolution=64)
+        proto_region = self._arch_star.difference(disc)
+        # Carve out the metaxylem already placed so the protoxylem never overlaps.
+        meta_polys = list(self.vascular_polygons)
+        if meta_polys:
+            proto_region = proto_region.difference(unary_union(meta_polys))
+        if proto_region.is_empty:
+            return
+
+        p = self.vascular_params
+        d_max = p["protoxylem_diameter"]
+        d_min = p["protoxylem_diameter_min"] or d_max * 0.4
+        cell_d = self.vascular_params.get("cell_diameter", d_min)
+        centers = getattr(self, "_arch_meta_centers", []) or [(cx, cy)]
+        # Each pole is a tapered trapezoid: ``inner`` wide at the metaxylem end,
+        # ``outer`` wide at the pericycle end.  Narrower poles leave more room for
+        # the phloem valleys between them.
+        w_inner = (p.get("protoxylem_pole_width_inner", 0.0) or d_max * 3.0)
+        w_outer = (p.get("protoxylem_pole_width_outer", 0.0) or d_max * 3.0)
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+
+        n = p["n_vascular_peak"]
+        for k in range(n):
+            theta = 2.0 * np.pi * k / n
+            tip = np.array([cx + outer_r * np.cos(theta), cy + outer_r * np.sin(theta)])
+            # Nearest metaxylem to this pole tip -> aim the corridor at it.
+            mx, my = min(centers, key=lambda c: (c[0] - tip[0]) ** 2 + (c[1] - tip[1]) ** 2)
+            m = np.array([mx, my])
+            axis = tip - m
+            L = np.hypot(*axis)
+            if L < 1e-9:
+                continue
+            perp = np.array([-axis[1], axis[0]]) / L      # unit normal to the pole axis
+            corridor = Polygon([
+                m + perp * w_inner / 2.0, m - perp * w_inner / 2.0,   # inner end (metaxylem)
+                tip - perp * w_outer / 2.0, tip + perp * w_outer / 2.0,  # outer end (pericycle)
+            ])
+            arm = self._largest_polygon(proto_region.intersection(corridor))
+            if arm is None:
+                continue
+            placed = fill_by_packing(
+                self.vascular_cells, arm, "protoxylem", rng=self.rng,
+                n_border=20, id_base=next_id, angle_center=(mx, my),
+                proportion=1.0, direction="center",
+                diameter_max=d_max, diameter_min=d_min,
+                diameter_sd=p["protoxylem_diameter_sd"],
+                gradient_function=p["xylem_gradient_function"],
+                gradient_inflection=p["xylem_gradient_inflection"],
+                gradient_steepness=p["xylem_gradient_steepness"],
+                gradient_asymmetry=p["xylem_gradient_asymmetry"],
+                gradient_center=(cx, cy),
+                gradient_radial_range=(r_split, outer_r),
+            )
+            next_id += len(placed)
+            new_polys = [poly for poly, _t, _g in placed]
+            self.vascular_polygons.extend(new_polys)
+            if new_polys:
+                # Clear stele only from the small interstitial gaps *between* the
+                # protoxylem cells (a morphological close of the vessel union),
+                # not the whole corridor -- otherwise the mask empties the pole and
+                # the protoxylem Voronoi cells blow up to fill it.  Then carve the
+                # region so neighbouring poles don't double-fill the overlap.
+                union = unary_union(new_polys)
+                closed = union.buffer(cell_d).buffer(-cell_d)     # fill gaps <= ~2*cell_d
+                self.vascular_tissue_polygons.setdefault("protoxylem", []).append(closed)
+                proto_region = proto_region.difference(union)
+                if proto_region.is_empty:
+                    break
+
+    def _fit_arch_phloem(self, polygon: Polygon) -> None:
+        """Phloem sits in the outer band, in the valleys *between* the poles.
+
+        Same radial band as the protoxylem (``[r_split, outer_r]``) but at the
+        mid-pole angles, so xylem poles and phloem alternate around the ring.
+        Each valley cluster is carved clear of every already-placed vessel."""
+        if not hasattr(self, "_arch_star"):
+            return
+        p = self.vascular_params
+        cx, cy = self._xylem_gradient_center
+        r_split = self._arch_split_r
+        _, _, outer_r = self._arch_split_radius()
+        n = p["n_vascular_peak"]
+        sieve_d = p["phloem_diameter"]
+
+        width, height = p["phloem_width"], p["phloem_height"]
+        r_center = 0.5 * (r_split + outer_r)             # mid-band
+
+        band = (polygon.intersection(Point(cx, cy).buffer(outer_r, resolution=64))
+                .difference(Point(cx, cy).buffer(r_split, resolution=64)))
+        if self.vascular_polygons:
+            band = band.difference(
+                unary_union([g.buffer(sieve_d * 0.5) for g in self.vascular_polygons]))
+        if band.is_empty:
+            return
+
+        next_id = (self.vascular_cells.get_last_id_group() + 1) if self.vascular_cells.cells else 0
+        for k in range(n):
+            theta = 2.0 * np.pi * (k + 0.5) / n          # valley between poles k, k+1
+            # A bounded ellipse cluster at the valley, clipped to the free band.
+            raw = affine_scale(Point(0, 0).buffer(1, resolution=48), width / 2, height / 2)
+            raw = rotate(raw, np.degrees(theta) - 90, origin=(0, 0))
+            raw = translate(raw, cx + r_center * np.cos(theta), cy + r_center * np.sin(theta))
+            cluster = self._largest_polygon(raw.intersection(band))
+            if cluster is None:
+                continue
+            placed = fill_by_packing(
+                self.vascular_cells, cluster, "phloem", rng=self.rng,
+                n_border=16, id_base=next_id, angle_center=(cx, cy),
+                proportion=1.0, direction=None,
+                diameter_max=sieve_d, diameter_sd=p["phloem_diameter_sd"],
+                gradient_function="normal",
+            )
+            next_id += len(placed)
+            # Record the whole cluster region (not just the sieve circles) so the
+            # vascular mask clears stele parenchyma from the gaps *between* the
+            # phloem cells, not only from inside them.
+            if placed:
+                self.vascular_tissue_polygons.setdefault("phloem", []).append(cluster)
 
     def _remove_stele_seeds_near_xylem(self) -> None:
         """Remove stele parenchyma cells engulfed by xylem vessels.
@@ -499,7 +758,8 @@ class RootAnatomy(Organ):
 # ---------------------------------------------------------------------------
 
 class MonocotRootAnatomy(RootAnatomy):
-    """Monocot root: ring of metaxylem vessels or star-shaped xylem."""
+    """Monocot root: 'default' ring of metaxylem bundles, or 'arch' (an
+    evenly-spaced metaxylem ring with a stele sheath + graded protoxylem poles)."""
 
     def _parse_vascular_params(self) -> None:
         xylem  = self._get_param("xylem")
@@ -521,23 +781,29 @@ class MonocotRootAnatomy(RootAnatomy):
             "xylem_shape":            str(xylem.get("xylem_shape", "default")),
         })
 
-        if self.vascular_params["xylem_shape"] == "star":
+        if self.vascular_params["xylem_shape"] == "arch":
             self.vascular_params.update({
+                # Metaxylem ring geometry + size.
                 "xylem_diameter_max":        float(xylem.get("vessel_diameter",        0.06)),
                 "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",    0.01)),
                 "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",     0.005)),
                 "n_vascular_peak":           int(xylem.get("n_vascular_peak",          5)),
-                "inner_radius_xylem":        float(xylem.get("inner_radius",           0.05)),
+                "n_metaxylem":               int(xylem.get("n_metaxylem",             0)),
                 "outer_radius_xylem":        float(xylem.get("outer_radius",           0.15)),
-                "arc_top_xylem":             float(xylem.get("arc_top",               0.02)),
-                "arc_bottom_xylem":          float(xylem.get("arc_bottom",            0.04)),
+                "pith_radius":               float(xylem.get("pith_radius",           0.0)),
+                "xylem_allow_ellipse":       bool(xylem.get("allow_ellipse",          True)),
+                "xylem_ellipse_max_aspect":  float(xylem.get("ellipse_max_aspect",   2.0)),
+                # Protoxylem chain (outer band) + its size gradient.
+                "protoxylem_diameter":       float(xylem.get("protoxylem_diameter",     0.01)),
+                "protoxylem_diameter_sd":    float(xylem.get("protoxylem_diameter_sd",  0.001)),
+                "protoxylem_band_depth":     float(xylem.get("protoxylem_band_depth",   0.0)),
+                "protoxylem_diameter_min":   float(xylem.get("protoxylem_diameter_min", 0.0)),
+                "protoxylem_pole_width_inner": float(xylem.get("protoxylem_pole_width_inner", 0.0)),
+                "protoxylem_pole_width_outer": float(xylem.get("protoxylem_pole_width_outer", 0.0)),
                 "xylem_gradient_function":   str(xylem.get("gradient_function",       "five_pl")),
                 "xylem_gradient_inflection": float(xylem.get("gradient_inflection",   0.7)),
                 "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",    5.0)),
                 "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",    1.0)),
-                "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",    0.7)),
-                "xylem_direction":           str(xylem.get("direction",               "center")),
-                "pith_radius":               float(xylem.get("pith_radius",           0.0)),
                 "relative_phloem":           float(phloem.get("relative_distance",    0.5)),
             })
 
@@ -557,13 +823,19 @@ class MonocotRootAnatomy(RootAnatomy):
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
         if self.vascular_params.get("n_vascular_bundles", 0) == 0:
             return recipe                       # no vascular bundles -> empty
-        if self.vascular_params.get("xylem_shape", "default") == "star":
-            recipe.fill("xylem star", self._xylem_star_region(polygon),
-                        strategy="packing", produces=("xylem", "stele"),
-                        record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
-            recipe.cleanup("clear stele under xylem",
-                           self._remove_stele_seeds_near_xylem)
-            self._add_phloem_step(recipe, polygon, type="monocot")
+        if self.vascular_params.get("xylem_shape", "default") == "arch":
+            # Arch mode, built inside-out: (1) evenly-spaced metaxylem ring,
+            # (2) a stele-cell sheath around each metaxylem, (3) a graded
+            # protoxylem chain per pole directed to its nearest metaxylem.
+            recipe.special("arch metaxylem",
+                           lambda: self._fit_arch_metaxylem(polygon),
+                           produces=("metaxylem",))
+            recipe.special("arch protoxylem",
+                           lambda: self._fit_arch_protoxylem(),
+                           produces=("protoxylem",))
+            recipe.special("arch phloem",
+                           lambda: self._fit_arch_phloem(polygon),
+                           produces=("phloem",))
         else:
             # Bespoke placements (a single-vessel border fill, a cell-relative
             # sheath, and pizza-sliced bundles) — not plain region+fill, so they
@@ -640,7 +912,7 @@ class MonocotRootAnatomy(RootAnatomy):
         xylem_polygons = list(self.vascular_polygons)
 
         for xylem_polygon in xylem_polygons:
-            outer = xylem_polygon.buffer(cell_diameter).intersection(stele_polygon)
+            outer = xylem_polygon.buffer(cell_diameter*0.8).intersection(stele_polygon)
             if outer.is_empty:
                 continue
             mid_ring = xylem_polygon.buffer(cell_diameter / 2).intersection(stele_polygon)
@@ -783,6 +1055,10 @@ class DicotRootAnatomy(RootAnatomy):
             "xylem_gradient_inflection": float(xylem.get("gradient_inflection",  0.7)),
             "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",   5.0)),
             "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",   1.0)),
+            "xylem_enforce_gradient_min": float(xylem.get("enforce_gradient_min", 0.0)),
+            "xylem_allow_ellipse":       bool(xylem.get("allow_ellipse",        False)),
+            "xylem_ellipse_max_aspect":  float(xylem.get("ellipse_max_aspect",  2.0)),
+            "xylem_packing_strategy":    str(xylem.get("packing_strategy",      "space")),
             "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",   0.7)),
             "pith_radius":               float(xylem.get("pith_radius",          0.0)),
             "xylem_direction":           str(xylem.get("direction",              "center")),
@@ -817,6 +1093,10 @@ class DicotRootAnatomy(RootAnatomy):
                 "gradient_inflection":    float(sec_xylem.get("gradient_inflection",    0.7)),
                 "gradient_steepness":     float(sec_xylem.get("gradient_steepness",     5.0)),
                 "gradient_asymmetry":     float(sec_xylem.get("gradient_asymmetry",     1.0)),
+                "enforce_gradient_min":   float(sec_xylem.get("enforce_gradient_min",   0.0)),
+                "allow_ellipse":          bool(sec_xylem.get("allow_ellipse",           False)),
+                "ellipse_max_aspect":     float(sec_xylem.get("ellipse_max_aspect",     2.0)),
+                "packing_strategy":       str(sec_xylem.get("packing_strategy",         "space")),
                 "prop_vessel_ring":       float(sec_xylem.get("prop_vessel_ring",       0.5)),
                 "n_ring":                 max(1, int(sec_xylem.get("n_ring",            1))),
                 "must_be_adjacent":       bool(sec_xylem.get("must_be_adjacent",        False)),
@@ -1605,6 +1885,10 @@ class DicotRootAnatomy(RootAnatomy):
                         gradient_inflection=sx["gradient_inflection"],
                         gradient_steepness=sx["gradient_steepness"],
                         gradient_asymmetry=sx["gradient_asymmetry"],
+                        enforce_gradient_min=sx["enforce_gradient_min"],
+                        allow_ellipse=sx["allow_ellipse"],
+                        ellipse_max_aspect=sx["ellipse_max_aspect"],
+                        pack_strategy=sx["packing_strategy"],
                         adjacent=sx["must_be_adjacent"],
                         gradient_center=(cx, cy),
                         gradient_radial_range=grr,

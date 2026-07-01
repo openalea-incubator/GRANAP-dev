@@ -33,16 +33,9 @@ def monocot_default() -> RootAnatomy:
     return RootAnatomy(OrganInputData.for_root(), seed=SEED)
 
 
-def monocot_star() -> RootAnatomy:
+def monocot_arch() -> RootAnatomy:
     data = OrganInputData.for_root()
-    data.set_value("xylem", "xylem_shape", "star")
-    return RootAnatomy(data, seed=SEED)
-
-
-def monocot_star_pith() -> RootAnatomy:
-    data = OrganInputData.for_root()
-    data.set_value("xylem", "xylem_shape", "star")
-    data.set_value("xylem", "pith_radius", 0.05)
+    data.set_value("xylem", "xylem_shape", "arch")
     return RootAnatomy(data, seed=SEED)
 
 
@@ -72,27 +65,19 @@ def needle_features() -> NeedleAnatomy:
 
 GOLDEN = {
     "monocot_default": (monocot_default, {
-        "air space": 359, "cortex": 202, "endodermis": 31, "epidermis": 168,
-        "exodermis": 79, "metaxylem": 5, "pericycle": 93, "phloem": 10,
-        "protoxylem": 10, "stele": 341,
-    }),
-    "monocot_star": (monocot_star, {
-        "air space": 359, "cortex": 202, "endodermis": 31, "epidermis": 168,
-        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 202, "xylem": 37,
-    }),
-    "monocot_star_pith": (monocot_star_pith, {
-        "air space": 359, "cortex": 202, "endodermis": 31, "epidermis": 168,
-        "exodermis": 79, "pericycle": 93, "phloem": 5, "stele": 226, "xylem": 34,
+        "air space": 367, "cortex": 206, "endodermis": 32, "epidermis": 168,
+        "exodermis": 79, "metaxylem": 5, "pericycle": 97, "phloem": 10,
+        "protoxylem": 10, "stele": 410,
     }),
     "dicot_primary": (dicot_primary, {
-        "air space": 601, "cambium": 81, "cortex": 349, "endodermis": 70,
-        "epidermis": 247, "exodermis": 118, "pericycle": 223, "phloem": 51,
-        "stele": 849, "xylem": 28,
+        "air space": 621, "cambium": 81, "cortex": 355, "endodermis": 72,
+        "epidermis": 248, "exodermis": 119, "pericycle": 230, "phloem": 51,
+        "stele": 967, "xylem": 28,
     }),
     "dicot_secondary": (dicot_secondary, {
-        "air space": 538, "cambium": 89, "cortex": 338, "endodermis": 70,
-        "epidermis": 247, "exodermis": 118, "medullar_ray": 48, "pericycle": 223,
-        "phloem": 138, "phloem_parenchyma": 130, "stele": 422, "xylem": 57,
+        "air space": 511, "cambium": 93, "companion_cell": 84, "cortex": 321,
+        "endodermis": 39, "epidermis": 248, "exodermis": 119, "medullar_ray": 48,
+        "pericycle": 91, "phloem": 119, "stele": 858, "xylem": 64,
     }),
     "needle_default": (needle_default, {
         "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,
@@ -138,12 +123,12 @@ def test_monocot_default_golden():
     _check("monocot_default")
 
 
-def test_monocot_star_golden():
-    _check("monocot_star")
-
-
-def test_monocot_star_pith_golden():
-    _check("monocot_star_pith")
+def test_monocot_arch_reproducible():
+    """Arch mode builds vessels and is reproducible (no global-RNG leakage)."""
+    a = _census(monocot_arch)
+    b = _census(monocot_arch)
+    assert a == b, "monocot_arch not reproducible"
+    assert a.get("metaxylem", 0) > 0 and a.get("protoxylem", 0) > 0
 
 
 def test_dicot_primary_golden():

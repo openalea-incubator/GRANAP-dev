@@ -194,9 +194,9 @@ def main(show=True):
     # contiguous band (only its innermost ring is preserved). Runs at
     # generation time, before the inner/outer cortex are retagged to "cortex".
     maize_b73.set_value("aerenchyma", "tissue",
-                   ["inner_cortex", "cortex"])
-    maize_b73.set_value("aerenchyma", "aerenchyma_proportion", 0.25)
-    maize_b73.set_value("aerenchyma", "aerenchyma_type", 2)
+                   ["inner_cortex", "cortex", "outer_cortex"])
+    maize_b73.set_value("aerenchyma", "aerenchyma_proportion", 0.31)
+    maize_b73.set_value("aerenchyma", "aerenchyma_type", 1)
     maize_b73.set_value("aerenchyma", "n_files", 15)
 
     # Build once, after all configuration is in place.

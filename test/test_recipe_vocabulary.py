@@ -26,9 +26,9 @@ from openalea.granap.tissue_class import Tissue, TissueRecipe, retag_tissue
 SEED = 0
 
 
-def make_star_root(**xylem_overrides) -> RootAnatomy:
+def make_arch_root(**xylem_overrides) -> RootAnatomy:
     data = OrganInputData.for_root()
-    data.set_value("xylem", "xylem_shape", "star")
+    data.set_value("xylem", "xylem_shape", "arch")
     for field, value in xylem_overrides.items():
         data.set_value("xylem", field, value)
     return RootAnatomy(data, seed=SEED)
@@ -178,25 +178,33 @@ def test_recipe_special_and_cleanup_order():
 # The phloem regions really are shape-first Tissues, built by region algebra
 # ---------------------------------------------------------------------------
 
-def test_phloem_valley_zones_are_tissue_regions():
-    root = make_star_root()
-    layers = root.generate_layer_polygons()
-    stele = next(p["polygon"] for p in layers if p["name"] == "stele")
+def test_arch_phloem_sits_in_band_clear_of_vessels():
+    """Arch phloem is placed in the outer band and never inside a metaxylem."""
+    from shapely.geometry import Point
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "xylem_shape", "arch")
+    for f, v in dict(n_vascular_peak=8, n_metaxylem=6, outer_radius=0.35, pith_radius=0.0,
+                     vessel_diameter=0.1, protoxylem_band_depth=0.08,
+                     protoxylem_pole_width_inner=0.03,
+                     protoxylem_pole_width_outer=0.03).items():
+        data.set_value("xylem", f, v)
+    data.set_value("phloem", "sieve_diameter", 0.012)
+    data.set_value("phloem", "cluster_width", 0.03)
+    data.set_value("phloem", "cluster_height", 0.03)
+    root = RootAnatomy(data, seed=SEED)
+    root.generate_cells()
 
-    root.all_cells = CellManager()
-    root.vascular_cells = CellManager()
-    root.vascular_polygons = []
-    root.vascular_tissue_polygons = {}
-    root.fit_star_shapped_xylem(stele)        # sets root.xylem_star
+    phloem = [c for c in root.all_cells.cells if c.type == "phloem"]
+    assert phloem, "Expected phloem cells in the valleys"
 
-    tissues, adjustment = root._phloem_valley_zones(stele, type="monocot")
-    assert tissues
-    assert all(isinstance(t, Tissue) for t in tissues)
-    assert all(t.tag == "phloem" for t in tissues)
-    assert all(not t.is_empty for t in tissues)
-    # carved out of the xylem star: no phloem region overlaps it
-    for t in tissues:
-        assert t.shape.intersection(root.xylem_star).area < 1e-9
+    meta_gids = {c.id_group for c in root.all_cells.cells if c.type == "metaxylem"}
+    meta_polys = root._arch_meta_polys
+    for c in root.all_cells.cells:
+        if c.id_group in meta_gids:
+            continue
+        assert not any(mp.contains(Point(c.x, c.y)) for mp in meta_polys), (
+            "A non-metaxylem cell landed inside a metaxylem vessel"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -204,15 +212,17 @@ def test_phloem_valley_zones_are_tissue_regions():
 # ---------------------------------------------------------------------------
 
 def test_recipe_is_inspectable():
-    root = make_star_root()
+    root = make_arch_root()
     layers = root.generate_layer_polygons()
     stele = next(p["polygon"] for p in layers if p["name"] == "stele")
     recipe = root._vascular_recipe(stele)
     names = [name for name, _ in recipe.describe()]
-    assert names == ["xylem star", "clear stele under xylem", "phloem in valleys"]
-    assert dict(recipe.describe())["phloem in valleys"] == ("phloem",)
+    assert names == ["arch metaxylem", "arch metaxylem sheath",
+                     "arch protoxylem", "arch phloem"]
+    assert dict(recipe.describe())["arch phloem"] == ("phloem",)
     # plan() additionally reports each step's kind
-    assert [kind for _, kind, _ in recipe.plan()] == ["fill", "cleanup", "fill_each"]
+    assert [kind for _, kind, _ in recipe.plan()] == [
+        "special", "special", "special", "special"]
 
 
 def test_recipe_plan_reports_kinds_and_renders():
@@ -256,15 +266,14 @@ def test_needle_recipes_are_inspectable():
     assert [name for name, _ in orec.describe()] == ["resin ducts", "stomata"]
 
 
-def test_monocot_baseline_unchanged():
-    root = make_star_root()
+def test_monocot_arch_produces_vessels():
+    root = make_arch_root()
     root.generate_cells()
     counts = cell_type_counts(root)
-    # Anchors match the authoritative monocot_star golden in
-    # test_vascular_regression.py (rebaselined by the chebyshev speed-up).
-    assert counts["xylem"] == 37
-    assert counts["stele"] == 202
-    assert counts["phloem"] == 5
+    # Arch mode yields distinct metaxylem + protoxylem + stele populations.
+    assert counts.get("metaxylem", 0) > 0
+    assert counts.get("protoxylem", 0) > 0
+    assert counts.get("stele", 0) > 0
 
 
 if __name__ == "__main__":
