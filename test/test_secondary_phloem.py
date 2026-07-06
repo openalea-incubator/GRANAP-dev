@@ -71,8 +71,3 @@ def test_secondary_phloem_zone_placement():
     # Sieve elements are always present.
     counts = cell_type_counts(root)
     assert counts.get("phloem", 0) > 0, "No phloem (sieve) cells generated"
-
-
-if __name__ == "__main__":
-    test_secondary_phloem_zone_placement()
-    print("SECONDARY PHLOEM TESTS PASSED")

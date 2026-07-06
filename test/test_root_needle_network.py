@@ -32,9 +32,3 @@ def test_needle_from_param_list_builds():
     needle_sim = Organ.create_from_input(input_data_needle)
     needle_sim.export_to_adjencymatrix()
     assert len(needle_sim.all_cells.cells) > 0
-
-
-if __name__ == "__main__":
-    test_root_from_xml_has_expected_vasculature()
-    test_needle_from_param_list_builds()
-    print("ROOT/NEEDLE NETWORK INPUT TESTS PASSED")

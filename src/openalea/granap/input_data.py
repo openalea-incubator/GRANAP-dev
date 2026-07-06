@@ -513,25 +513,143 @@ class OrganInputData(BaseModel):
         return result
 
     def get(self, name: str) -> Optional[Any]:
-        """Retrieve a param entry by its `name` field."""
+        """Retrieve a param entry by its `name` field, or None if absent.
+
+        Prefer ``data[name]`` / ``data.name`` for typed access with autocomplete;
+        this stays for callers that want the None-on-miss behaviour.
+        """
         for p in self.params:
             n = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
             if n == name:
                 return p
         return None
 
-    def set_value(self, name: str, field: str, value: Any) -> None:
-        """
-        Update a field on a named param entry.
-        Pydantic will validate the new value automatically if validate_assignment=True.
-        """
+    def names(self) -> List[str]:
+        """The `name` of every param entry (the keys accepted by ``get`` / ``[]``)."""
+        return [
+            (p.get("name") if isinstance(p, dict) else getattr(p, "name", None))
+            for p in self.params
+        ]
+
+    def _require(self, name: str) -> Any:
+        """Return the param entry named ``name`` or raise a KeyError listing the
+        available names."""
         entry = self.get(name)
         if entry is None:
-            raise KeyError(f"No param with name='{name}' found.")
+            raise KeyError(
+                f"No param named {name!r}. Available: {', '.join(map(str, self.names()))}"
+            )
+        return entry
+
+    def __getitem__(self, name: str) -> Any:
+        """Typed access by name: ``data['xylem'].vessel_diameter = 0.03``.
+
+        Returns the live param entry (Pydantic model or raw dict), so assigning
+        to a field of a model triggers validation.
+        """
+        return self._require(name)
+
+    def __getattr__(self, name: str) -> Any:
+        """Attribute access by param name: ``data.xylem.vessel_diameter = 0.03``.
+
+        Only reached when normal attribute lookup fails, so real fields/methods
+        (``params``, ``set_value``, …) always take precedence; a param whose name
+        shadows one of those stays reachable via ``data[name]``.
+        """
+        # Avoid recursion before ``params`` exists (during pydantic init).
+        try:
+            params = object.__getattribute__(self, "__dict__").get("params")
+        except AttributeError:
+            params = None
+        if params:
+            for p in params:
+                n = p.get("name") if isinstance(p, dict) else getattr(p, "name", None)
+                if n == name:
+                    return p
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute or param named {name!r}"
+        )
+
+    def set_value(self, name: str, field: str, value: Any) -> "OrganInputData":
+        """Update one field on a named param entry; returns ``self`` for chaining.
+
+        Model-backed entries validate the value (and the *field name* — an unknown
+        field raises with the list of valid fields).  Raw-dict entries (e.g. from
+        ``from_xml``) can't be schema-checked, so setting a field that isn't
+        already present warns (it's usually a typo) but still applies.
+        """
+        entry = self._require(name)
         if isinstance(entry, BaseModel):
+            fields = type(entry).model_fields
+            if field not in fields:
+                raise AttributeError(
+                    f"{name!r} has no field {field!r}. "
+                    f"Valid fields: {', '.join(fields)}"
+                )
             setattr(entry, field, value)  # triggers Pydantic validation
         else:
-            entry[field] = value          # raw dict — no validation
+            if field != "name" and field not in entry:
+                warnings.warn(
+                    f"set_value({name!r}, {field!r}, …): {field!r} is not an existing "
+                    f"field on this raw-dict param — adding it as a new key (typo?). "
+                    f"Existing fields: {', '.join(k for k in entry if k != 'name')}",
+                    stacklevel=2,
+                )
+            entry[field] = value          # raw dict — no schema validation
+        return self
+
+    def set_values(self, name: str, **fields: Any) -> "OrganInputData":
+        """Update several fields on one param entry in a single call; returns
+        ``self``.  ``data.set_values('xylem', n_vascular_peak=6, outer_radius=0.16)``."""
+        for field, value in fields.items():
+            self.set_value(name, field, value)
+        return self
+
+    def validate(self, raise_on_error: bool = False) -> List[str]:
+        """Check cross-field geometry constraints that otherwise fail silently
+        (an empty or distorted render rather than an error).
+
+        Returns a list of human-readable problem descriptions (empty when the
+        config is sound).  With ``raise_on_error=True`` raises ``ValueError``
+        instead.  Only constraints whose params are present are checked, so it is
+        safe for any organ type.
+        """
+        def fld(param_name: str, field: str) -> Any:
+            entry = self.get(param_name)
+            if entry is None:
+                return None
+            return entry.get(field) if isinstance(entry, dict) else getattr(entry, field, None)
+
+        issues: List[str] = []
+
+        # A star's inner (valley) radius must be below its outer (tip) radius.
+        for pname, inner, outer, label in (
+            ("xylem", "inner_radius", "outer_radius", "xylem star"),
+            ("cambium", "inner_distance", "outer_distance", "primary cambium"),
+            ("secondary_cambium", "inner_distance", "outer_distance", "secondary cambium"),
+        ):
+            lo, hi = fld(pname, inner), fld(pname, outer)
+            # inner == outer is a valid degenerate star (a circle); only an
+            # inverted radius (inner > outer) is broken.
+            if lo is not None and hi is not None and lo > hi:
+                issues.append(f"{label}: {inner} ({lo}) must be <= {outer} ({hi}).")
+
+        # Secondary cambium must enclose the primary cambium.
+        if fld("secondary_growth", "value"):
+            sc_in = fld("secondary_cambium", "inner_distance")
+            pc_out = fld("cambium", "outer_distance")
+            if sc_in is not None and pc_out is not None and sc_in <= pc_out:
+                issues.append(
+                    f"secondary growth: secondary_cambium.inner_distance ({sc_in}) must "
+                    f"exceed the primary cambium.outer_distance ({pc_out}) so it encloses "
+                    "the primary cambium."
+                )
+
+        if raise_on_error and issues:
+            raise ValueError(
+                "Invalid anatomy configuration:\n  - " + "\n  - ".join(issues)
+            )
+        return issues
 
     # ------------------------------------------------------------------
     # Constructors

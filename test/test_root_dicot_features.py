@@ -78,8 +78,3 @@ def test_dicot_star_xylem_size_classification():
             f"[{s['label']}] Found {len(small_xylem)} xylem cell(s) with "
             f"diameter < vessel_diameter_min ({dmin})"
         )
-
-
-if __name__ == "__main__":
-    test_dicot_star_xylem_size_classification()
-    print("ALL DICOT XYLEM FEATURE TESTS PASSED")

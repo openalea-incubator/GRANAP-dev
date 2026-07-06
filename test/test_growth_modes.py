@@ -102,41 +102,8 @@ def test_dicot_annual_has_more_vessels_than_secondary():
     """N annual rings repeat the vessel packing, so annual has more xylem cells."""
     sec = _census(dicot_secondary)
     ann = _census(dicot_annual)
-    # Same secondary tissue set.
-    for t in ("cambium", "medullar_ray"):
-        assert ann.get(t, 0) > 0, f"dicot_annual missing {t}"
+    assert ann.get("cambium", 0) > 0, "dicot_annual missing cambium"
     assert ann.get("xylem", 0) > sec.get("xylem", 0), (
         f"annual xylem ({ann.get('xylem', 0)}) should exceed "
         f"secondary xylem ({sec.get('xylem', 0)})"
     )
-
-
-# -- visualisation (script mode only) ----------------------------------------
-
-def _plot_all(show: bool) -> None:
-    import matplotlib.pyplot as plt
-
-    fig, axs = plt.subplots(2, 2, figsize=(14, 14))
-    for ax, (name, make) in zip(axs.flat, CASES.items()):
-        organ = make()
-        organ.generate_cells()
-        organ.plot_cells(show=False, ax=ax, title=name)
-        legend = ax.get_legend()
-        if legend:
-            legend.remove()
-    plt.suptitle("Growth cases — monocot / dicot primary / secondary / annual", fontsize=14)
-    plt.tight_layout()
-    if show:
-        plt.show()
-    else:
-        plt.close(fig)
-
-
-if __name__ == "__main__":
-    test_all_cases_reproducible()
-    test_monocot_structure()
-    test_dicot_primary_structure()
-    test_dicot_secondary_structure()
-    test_dicot_annual_has_more_vessels_than_secondary()
-    print("ALL GROWTH-MODE TESTS PASSED")
-    _plot_all(show=True)

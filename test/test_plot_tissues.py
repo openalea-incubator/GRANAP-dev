@@ -19,11 +19,10 @@ def _dicot_secondary():
     return RootAnatomy(data, seed=SEED)
 
 
-def test_plot_tissues(show=False):
-    """
-    Verify plot_tissues and build_anatomy_tissues for monocot, dicot, and needle.
-    Shows each organ as two side-by-side plots: individual rings vs fused tissues.
-    """
+def test_plot_tissues():
+    """Verify plot_tissues and build_anatomy_tissues for monocot, dicot, and needle:
+    both kinds of tissue are returned, no polygon is empty, and the dry-run (both
+    build_anatomy_tissues and plot_tissues) never materialises cells."""
 
     organs = [
         ("monocot",         RootAnatomy(OrganInputData.for_root(),        seed=SEED)),
@@ -33,8 +32,6 @@ def test_plot_tissues(show=False):
     ]
 
     for name, organ in organs:
-        print(f"\n--- {name} ---")
-
         # build_anatomy_tissues must return a non-empty list with both kinds
         tissues = organ.build_anatomy_tissues()
         assert len(tissues) > 0, f"{name}: build_anatomy_tissues returned empty list"
@@ -47,27 +44,9 @@ def test_plot_tissues(show=False):
         # state must be untouched after the dry-run
         assert organ.all_cells.cells == [], f"{name}: all_cells was modified"
 
-        # Side-by-side: individual rings on the left, fused tissues on the right
+        # plot_tissues must render onto axes (both modes) without materialising cells
         fig, (ax_rings, ax_fused) = plt.subplots(1, 2, figsize=(16, 8))
-
         organ.plot_tissues(ax=ax_rings, show=False, labels=True, fuse=False)
-        ax_rings.set_title(f"{name} - individual rings")
-
         organ.plot_tissues(ax=ax_fused, show=False, labels=True, fuse=True)
-        ax_fused.set_title(f"{name} - fused tissues")
-
         assert organ.all_cells.cells == [], f"{name}: all_cells was modified by plot_tissues"
-
-        print(f"  layers:            {[t['name'] for t in tissues if t['kind'] == 'layer']}")
-        print(f"  vascular polygons: {sum(1 for t in tissues if t['kind'] == 'vascular')}")
-
-        if show:
-            plt.show()
-        else:
-            plt.close(fig)
-
-    print("\nAll plot_tissues tests passed.")
-
-
-if __name__ == "__main__":
-    test_plot_tissues(show=True)
+        plt.close(fig)

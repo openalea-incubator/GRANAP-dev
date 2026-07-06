@@ -100,13 +100,3 @@ def test_consider_as_cell_keep_existing():
     consider_as_cell(cm, region, "blob", replace=False)
     assert len(cm.cells) == 2                    # original kept, blob added
     assert sorted(c.type for c in cm.cells) == ["blob", "phloem"]
-
-
-if __name__ == "__main__":
-    test_cell_radial_polar_from_center()
-    test_cell_radial_center_offset_and_explicit_ids()
-    test_carve_and_insert_removes_overlap_and_adds()
-    test_carve_and_insert_buffer_widens_removal()
-    test_consider_as_cell_collapses_region()
-    test_consider_as_cell_keep_existing()
-    print("ALL SPECIAL-TISSUE TESTS PASSED")

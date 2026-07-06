@@ -217,12 +217,10 @@ def test_recipe_is_inspectable():
     stele = next(p["polygon"] for p in layers if p["name"] == "stele")
     recipe = root._vascular_recipe(stele)
     names = [name for name, _ in recipe.describe()]
-    assert names == ["arch metaxylem", "arch metaxylem sheath",
-                     "arch protoxylem", "arch phloem"]
+    assert names == ["arch metaxylem", "arch protoxylem", "arch phloem"]
     assert dict(recipe.describe())["arch phloem"] == ("phloem",)
     # plan() additionally reports each step's kind
-    assert [kind for _, kind, _ in recipe.plan()] == [
-        "special", "special", "special", "special"]
+    assert [kind for _, kind, _ in recipe.plan()] == ["special", "special", "special"]
 
 
 def test_recipe_plan_reports_kinds_and_renders():
@@ -274,22 +272,3 @@ def test_monocot_arch_produces_vessels():
     assert counts.get("metaxylem", 0) > 0
     assert counts.get("protoxylem", 0) > 0
     assert counts.get("stele", 0) > 0
-
-
-if __name__ == "__main__":
-    test_tissue_translate_moves_region()
-    test_tissue_rotate_about_origin_preserves_distance()
-    test_tissue_smooth_changes_boundary_keeps_centre()
-    test_tissue_region_algebra()
-    test_retag_is_terminal_cell_verb()
-    test_recipe_fill_packs_a_region()
-    test_recipe_fill_each_and_lazy_target()
-    test_recipe_empty_region_is_safe()
-    test_recipe_special_and_cleanup_order()
-    test_needle_recipes_are_inspectable()
-    test_phloem_valley_zones_are_tissue_regions()
-    test_recipe_is_inspectable()
-    test_recipe_plan_reports_kinds_and_renders()
-    test_organ_default_recipes_are_empty()
-    test_monocot_baseline_unchanged()
-    print("ALL SHAPE-FIRST TISSUE TESTS PASSED")

@@ -7,6 +7,7 @@ depending on the ``planttype`` value in the input.  Both subclasses are
 ``isinstance(obj, RootAnatomy)`` == True, so all existing code keeps working.
 """
 
+import warnings
 import numpy as np
 from typing import List, Dict, Any
 from collections import defaultdict
@@ -86,6 +87,11 @@ class RootAnatomy(Organ):
     def __init__(self, input_data=None, seed=None):
         super().__init__(seed=seed)
         if isinstance(input_data, OrganInputData):
+            # Surface known cross-field footguns up front (secondary cambium not
+            # enclosing the primary, inner >= outer, …) as warnings rather than a
+            # silently broken render.  Non-fatal: clipping still produces output.
+            for issue in input_data.validate():
+                warnings.warn(f"[anatomy config] {issue}", stacklevel=2)
             self.params = input_data.to_dict_list()
         elif isinstance(input_data, list):
             self.params = input_data
@@ -439,98 +445,6 @@ class RootAnatomy(Organ):
                 c for c in self.all_cells.cells
                 if not (c.type == "stele" and c.id_group in to_delete)
             ]
-
-    def _phloem_valley_zones(self, stele_polygon: Polygon, type="monocot"):
-        """Build the phloem regions: one :class:`Tissue` per valley between peaks.
-
-        Shape-first — each valley starts as a ``Tissue("phloem", ellipse)`` and is
-        shaped purely by region algebra: clipped to the stele and carved out of
-        the xylem star.  Returns ``(tissues, adjustment)``; the cells are filled
-        in later by :meth:`fit_phloem_elements`.  ``adjustment`` is the clearance
-        used when recording the region for the stele-clearing mask.
-        """
-        p = self.vascular_params
-        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
-        n_peaks = p["n_vascular_peak"]
-
-        width     = p["phloem_width"]
-        height    = p["phloem_height"]
-        cell_diam = p["phloem_diameter"]
-        relative_distance = p["relative_phloem"]
-
-        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        if type == "monocot":
-            minimal_distance = min(p["inner_radius_xylem"], stele_r * 0.95)
-        if type == "dicot":
-            minimal_distance = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
-        adjustment = self._phloem_adjustment(type)
-
-        r_center = (
-            minimal_distance + adjustment + (height / 2)
-            + (stele_r - adjustment - height - minimal_distance) * relative_distance
-        )
-
-        xylem_star = getattr(self, "xylem_star", None)
-        min_area = np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015)
-        tissues = []
-        for k in range(n_peaks):
-            theta = 2 * np.pi * (k + 0.5) / n_peaks
-
-            raw = self._oriented_ellipse(
-                cx + r_center * np.cos(theta), cy + r_center * np.sin(theta),
-                width, height, np.degrees(theta),
-            )
-
-            tissue = Tissue("phloem", raw).intersection(stele_polygon)
-            if xylem_star is not None and not xylem_star.is_empty:
-                tissue.difference(xylem_star)
-            if tissue.is_empty or tissue.area < min_area:
-                continue
-            tissues.append(tissue)
-
-        return tissues, adjustment
-
-    def _phloem_adjustment(self, type="monocot") -> float:
-        """Clearance buffer used when recording phloem regions for the stele mask.
-
-        One source of truth for both the valley geometry (:meth:`_phloem_valley_zones`)
-        and the mask recording (:meth:`_add_phloem_step`).
-        """
-        p = self.vascular_params
-        if type == "dicot":
-            return p.get("cambium_cell_diameter", 0.0)
-        return p.get("cell_diameter", 0.0)
-
-    def _add_phloem_step(self, recipe: TissueRecipe, stele_polygon: Polygon, type="monocot") -> None:
-        """Declarative phloem step: valley *regions* filled by circle-packing.
-
-        Shape-first vocabulary — the regions (:meth:`_phloem_valley_zones`, built
-        lazily at recipe-build time because they are carved from the xylem star
-        placed by an earlier step) are filled by the recipe's ``packing``
-        strategy.  Each filled region is recorded (buffered by the phloem
-        clearance) so the unified vascular mask in ``generate_cells`` clears the
-        stele seeds underneath it.
-        """
-        p = self.vascular_params
-        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
-        cell_diam = p["phloem_diameter"]
-        cell_sd   = p["phloem_diameter_sd"]
-        adjustment = self._phloem_adjustment(type)
-
-        def record(tissue, _result, adj=adjustment):
-            self.vascular_tissue_polygons.setdefault(tissue.tag, []).append(
-                GeometryProcessor.buffer_polygon(tissue.shape, adj / 2)
-            )
-
-        recipe.fill_each(
-            "phloem in valleys",
-            lambda: self._phloem_valley_zones(stele_polygon, type)[0],
-            strategy="packing", produces=("phloem",), record=record,
-            n_border=25, angle_center=(cx, cy),
-            proportion=1.0, direction=None,
-            diameter_max=cell_diam, diameter_min=cell_diam,
-            diameter_sd=cell_sd, gradient_function="normal",
-        )
 
     # ------------------------------------------------------------------
     # Shared low-level rendering helper

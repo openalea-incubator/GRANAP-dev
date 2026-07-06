@@ -82,11 +82,3 @@ def test_arch_vs_default_both_produce_cells():
 
     assert sum(counts_default.values()) > 10, "Default mode produced too few cells"
     assert sum(counts_arch.values()) > 10, "Arch mode produced too few cells"
-
-
-if __name__ == "__main__":
-    test_arch_mode_no_pith()
-    test_arch_mode_with_pith()
-    test_arch_exact_metaxylem_count()
-    test_arch_vs_default_both_produce_cells()
-    print("ALL MONOCOT XYLEM TESTS PASSED")

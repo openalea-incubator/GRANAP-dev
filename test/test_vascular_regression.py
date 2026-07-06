@@ -145,11 +145,3 @@ def test_needle_default_golden():
 
 def test_needle_features_golden():
     _check("needle_features")
-
-
-if __name__ == "__main__":
-    test_seed0_reproducible()
-    for key in GOLDEN:
-        _check(key)
-        print("OK", key)
-    print("ALL VASCULAR REGRESSION GOLDENS PASSED")
