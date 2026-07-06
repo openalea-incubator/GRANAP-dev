@@ -48,10 +48,24 @@ def anatomy_metrics(root: RootAnatomy) -> dict:
         stele_radius = float("nan")
 
     xylem_area = sum(c.area for c in root.all_cells.cells if "xylem" in c.type)
+
+    # Realized aerenchyma proportion, measured from the *generated* geometry
+    # (i.e. after Voronoi + intercellular carving + aerenchyma merge). This is
+    # the air-space fraction of the cortex band (air / (air + cortex)); compare
+    # it against the requested ``aerenchyma_proportion`` input.
+    air_area = sum(
+        c.area for c in root.all_cells.cells
+        if c.type in ("air space", "aerenchyma")
+    )
+    cortex_area = sum(c.area for c in root.all_cells.cells if c.type == "cortex")
+    denom = air_area + cortex_area
+    aerenchyma_proportion = air_area / denom if denom > 0 else 0.0
+
     return {
         "root_diameter":  np.sqrt(root_area / np.pi) * 2,
         "stele_diameter": stele_radius * 2,
         "xylem_area":   xylem_area,
+        "aerenchyma_proportion": aerenchyma_proportion,
     }
 
 
@@ -223,7 +237,8 @@ def main(show=True):
             f"{labels[i]}\n"
             f"root d = {m['root_diameter']:.3f}   "
             f"stele d = {m['stele_diameter']:.3f}   "
-            f"xylem area = {m['xylem_area']:.4f}"
+            f"xylem area = {m['xylem_area']:.4f}\n"
+            f"aerenchyma prop = {m['aerenchyma_proportion']:.3f}"
         )
         root.plot_cells(show=False, ax=axs_flat[i], title=title)
         legend = axs_flat[i].get_legend()

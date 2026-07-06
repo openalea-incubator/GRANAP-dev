@@ -274,7 +274,7 @@ class GeometryProcessor:
     @staticmethod
     def ellipse_to_polygon(cx, cy, rx, ry, angle):
         """
-        Create a polygon for an ellipse 
+        Create a polygon for an ellipse
         """
         circle = sp.Point(0, 0).buffer(1)
         ellipse = sp.affinity.scale(circle, rx, ry, origin=(0, 0))
@@ -282,6 +282,75 @@ class GeometryProcessor:
         ellipse = sp.affinity.translate(ellipse, cx, cy)
 
         return ellipse
+
+    @staticmethod
+    def focus_ellipse_polygon(cx, cy, rx, ry, angle, exponent=4.0, n=200):
+        """A superellipse / Lamé curve ``|x/rx|**e + |y/ry|**e = 1``.
+
+        Named ``focus_ellipse`` because ``exponent`` acts as a "latus rectum" knob
+        on top of a classic ellipse.  Same bounding box as
+        :meth:`ellipse_to_polygon` (half-axes ``rx``, ``ry``), but ``exponent``
+        controls how *full* the outline is — a way to enlarge the shape (bigger
+        latus rectum, more area, blunter flanks) **without** changing the width or
+        height:
+
+        - ``exponent == 2`` -> a classic ellipse (area ``pi*rx*ry``, latus rectum
+          ``2*ry**2/rx``);
+        - ``exponent > 2``  -> fuller/blunter flanks toward a rounded rectangle
+          (area grows toward ``4*rx*ry``, latus rectum increases);
+        - ``exponent < 2``  -> pointier toward a diamond (latus rectum shrinks).
+
+        The curve keeps the axis endpoints (``±rx`` on the major axis, ``±ry`` on
+        the minor) fixed; only the fullness between them changes.  ``angle`` is in
+        degrees, applied about the shape centre before translating to ``(cx, cy)``.
+        """
+        t = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+        p = 2.0 / float(exponent)
+        x = rx * np.sign(np.cos(t)) * np.abs(np.cos(t)) ** p
+        y = ry * np.sign(np.sin(t)) * np.abs(np.sin(t)) ** p
+        poly = sp.Polygon(np.column_stack([x, y]))
+        poly = sp.affinity.rotate(poly, angle, origin=(0, 0))
+        poly = sp.affinity.translate(poly, cx, cy)
+        return poly
+
+    @staticmethod
+    def fit_focus_ellipse(profile):
+        """Best-fit :meth:`focus_ellipse_polygon` to a measured contour profile.
+
+        ``profile`` is a list of ``(major_pos, minor_width)`` measurements: the
+        distance from the centre along the major axis (mm) and the FULL width in
+        the minor direction there (mm).  The widest point sets the semi-minor
+        axis, the farthest point (the tip, width -> 0) sets the semi-major axis,
+        and the single superellipse ``exponent`` is least-squares fitted to the
+        interior points.
+
+        Returns ``(semi_major, semi_minor, exponent)``.  With one interior point
+        the fit is exact; with several it is a best fit (a superellipse has only
+        the exponent free once the axes are fixed), and it falls back to a classic
+        ellipse (exponent 2) when no interior point is given.
+        """
+        pts = [(float(x), float(w)) for x, w in profile]
+        if len(pts) < 2:
+            raise ValueError(
+                "focus-ellipse profile needs >= 2 (major_pos, minor_width) points"
+            )
+        semi_minor = max(w for _, w in pts) / 2.0
+        semi_major = max(x for x, _ in pts)
+        if semi_major <= 0.0 or semi_minor <= 0.0:
+            raise ValueError(
+                "focus-ellipse profile needs a positive centre width and tip position"
+            )
+
+        interior = [(x, w) for x, w in pts
+                    if 0.0 < x < semi_major - 1e-9 and w > 1e-9]
+        if not interior:
+            return semi_major, semi_minor, 2.0
+
+        u = np.array([x / semi_major for x, _ in interior])
+        v = np.array([(w / 2.0) / semi_minor for _, w in interior])
+        exponents = np.linspace(0.5, 12.0, 2301)
+        residuals = np.array([np.sum((u ** e + v ** e - 1.0) ** 2) for e in exponents])
+        return semi_major, semi_minor, float(exponents[int(np.argmin(residuals))])
 
     @staticmethod
     def egg_polygon(cx, cy, a_out, a_in, b, angle, n=28):

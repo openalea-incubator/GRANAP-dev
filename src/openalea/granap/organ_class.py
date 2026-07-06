@@ -13,6 +13,8 @@ from shapely.ops import unary_union
 from shapely.strtree import STRtree
 from collections import defaultdict
 from scipy.sparse import lil_matrix
+import copy
+import heapq
 import time
 from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.layer_manager import LayerManager
@@ -379,8 +381,89 @@ class Organ(AbstractNetwork, ABC):
     def add_intercellular_spaces(self):
         """Orchestrate intercellular space and aerenchyma generation."""
         self.add_intercellular()
-        self.add_aerenchyma()
-        self.merge_intercellular_aerenchyma()
+        self._add_aerenchyma_to_proportion()
+
+    def _measure_air_proportion(self, tissues: List[str]) -> float:
+        """Air-space fraction of the tissue band, ``air / (air + tissue)``,
+        measured from the current cell polygons. This is the quantity the
+        aerenchyma request refers to."""
+        tissue_area = sum(
+            c.polygon.area
+            for t in tissues
+            for c in self.all_cells.get_cells_by_type(t)
+            if c.polygon is not None
+        )
+        air_area = sum(
+            c.polygon.area
+            for c in self.all_cells.get_cells_by_type("air space")
+            if c.polygon is not None
+        )
+        denom = tissue_area + air_area
+        return air_area / denom if denom > 0 else 0.0
+
+    def _add_aerenchyma_to_proportion(self, tol: float = 5e-3, max_iter: int = 20):
+        """Place aerenchyma so the realized air proportion matches the request.
+
+        The fuse-and-smooth step in :meth:`merge_intercellular_aerenchyma` grows
+        the air lacunae, so simply filling to the requested area overshoots
+        the final proportion. Because that overshoot depends on the emergent
+        geometry it cannot be predicted cleanly, so we calibrate: fill + fuse +
+        smooth for a trial target, measure the *realized* proportion, and bisect
+        the internal target until it lands on the requested value. Each attempt
+        restores the clean pre-aerenchyma tessellation, and the sector angle is
+        fixed once, so the attempts differ only in how much air is placed and the
+        realized proportion is monotone in the internal target.
+        """
+        requested = self.aerenchyma_params.get("aerenchyma_proportion", 0)
+        if not requested:
+            # No aerenchyma requested — still fuse/simplify the intercellular air.
+            self.merge_intercellular_aerenchyma()
+            return
+
+        tissue = self.aerenchyma_params.get("tissue")
+        tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
+
+        # Clean, non-overlapping tessellation to restore before every attempt,
+        # and a fixed sector angle so attempts are comparable.
+        snapshot = copy.deepcopy(self.all_cells.cells)
+        self._aerenchyma_start_angle = float(self.rng.uniform(0, 2 * np.pi))
+
+        def attempt(internal_target: float) -> float:
+            self.all_cells.cells = copy.deepcopy(snapshot)
+            self.add_aerenchyma(prop_override=internal_target)
+            self.merge_intercellular_aerenchyma()
+            return self._measure_air_proportion(tissues)
+
+        best_target, best_realized = requested, attempt(requested)
+        best_err = abs(best_realized - requested)
+
+        # Bracket the requested proportion. The realized value at the requested
+        # target is normally already above it (bubble inflation), so search
+        # downward; guard the rare undershoot by expanding the upper bound.
+        lo, hi = 0.0, requested
+        if best_realized < requested:
+            lo, hi = requested, 1.0
+
+        for _ in range(max_iter):
+            if best_err <= tol or (hi - lo) < 1e-4:
+                break
+            mid = 0.5 * (lo + hi)
+            realized = attempt(mid)
+            err = abs(realized - requested)
+            if err < best_err:
+                best_target, best_realized, best_err = mid, realized, err
+            if realized > requested:
+                hi = mid
+            else:
+                lo = mid
+
+        # Rebuild the cells in the best-calibrated state (the last attempt was
+        # not necessarily the best one).
+        best_realized = attempt(best_target)
+        log.debug(
+            "Calibrated aerenchyma: requested %.3f -> realized %.3f (internal target %.3f)",
+            requested, best_realized, best_target,
+        )
 
     def add_intercellular(self):
         """Compute air spaces for each inter_cellular_spaces entry."""
@@ -486,9 +569,82 @@ class Organ(AbstractNetwork, ABC):
         """Denominator for the per-quadrant aerenchyma target area. Override in subclasses."""
         return float(n_files)
 
-    def add_aerenchyma(self):
-        """Generate aerenchyma in the tissue defined in aerenchyma_params."""
-        aerenchyma_prop = self.aerenchyma_params.get("aerenchyma_proportion", 0)
+    @staticmethod
+    def _connected_radial_order(cells: list, central_angle: float) -> list:
+        """Order ``cells`` so that every prefix is a connected region, growing
+        outward from the cell nearest ``central_angle``.
+
+        Used to fill an aerenchyma file as one connected radial channel. Cells
+        are treated as adjacent when their polygons touch (across tissue types),
+        so growth bridges tissue boundaries; expansion is prioritised by angular
+        distance to ``central_angle`` to keep the channel centred. When a
+        connected component is exhausted before all cells are placed, growth
+        restarts from the next-nearest unused cell (a fresh component).
+        """
+        n = len(cells)
+        if n <= 1:
+            return list(cells)
+
+        def ang_dist(cell):
+            a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+            d = abs(a - central_angle)
+            return min(d, 2 * np.pi - d)
+
+        polys = [c.polygon for c in cells]
+        tree = STRtree(polys)
+        neighbors: list = [[] for _ in range(n)]
+        for i, poly_i in enumerate(polys):
+            if poly_i is None:
+                continue
+            for j in tree.query(poly_i):
+                if j != i and polys[j] is not None and poly_i.intersects(polys[j]):
+                    neighbors[i].append(j)
+
+        priorities = [ang_dist(c) for c in cells]
+        seeds = sorted(range(n), key=lambda i: priorities[i])
+        visited = [False] * n
+        heap: list = []
+        counter = 0
+        order: list = []
+        seed_ptr = 0
+
+        def _push(i):
+            nonlocal counter
+            heapq.heappush(heap, (priorities[i], counter, i))
+            counter += 1
+
+        while len(order) < n:
+            if not heap:
+                while seed_ptr < n and visited[seeds[seed_ptr]]:
+                    seed_ptr += 1
+                if seed_ptr >= n:
+                    break
+                _push(seeds[seed_ptr])
+            _, _, i = heapq.heappop(heap)
+            if visited[i]:
+                continue
+            visited[i] = True
+            order.append(cells[i])
+            for j in neighbors[i]:
+                if not visited[j]:
+                    _push(j)
+
+        return order
+
+    def add_aerenchyma(self, prop_override: Optional[float] = None):
+        """Generate aerenchyma in the tissue defined in aerenchyma_params.
+
+        ``prop_override`` replaces the requested ``aerenchyma_proportion`` with an
+        internal working target; :meth:`_add_aerenchyma_to_proportion` uses it to
+        calibrate the fill so the *realized* proportion (measured after the fuse
+        and smoothing) matches what the user asked for. The sector start angle is
+        drawn once and then reused, so repeated calibration attempts share the
+        same geometry and only differ in how much air is placed.
+        """
+        aerenchyma_prop = (
+            prop_override if prop_override is not None
+            else self.aerenchyma_params.get("aerenchyma_proportion", 0)
+        )
         if not aerenchyma_prop:
             return
 
@@ -498,7 +654,8 @@ class Organ(AbstractNetwork, ABC):
         aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
 
         self._aerenchyma_n_files = n_files
-        self._aerenchyma_start_angle = self.rng.uniform(0, 2 * np.pi)
+        if getattr(self, "_aerenchyma_start_angle", None) is None:
+            self._aerenchyma_start_angle = float(self.rng.uniform(0, 2 * np.pi))
         start_angle = self._aerenchyma_start_angle
 
         def cell_quadrant(cell):
@@ -547,13 +704,10 @@ class Organ(AbstractNetwork, ABC):
             quadrant_buckets[cell_quadrant(c)].append(c)
 
         if aerenchyma_type == 1:
+            # Order each file as a *connected* radial channel rather than by raw angular distance. 
             for q, bucket in enumerate(quadrant_buckets):
                 central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
-                def _ang_dist(cell, ca=central_angle):
-                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-                    d = abs(a - ca)
-                    return min(d, 2 * np.pi - d)
-                bucket.sort(key=_ang_dist)
+                quadrant_buckets[q] = self._connected_radial_order(bucket, central_angle)
         elif aerenchyma_type == 2:
             for q, bucket in enumerate(quadrant_buckets):
                 if not bucket:
@@ -631,10 +785,6 @@ class Organ(AbstractNetwork, ABC):
                     parent[ri] = rj
 
             # Only test pairs whose bounding boxes overlap (an STRtree query);
-            # touching/intersecting polygons always have overlapping bboxes, so
-            # the resulting union-find partition is identical to the old O(n²)
-            # all-pairs scan.  ``touches or intersects`` collapses to just
-            # ``intersects`` (touches ⟹ intersects).
             pool_polys = [c.polygon for c in merge_pool]
             tree = STRtree(pool_polys)
             for i in range(n_pool):

@@ -197,7 +197,7 @@ class DicotXylemParams(BaseParams):
     vessel_diameter_sd  : float                        = Field(default=0.002, ge=0.0,            title="Vessel Diameter SD",       description="Standard deviation added to each vessel diameter.")
     gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",               title="Gradient Function",        description="Shape function used for the centre-to-tip vessel size gradient.")
     gradient_inflection : float                        = Field(default=0.7,   ge=0.001, le=1.0,  title="Gradient Inflection",     description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
-    gradient_steepness  : float                        = Field(default=5.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
+    gradient_steepness  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
     gradient_asymmetry  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",      description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
     enforce_gradient_min: float                        = Field(default=0.0,   ge=0.0, le=1.0, title="Enforce Gradient Minimum", description="Radial extent in [0, 1] (same axis as gradient_inflection) over which the gradient minimum is enforced: where the local gradient position t <= this value, no vessel smaller than the gradient-prescribed diameter is placed (a spot too tight for the local target is left empty). 0 disables it, 1 enforces it everywhere.")
     allow_ellipse       : bool                         = Field(default=False, title="Allow Ellipse Vessels", description="If True, when a tight/elongated spot is too narrow for a target-diameter circle, fit an area-matched ellipse elongated along the spot instead of shrinking the vessel.")
@@ -223,7 +223,7 @@ class DicotCambiumParams(BaseParams):
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
     cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     # for primary growth
-    visible_distance : float = Field(default=0.8,  ge=0.00001, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
+    visible_distance : float = Field(default=0.8,  ge=0.0, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
     inner_distance   : float = Field(default=0.11,  ge=0.00001, title="Primary Start Distance",   description="Inner radius of the cambium ring from the stele centre at primary growth.")
     outer_distance   : float = Field(default=0.28,  ge=0.00001, title="Primary Outer Distance",   description="Outer radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
     arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
@@ -311,6 +311,20 @@ class DicotSecondaryCambiumParams(BaseParams):
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of secondary cambium cells.")
     cell_width       : float = Field(default=0.02,  ge=0.00001, title="Cell Width",       description="Tangential width of secondary cambium cells.")
     n_layers         : int   = Field(default=1,     ge=1,       title="Number of Layers", description="Number of concentric cambium cell files (the cambial zone). 1 = a single ring; higher values add rings buffered inward by one cell diameter each.")
+
+    # Cambium contour family (orthogonal to n_vascular_peak).
+    shape : Literal["star", "focus_ellipse"] = Field(default="star", title="Cambium Contour",
+        description="'star' = lobed cambium (inner/outer_distance + arcs). 'focus_ellipse' = a "
+                    "single smooth best-fit superellipse for a mature/ring-shaped secondary "
+                    "cambium: the axes come from the measured profile and one exponent is "
+                    "least-squares fitted to the rest (NOT an interpolation through every point).")
+    profile : List[Tuple[float, float]] = Field(default_factory=list, title="Measured Contour Profile",
+        description="Only used when shape='focus_ellipse'. A list of (major_pos, minor_width) "
+                    "measurements in mm: distance from the centre along the major axis and "
+                    "the full minor-direction width there. The widest point sets the minor "
+                    "axis, the farthest point (tip, width→0) the major axis; the superellipse "
+                    "exponent is best-fitted to the rest. The major axis runs along +y.")
+
     # for secondary growth — must be larger than the primary cambium outer_distance
     inner_distance : float = Field(default=0.40,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
     outer_distance : float = Field(default=0.45,  ge=0.00001, title="Secondary Outer Distance", description="Outer radius of the secondary cambium star from the stele centre. Must be ≤ the stele radius.")
@@ -686,28 +700,6 @@ class OrganInputData(BaseModel):
         """
         data = cls.for_dicot_root()
         data.set_value("secondary_growth", "value", True)
-
-        # Wider stele so the secondary cambium + xylem + phloem fit inside it.
-        data.set_value("stele", "thickness", 1.2)
-
-        # Secondary cambium ring (must enclose the primary cambium: inner_distance
-        # > primary cambium outer_distance, outer_distance <= stele radius).
-        data.set_value("secondary_cambium", "inner_distance", 0.40)
-        data.set_value("secondary_cambium", "outer_distance", 0.45)
-        data.set_value("secondary_cambium", "arc_bottom",     0.20)
-        data.set_value("secondary_cambium", "arc_top",        0.10)
-
-        # Secondary xylem vessels (large near the centre -> small near the cambium).
-        data.set_value("secondary_xylem", "prop_stele",          0.8)
-        data.set_value("secondary_xylem", "vessel_diameter",     0.10)
-        data.set_value("secondary_xylem", "vessel_diameter_min", 0.03)
-        data.set_value("secondary_xylem", "vessel_diameter_sd",  0.005)
-        data.set_value("secondary_xylem", "prop_vessel_ring",    0.3)
-
-        # Secondary phloem band (trapezes outside the cambium).
-        data.set_value("secondary_phloem", "height",         0.15)
-        data.set_value("secondary_phloem", "top_width",      0.04)
-        data.set_value("secondary_phloem", "alive_distance", 0.10)
 
         return data
 

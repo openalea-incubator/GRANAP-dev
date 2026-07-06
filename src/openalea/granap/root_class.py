@@ -9,8 +9,9 @@ depending on the ``planttype`` value in the input.  Both subclasses are
 
 import numpy as np
 from typing import List, Dict, Any
+from collections import defaultdict
 
-from shapely.geometry import Point, Polygon, LineString, box
+from shapely.geometry import Point, Polygon, LineString, MultiPoint, box
 from shapely.ops import unary_union
 from shapely.affinity import translate, scale as affine_scale, rotate
 from shapely.prepared import prep
@@ -179,6 +180,22 @@ class RootAnatomy(Organ):
 
         if kind == "ellipse":
             return GeometryProcessor.ellipse_to_polygon(0.0, 0.0, width / 2, height / 2, 0.0)
+        if kind == "focus_ellipse":
+            # Preferred: a measured contour ``profile`` (list of (major_pos,
+            # minor_width) mm points) best-fitted to a single superellipse — no
+            # exponent to hand-tune.  Major axis runs along +y (height).  Falls
+            # back to the width/height bounding box (+ optional exponent) when no
+            # profile is given.
+            profile = shape_params.get("profile")
+            if profile:
+                semi_major, semi_minor, exponent = GeometryProcessor.fit_focus_ellipse(profile)
+                return GeometryProcessor.focus_ellipse_polygon(
+                    0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exponent,
+                )
+            return GeometryProcessor.focus_ellipse_polygon(
+                0.0, 0.0, width / 2, height / 2, 0.0,
+                exponent=float(shape_params.get("exponent", 4.0)),
+            )
         if kind == "square":
             return GeometryProcessor.rectangle_polygon(width, width)
         if kind == "rectangle":
@@ -265,7 +282,7 @@ class RootAnatomy(Organ):
         ``self.xylem_star`` (the region later steps carve phloem out of) and
         ``self.pith_polygon``.  Returns the xylem :class:`Tissue`; an *empty*
         result (the star did not fit) leaves ``self.xylem_star`` unset, so the
-        downstream stele-clearing cleanup is skipped.
+        downstream phloem valleys have nothing to carve against.
         """
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
@@ -605,40 +622,53 @@ class RootAnatomy(Organ):
             if placed:
                 self.vascular_tissue_polygons.setdefault("phloem", []).append(cluster)
 
-    def _remove_stele_seeds_near_xylem(self) -> None:
-        """Remove stele parenchyma cells engulfed by xylem vessels.
+    def _remove_stele_engulfed_by_xylem(self, area_fraction: float = 0.75) -> None:
+        """Drop stele cells whose footprint is mostly covered by xylem vessels.
 
-        This is a *group-level* cleanup, deliberately NOT replaced by the unified
-        region mask in ``Organ.generate_cells``: that mask removes individual
-        seeds whose point lies inside a vascular region, which would leave the
-        rest of an engulfed parenchyma cell's border seeds in place and produce a
-        partial, distorted Voronoi cell straddling the vessels.  Here, if any seed
-        of an ``id_group`` lands inside a vessel the whole cell is dropped.
-        (Removing this step leaves ~90 such partial cells in the default star
-        root — stele 217 -> 307.)
+        A *group-level* cleanup run before the unified point-level vascular mask.
+        A stele cell is a ring of border seeds sharing an ``id_group`` (pre-Voronoi);
+        its footprint is approximated by the convex hull of those seeds.  The whole
+        cell is dropped when at least ``area_fraction`` (default 0.75) of that
+        footprint lies inside the xylem vessel union.
+
+        Cells below the threshold are kept whole; the point-level mask in
+        ``Organ.generate_cells`` then clips their seeds that poke into a vessel, so
+        they abut the vessels cleanly.  This is the middle ground between the old
+        rule (drop the cell if *any* seed touched a vessel — over-removes) and the
+        point-level mask alone (leaves distorted partial cells / slivers).
         """
-        if not hasattr(self, "xylem_star") or self.xylem_star is None:
-            return
-        if not self.vascular_polygons:
+        if not getattr(self, "xylem_star", None) or not self.vascular_polygons:
             return
 
         xylem_union     = unary_union(self.vascular_polygons)
         xylem_star_prep = prep(self.xylem_star)
 
-        groups_to_delete: set = set()
+        groups: Dict[Any, list] = defaultdict(list)
         for c in self.all_cells.cells:
-            if c.type != "stele" or c.id_group in groups_to_delete:
-                continue
-            pt = Point(c.x, c.y)
-            if not xylem_star_prep.contains(pt):
-                continue
-            if xylem_union.contains(pt):
-                groups_to_delete.add(c.id_group)
+            if c.type == "stele":
+                groups[c.id_group].append(c)
 
-        self.all_cells.cells = [
-            c for c in self.all_cells.cells
-            if c.id_group not in groups_to_delete
-        ]
+        to_delete: set = set()
+        for gid, cells in groups.items():
+            # Cheap prefilter: only cells reaching into the xylem star can qualify.
+            if not any(xylem_star_prep.contains(Point(c.x, c.y)) for c in cells):
+                continue
+            footprint = MultiPoint([(c.x, c.y) for c in cells]).convex_hull
+            if footprint.area <= 0.0:
+                # Degenerate footprint (a point/line of seeds) -> approximate as a
+                # disc of the cell diameter so the fraction is still well defined.
+                r = 0.5 * max((c.diameter for c in cells), default=0.0)
+                if r <= 0.0:
+                    continue
+                footprint = footprint.centroid.buffer(r)
+            if footprint.intersection(xylem_union).area / footprint.area >= area_fraction:
+                to_delete.add(gid)
+
+        if to_delete:
+            self.all_cells.cells = [
+                c for c in self.all_cells.cells
+                if not (c.type == "stele" and c.id_group in to_delete)
+            ]
 
     def _phloem_valley_zones(self, stele_polygon: Polygon, type="monocot"):
         """Build the phloem regions: one :class:`Tissue` per valley between peaks.
@@ -1105,13 +1135,15 @@ class DicotRootAnatomy(RootAnatomy):
                 "parenchyma_width":       float(sec_xylem.get("parenchyma_width",       0.01)),
             }
             self.secondary_cambium_params = {
-                "cell_diameter":  float(sec_cam.get("cell_diameter",  0.01)),
-                "cell_width":     float(sec_cam.get("cell_width",     0.02)),
+                "cell_diameter":  float(sec_cam.get("cell_diameter",  0.015)),
+                "cell_width":     float(sec_cam.get("cell_width",     0.025)),
                 "inner_distance": float(sec_cam.get("inner_distance", 0.30)),
                 "outer_distance": float(sec_cam.get("outer_distance", 0.45)),
                 "arc_top":        float(sec_cam.get("arc_top",        0.05)),
                 "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
                 "n_layers":       max(1, int(sec_cam.get("n_layers",  1))),
+                "shape":          str(sec_cam.get("shape", "star")),
+                "profile":        list(sec_cam.get("profile", []) or []),
             }
 
             sec_phloem = self._get_param("secondary_phloem")
@@ -1131,7 +1163,7 @@ class DicotRootAnatomy(RootAnatomy):
 
             med_rays = self._get_param("medullar_rays")
             self.medullar_rays_params = {
-                "n_medullar":         int(med_rays.get("n_medullar",         6)),
+                "n_medullar":         int(med_rays.get("n_medullar",         0)),
                 "base_width":         float(med_rays.get("base_width",       0.005)),
                 "cell_diameter":      float(med_rays.get("cell_diameter",    0.025)),
                 "cell_width":         float(med_rays.get("cell_width",       0.005)),
@@ -1157,8 +1189,11 @@ class DicotRootAnatomy(RootAnatomy):
         recipe.fill("xylem star", self._xylem_star_region(polygon),
                     strategy="packing", produces=("xylem", "stele"),
                     record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
-        recipe.cleanup("clear stele under xylem",
-                       self._remove_stele_seeds_near_xylem)
+        # Drop stele cells that are >=75% engulfed by xylem vessels (area-based);
+        # cells below the threshold are kept whole and merely clipped against the
+        # vessels by the unified point-level mask in Organ.generate_cells.
+        recipe.cleanup("clear stele engulfed by xylem",
+                       self._remove_stele_engulfed_by_xylem)
         if self.vascular_params.get("secondary_growth", False):
             # Secondary growth is bespoke (concentric ring fills + medullar rays +
             # companion cells), kept as `special` steps; see _build_*_polygon.
@@ -1268,16 +1303,37 @@ class DicotRootAnatomy(RootAnatomy):
     def _build_secondary_cambium_polygon(self, stele_polygon: Polygon, cx: float, cy: float) -> Polygon:
         sc = self.secondary_cambium_params
         p  = self.vascular_params
-        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
 
-        outer_r = min(sc["outer_distance"], stele_r)
+        # 'focus_ellipse' contour: one smooth best-fit superellipse for a mature
+        # ring-shaped cambium.  Axes come from the measured profile (semi-minor =
+        # widest point, semi-major = tip) and a single exponent is least-squares
+        # fitted to the interior points.  Sized in absolute mm (major axis along
+        # +y) and clipped to the stele shape — no isotropic stele-radius clamp, so
+        # it stays elliptical instead of collapsing to the stele's inscribed circle.
+        if sc.get("shape", "star") == "focus_ellipse":
+            semi_major, semi_minor, exponent = GeometryProcessor.fit_focus_ellipse(sc["profile"])
+            contour = GeometryProcessor.focus_ellipse_polygon(
+                0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exponent,
+            )
+            return translate(contour, cx, cy).intersection(stele_polygon)
+
+        outer_r = sc["outer_distance"]
         inner_r = min(sc["inner_distance"], outer_r)
 
+        n_peaks = p["n_vascular_peak"]
         raw_star = GeometryProcessor.star_polygon(
-            n_branches=p["n_vascular_peak"],
+            n_branches=n_peaks,
             r_min=inner_r, r_max=outer_r,
             arc_base=sc["arc_bottom"], arc_top=sc["arc_top"],
         )
+        # Offset the secondary cambium star by half a period so its peaks fall in
+        # the *valleys* of the primary xylem star (the secondary xylem vessel
+        # zones sit at 2*pi*(k+0.5)/n_peaks).  Botanically the cambium in those
+        # valleys produces secondary xylem and is pushed outward far more than the
+        # cambium at the primary-xylem peaks, so the secondary cambium bulges
+        # there.  For a diarch (n_peaks == 2) root this makes the secondary
+        # cambium run perpendicular to the primary xylem.
+        raw_star = rotate(raw_star, np.pi / n_peaks, origin=(0.0, 0.0), use_radians=True)
         star_coords = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
         )
@@ -1334,25 +1390,44 @@ class DicotRootAnatomy(RootAnatomy):
         return (pt.x, pt.y), (tx, ty), (nx, ny)
 
     @staticmethod
-    def _phloem_trapeze_local(P, tangent, normal, base_half_width: float,
-                              top_width: float, height: float) -> Polygon:
-        """Trapeze standing perpendicular on the cambium at ``P``.
+    def _phloem_trapeze_curved(cam_ext, cx: float, cy: float, P, tangent, normal,
+                               base_arc_half_width: float, top_width: float,
+                               height: float, n: int = 40) -> Polygon:
+        """Trapeze standing on the cambium at ``P``, oriented by the local tangent
+        frame (the stomata principle) with its base **following the cambium curve**.
 
-        Base of width ``2*base_half_width`` along the local ``tangent``, extending
-        ``height`` along the outward ``normal`` and narrowing to ``top_width`` —
-        the local-frame analogue of a stomata.  The base/tip are pushed slightly
-        in/out so the caller's band intersection clips cleanly to the band.
+        The base is an arc of the cambium exterior spanning ``2*base_arc_half_width``
+        of arc length centred on ``P`` (pushed slightly inward so the caller's band
+        intersection clips cleanly); the arm then tapers to ``top_width`` at
+        ``height`` along the outward local ``normal``.
+
+        Curving the base along the contour — rather than the earlier straight
+        chord along the local tangent — is what fixes the inverted taper: on a
+        convex cambium a straight base chord bows out to a larger radius, so once
+        clipped to the annular band the wide base landed at the *outer* edge
+        (pinched at the cambium, wide at the tip).  The arm still leans along the
+        local normal, so it is not forced to point at the stele centre.
         """
         (px, py), (tx, ty), (nx, ny) = P, tangent, normal
+        L     = cam_ext.length
+        s0    = cam_ext.project(Point(px, py))
         inset = height * 0.3
-        bcx, bcy = px - nx * inset,            py - ny * inset
-        tcx, tcy = px + nx * (height + inset), py + ny * (height + inset)
+
+        # Curved base: sample the cambium exterior over ±base_arc_half_width of arc
+        # length around P, each point pushed radially inward by ``inset`` so the
+        # base sits just inside the band's inner edge.
+        base = []
+        for si in np.linspace(s0 - base_arc_half_width, s0 + base_arc_half_width, n):
+            q = cam_ext.interpolate(si % L)
+            dx, dy = q.x - cx, q.y - cy
+            d = np.hypot(dx, dy) or 1.0
+            base.append((q.x - dx / d * inset, q.y - dy / d * inset))
+
         hw = top_width / 2.0
-        p1 = (bcx - tx * base_half_width, bcy - ty * base_half_width)
-        p2 = (bcx + tx * base_half_width, bcy + ty * base_half_width)
-        p3 = (tcx + tx * hw,              tcy + ty * hw)
-        p4 = (tcx - tx * hw,              tcy - ty * hw)
-        return Polygon([p1, p2, p3, p4]).buffer(0)
+        tcx, tcy = px + nx * (height + inset), py + ny * (height + inset)
+        top_r = (tcx + tx * hw, tcy + ty * hw)   # +tangent (increasing-arc) side
+        top_l = (tcx - tx * hw, tcy - ty * hw)   # -tangent side
+        return Polygon(base + [top_r, top_l]).buffer(0)
 
     def _phloem_compartments(self) -> list:
         """``(center_theta, base_half_width)`` for each phloem compartment.
@@ -1733,7 +1808,17 @@ class DicotRootAnatomy(RootAnatomy):
                     self._render_layer(g, "cambium", sc["cell_diameter"], sc["cell_width"], cx, cy)
         self.vascular_tissue_polygons.setdefault("cambium", []).append(secondary_cambium_polygon)
 
-        annular_zone = secondary_cambium_polygon.difference(primary_cambium_polygon)
+        # Reserve the full cambial band for the cambium files.  The n_layers
+        # concentric files occupy the outer ``n_layers * cell_diameter`` shell of
+        # the secondary cambium (buffered inward, above).  The secondary xylem
+        # (vessels + axial parenchyma) must stop at the innermost file, otherwise
+        # xylem parenchyma packs on top of the inner cambium layers.
+        cambium_band_depth = sc.get("n_layers", 1) * sc["cell_diameter"]
+        xylem_boundary = secondary_cambium_polygon.buffer(-cambium_band_depth)
+        if xylem_boundary.is_empty:
+            xylem_boundary = secondary_cambium_polygon
+
+        annular_zone = xylem_boundary.difference(primary_cambium_polygon)
         shrinked_sec_cambium_pol = GeometryProcessor.buffer_polygon(
             secondary_cambium_polygon, +sc["cell_diameter"] / 1.5, 0
         )
@@ -1820,10 +1905,7 @@ class DicotRootAnatomy(RootAnatomy):
 
         # Annual growth rings: divide the secondary-xylem annulus radially into
         # n_ring bands that follow the secondary-cambium contour (buffered inward
-        # in equal steps).  Each band is packed independently with the vessel size
-        # gradient reset (large at the band's inner edge -> small at its outer
-        # edge), so n_ring repetitions read as successive growth rings.  n_ring==1
-        # keeps a single band == the whole zone (original behaviour).
+        # in equal steps). 
         n_ring = sx.get("n_ring", 1)
         annual_bands = None
         if n_ring > 1:
@@ -1918,11 +2000,9 @@ class DicotRootAnatomy(RootAnatomy):
         r_outer = max(
             np.hypot(x - cx, y - cy)
             for x, y in secondary_cambium_polygon.exterior.coords
-        ) - sc["cell_diameter"]
+        ) - cambium_band_depth
 
-        ray_annular_zone = secondary_cambium_polygon.buffer(
-            -sc["cell_diameter"]
-        ).difference(primary_cambium_polygon)
+        ray_annular_zone = xylem_boundary.difference(primary_cambium_polygon)
         # Only exclude medullar areas from the ray zone when they can extend
         # into the gap region (allow_non_vascular=True).  When False, medullar
         # rays are fully inside the vessel pizza slices
@@ -1975,10 +2055,7 @@ class DicotRootAnatomy(RootAnatomy):
         r_outer = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
 
         # One tapering trapeze per compartment (between consecutive rays), each
-        # standing perpendicular on the cambium surface (stomata principle) and
-        # clipped to the band.  top_width sets the taper, clamped so a narrow
-        # compartment can't flare outward.  With no discrete vessel zones
-        # (prop_stele >= 1) the band is all phloem.
+        # standing perpendicular on the cambium surface
         cam_ext = secondary_cambium_polygon.exterior
         if self._secondary_vessel_thetas:
             masks = []
@@ -1990,8 +2067,8 @@ class DicotRootAnatomy(RootAnatomy):
                 r_P     = np.hypot(P[0] - cx, P[1] - cy)
                 base_hw = comp_hw * r_P                       # arc-length half-width
                 top_w   = min(sp["top_width"], 2.0 * base_hw)
-                masks.append(self._phloem_trapeze_local(
-                    P, tangent, normal, base_hw, top_w, sp["height"]
+                masks.append(self._phloem_trapeze_curved(
+                    cam_ext, cx, cy, P, tangent, normal, base_hw, top_w, sp["height"],
                 ))
             arms = band.intersection(unary_union(masks)) if masks else band
         else:
