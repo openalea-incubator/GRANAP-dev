@@ -72,12 +72,12 @@ GOLDEN = {
     "dicot_primary": (dicot_primary, {
         "air space": 621, "cambium": 81, "cortex": 355, "endodermis": 72,
         "epidermis": 248, "exodermis": 119, "pericycle": 230, "phloem": 51,
-        "stele": 967, "xylem": 28,
+        "stele": 1026, "xylem": 31,
     }),
     "dicot_secondary": (dicot_secondary, {
-        "air space": 511, "cambium": 93, "companion_cell": 84, "cortex": 321,
-        "endodermis": 39, "epidermis": 248, "exodermis": 119, "medullar_ray": 48,
-        "pericycle": 91, "phloem": 119, "stele": 858, "xylem": 64,
+        "air space": 573, "cambium": 99, "companion_cell": 43, "cortex": 332,
+        "endodermis": 51, "epidermis": 248, "exodermis": 119, "pericycle": 139,
+        "phloem": 73, "stele": 1034, "xylem": 47,
     }),
     "needle_default": (needle_default, {
         "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,

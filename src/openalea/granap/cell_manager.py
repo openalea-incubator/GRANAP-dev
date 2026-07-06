@@ -125,6 +125,14 @@ class CellManager:
     def get_last_id_group(self):
         return max((c.id_group for c in self.cells), default=0)
 
+    def next_group_id(self):
+        """Next free ``id_group`` for appending a new cell group.
+
+        ``get_last_id_group() + 1`` when there are cells, else 0 — the idiom
+        used everywhere vascular tissue is seeded group by group.
+        """
+        return self.get_last_id_group() + 1 if self.cells else 0
+
     def recenter_cells(self):
         # re position cells to the center of the global cell population
         x_center = np.mean([c.x for c in self.cells])

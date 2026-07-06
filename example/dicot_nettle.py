@@ -62,13 +62,13 @@ def main(show=True):
     data.set_value("xylem", "n_vascular_peak",     2)
     data.set_value("xylem", "inner_radius",        0.018)
     data.set_value("xylem", "outer_radius",        0.08)
-    data.set_value("xylem", "arc_top",             0.011)
-    data.set_value("xylem", "arc_bottom",          0.012)
-    data.set_value("xylem", "vessel_diameter",     0.045)
-    data.set_value("xylem", "vessel_diameter_min", 0.01)
+    data.set_value("xylem", "arc_top",             0.013)
+    data.set_value("xylem", "arc_bottom",          0.014)
+    data.set_value("xylem", "vessel_diameter",     0.035)
+    data.set_value("xylem", "vessel_diameter_min", 0.012)
     data.set_value("xylem", "pith_radius",         0.0)
-    data.set_value("xylem", "gradient_inflection", 0.03)
-    data.set_value("xylem", "gradient_steepness",  1)
+    data.set_value("xylem", "gradient_inflection", 0.05)
+    data.set_value("xylem", "gradient_steepness",  3)
     data.set_value("xylem", "enforce_gradient_min", 1)
     data.set_value("xylem", "allow_ellipse", False)
     # ── Secondary xylem  ───────────────────────────────────────────────────
@@ -88,11 +88,11 @@ def main(show=True):
     data.set_value("secondary_xylem", "parenchyma_width", 0.015)     
 
     # ── Primary cambium ring (valleys first, maturing outward) ─────────────
-    data.set_value("cambium", "inner_distance",   0.045)
-    data.set_value("cambium", "outer_distance",   0.095)
+    data.set_value("cambium", "inner_distance",   0.019)
+    data.set_value("cambium", "outer_distance",   0.082)
     data.set_value("cambium", "visible_distance", 0.0)
-    data.set_value("cambium", "arc_top",          0.016)
-    data.set_value("cambium", "arc_bottom",       0.036)
+    data.set_value("cambium", "arc_top",          0.014)
+    data.set_value("cambium", "arc_bottom",       0.015)
     # ── Secondary cambium ring  ────────────────────────────────────────────
     # Smooth best-fit superellipse (focus_ellipse) fitted to the measured
     # cambium contour: 
