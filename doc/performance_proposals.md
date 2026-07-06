@@ -126,23 +126,14 @@ matter *at scale*. All timings `seed=0`, conda env `granap`, Windows.
 
 ## How to reproduce
 
-`scratchpad/prof_nettle.py` (keep a copy; paraphrased here):
-
-```python
-import sys, os, logging, cProfile, pstats, io
-sys.path.insert(0, "src"); sys.path.insert(0, "example")
-import matplotlib; matplotlib.use("Agg")
-import matplotlib.pyplot as plt; plt.show = lambda *a, **k: None
-logging.basicConfig(level=logging.INFO, format="STEP %(message)s")  # per-phase timers
-import dicot_nettle
-pr = cProfile.Profile(); pr.enable()
-dicot_nettle.main(show=False)
-pr.disable()
-pstats.Stats(pr).sort_stats("tottime").print_stats(25)
+```
+python doc/perf_profile_nettle.py
 ```
 
-The per-phase timers come from the `log.info(...)` calls already in
-`Organ.generate_cells` (`organ_class.py:210`) — just enable INFO logging.
+`doc/perf_profile_nettle.py` runs `example/dicot_nettle` with INFO logging on (so
+the per-phase timers, which are `log.info(...)` calls already in
+`Organ.generate_cells`, `organ_class.py:210`, print) plus a cProfile pass sorted
+by `tottime` and `cumulative`.
 
 ## Measured (dicot_nettle, one `generate_cells`, ~145s)
 
@@ -168,12 +159,12 @@ The wins below remove *per-object overhead*; they are not algorithmic changes.
 
 ## Verification harness (use for every change here)
 
-`scratchpad/characterize.py` pins the `seed=0` cell-type census + a geometry hash
+`doc/perf_characterize.py` pins the `seed=0` cell-type census + a geometry hash
 for `{monocot_default, monocot_arch, dicot_primary, dicot_secondary}`. Run
-`python characterize.py save` once on the current tree, then `check` after each
-edit. Wins ①–② below must stay **byte-identical** (hash unchanged); ③–④ change
-the hash and need `test/test_vascular_regression.py` re-baselined + a rendered
-comparison.
+`python doc/perf_characterize.py save` once on the current tree, then
+`python doc/perf_characterize.py` (check) after each edit. Wins ①–② below must
+stay **byte-identical** (hash unchanged); ③–④ change the hash and need
+`test/test_vascular_regression.py` re-baselined + a rendered comparison.
 
 ---
 
