@@ -1,0 +1,63 @@
+{
+  "monocot_default": {
+    "census": {
+      "air space": 367,
+      "cortex": 206,
+      "endodermis": 32,
+      "epidermis": 168,
+      "exodermis": 79,
+      "metaxylem": 5,
+      "pericycle": 97,
+      "phloem": 10,
+      "protoxylem": 10,
+      "stele": 410
+    },
+    "hash": "3a821d5c14e1c733"
+  },
+  "monocot_arch": {
+    "census": {
+      "air space": 368,
+      "cortex": 206,
+      "endodermis": 32,
+      "epidermis": 168,
+      "exodermis": 79,
+      "metaxylem": 5,
+      "pericycle": 97,
+      "phloem": 5,
+      "protoxylem": 126,
+      "stele": 355
+    },
+    "hash": "60ab1a8634dd0c83"
+  },
+  "dicot_primary": {
+    "census": {
+      "air space": 845,
+      "cambium": 81,
+      "cortex": 492,
+      "endodermis": 108,
+      "epidermis": 321,
+      "exodermis": 156,
+      "pericycle": 352,
+      "phloem": 51,
+      "stele": 2891,
+      "xylem": 31
+    },
+    "hash": "0c6a204f4d082c54"
+  },
+  "dicot_secondary": {
+    "census": {
+      "air space": 826,
+      "cambium": 132,
+      "companion_cell": 56,
+      "cortex": 483,
+      "endodermis": 93,
+      "epidermis": 321,
+      "exodermis": 156,
+      "pericycle": 280,
+      "phloem": 85,
+      "stele": 2508,
+      "xylem": 74
+    },
+    "hash": "d9f9658a97def103"
+  }
+}

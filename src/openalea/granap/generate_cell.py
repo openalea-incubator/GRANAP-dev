@@ -3,9 +3,7 @@ Cell generator module for creating cells using Voronoi tessellation.
 """
 
 import numpy as np
-import pandas as pd
 import shapely as sp
-import geopandas as gpd
 from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
 from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
@@ -358,12 +356,23 @@ class CellGenerator:
 
     @staticmethod
     def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
-        # get all x and y coordinates
-        for cell in all_cells.cells:
-            cell.jitter(rng=rng)
-        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells.cells])
-        vor = Voronoi(cells_df[["x", "y"]])
-        return vor
+        cells = all_cells.cells
+        n = len(cells)
+        if n == 0:
+            return Voronoi(np.empty((0, 2)))
+        _rng = rng if rng is not None else np.random
+        shift = 0.0001
+        xs    = np.fromiter((c.x for c in cells),        float, n)
+        ys    = np.fromiter((c.y for c in cells),        float, n)
+        diams = np.fromiter((c.diameter for c in cells), float, n)
+        draws = _rng.uniform(-shift, shift, size=(n, 2))
+        xs = xs + draws[:, 0] * diams
+        ys = ys + draws[:, 1] * diams
+        angles = np.arctan2(ys, xs)
+        radii  = np.sqrt(xs ** 2 + ys ** 2)
+        for c, x, y, a, r in zip(cells, xs, ys, angles, radii):
+            c.x, c.y, c.angle, c.radius = x, y, a, r
+        return Voronoi(np.column_stack((xs, ys)))
     
     @staticmethod
     def process_voronoi_groups(all_cells: CellManager, 
@@ -388,51 +397,48 @@ class CellGenerator:
                 cell.polygon = None
             else:
                 vertices = vor.vertices[region_vertices_indices]
-                poly = sp.Polygon(vertices)
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                cell.polygon = poly
+                # Voronoi regions are convex by construction, hence always valid,
+                # so the per-polygon is_valid check + buffer(0) repair (~one call
+                # per seed) was a no-op in the normal case — dropped (perf
+                # proposal F1). The -1 / empty-region guard above already handles
+                # unbounded / degenerate regions.
+                cell.polygon = sp.Polygon(vertices)
             
             if cell.type != "outside" and cell.polygon is not None:
                 updated_cells.add_cell(cell)
                 
-        # Group handling is trickier with objects. 
-        # The original code used GeoPandas dissolve to union polygons by group.
-       
-        # return a list of 'biological' cells (one per group).
-        
-        cell_dicts = [c.cell_to_dict() for c in updated_cells.cells]
-        for i, c in enumerate(updated_cells.cells):
-            cell_dicts[i]['geometry'] = c.polygon
-            
-        gdf = gpd.GeoDataFrame(cell_dicts)
-        
-        # Dissolve by id_group
-        grouped_gdf = gdf.dissolve(by="id_group", as_index=False)
-        grouped_gdf["area"] = grouped_gdf.geometry.area
-        
-        # Now create new Cell objects from the grouped results
+        # Union the per-seed Voronoi polygons into one 'biological' cell per
+        # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
+        # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
+        # ~13s of pure overhead (see doc/performance_proposals.md ①). Plain
+        # Python grouping + shapely ``unary_union`` (what dissolve calls
+        # internally) is byte-identical: dissolve's default aggregation is
+        # 'first' per group, so the representative cell is the first-seen one;
+        # groups are emitted in sorted id_group order to match dissolve.
+        groups: Dict[Any, List] = {}
+        rep: Dict[Any, Cell] = {}
+        for c in updated_cells.cells:
+            groups.setdefault(c.id_group, []).append(c.polygon)
+            rep.setdefault(c.id_group, c)  # first-seen == dissolve's 'first'
+
         final_cells = CellManager()
-        for _, row in grouped_gdf.iterrows():
-            # Find a representative original cell to get non-geometric attributes
-            # (or use the aggregated ones, but dissolve aggregates strategy might be needed for some?)
-            # simple 'first' strategy is default for dissolve.
-            
-            new_cell = Cell(
-                type=row['type'],
-                x=row['x'], # Centroid might be better?
-                y=row['y'],
-                diameter=row['cell_diameter'],
-                id_cell=row['id_cell'],
-                id_layer=row['id_layer'],
-                id_group=row['id_group'],
-                angle=row['angle'],
-                radius=row['radius'],
-                area=row['area'],
-                polygon=row['geometry']
-            )
-            final_cells.add_cell(new_cell)
-            
+        for gid in sorted(groups):
+            poly = unary_union(groups[gid])
+            r = rep[gid]
+            final_cells.add_cell(Cell(
+                type=r.type,
+                x=r.x,
+                y=r.y,
+                diameter=r.diameter,
+                id_cell=r.id_cell,
+                id_layer=r.id_layer,
+                id_group=gid,
+                angle=r.angle,
+                radius=r.radius,
+                area=poly.area,
+                polygon=poly,
+            ))
+
         return final_cells
     
     @staticmethod

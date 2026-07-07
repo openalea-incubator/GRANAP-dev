@@ -91,7 +91,12 @@ cell areas, which can change which cells are selected as aerenchyma).
 
 ## Free win (no golden change) — not yet applied
 
-### F1 — Drop `is_valid` / `buffer(0)` on Voronoi cells in `process_voronoi_groups`
+### F1 — Drop `is_valid` / `buffer(0)` on Voronoi cells in `process_voronoi_groups`  *(DONE 2026-07-07)*
+
+**Applied.** Removed the per-seed `is_valid` check + `buffer(0)` repair; the
+`-1`/empty-region guard already covers degenerate regions. Byte-identical across
+all four `perf_characterize.py` configs + the 7-config golden regression suite.
+
 
 Voronoi cells are **convex by construction**, hence always valid, so the
 per-polygon `is_valid` check + `buffer(0)` repair (~42k calls, ~0.6s) is almost
@@ -168,7 +173,15 @@ stay **byte-identical** (hash unchanged); ③–④ change the hash and need
 
 ---
 
-## ① Drop geopandas `dissolve` in `process_voronoi_groups`  *(est. −15 to −25s, byte-identical)*
+## ① Drop geopandas `dissolve` in `process_voronoi_groups`  *(DONE 2026-07-07 — byte-identical)*
+
+**Applied** exactly as proposed below: plain-Python `defaultdict` grouping +
+`shapely.unary_union` per group, first-seen representative, groups emitted in
+sorted `id_group` order (matches dissolve). The now-unused `geopandas` import was
+dropped. Byte-identical across all four `perf_characterize.py` configs + the
+7-config golden regression suite.
+
+
 
 **Where:** `generate_cell.py:404-434`.
 
@@ -205,7 +218,17 @@ return final
 - No RNG, no geometry change → census hash must stay identical. Verify with
   `characterize.py check`.
 
-## ② Vectorise the remaining per-point containment tests  *(est. −8 to −12s, byte-identical)*
+## ② Vectorise the remaining per-point containment tests  *(DONE 2026-07-07 — byte-identical)*
+
+**Applied** at all six sites in the table below (`contains(Point)` /
+`intersects(Point)` → array `shapely.contains_xy` / `intersects_xy`). The two
+grid loops (`_fill_medullar_rays`, `_fill_ray_parenchyma`) batch one containment
+call per radius ring; the group cleanups (`fit_primary_cambium_elements`,
+`_prepare_medullar_rays`, `_remove_stele_engulfed_by_xylem`) batch over each
+cell/group's seeds via the new `DicotRootAnatomy._groups_intersecting` helper.
+Byte-identical across `perf_characterize.py` + the golden regression suite.
+
+
 
 `generate_cells_info` and `resolve_cell_border_overlaps` were already vectorised
 (see "Already done"). These fill/mask loops were **not** — they still build a
@@ -241,13 +264,31 @@ packing path). GEOS runtime drops roughly with looser tolerance; the centre move
 by ≤ tolerance so vessel positions shift slightly → **rebaseline the golden** and
 eyeball a section. Small win, only worth bundling with a golden update.
 
-## ④ Batch `Cell.jitter` / seed creation  *(est. −5 to −10s, BREAKS reproducibility)*
+## ④ Batch `Cell.jitter` / seed creation  *(DONE 2026-07-07 — byte-identical, NOT a repro break)*
 
-**Where:** `cell_class.py:51` (`jitter`), called 504k× from `generate_cells_info`.
-Vectorising the RNG draw would change the **draw order** → every `seed=0` golden
-changes and results are no longer comparable run-to-run against old baselines.
-Only do this as a deliberate reproducibility break (draw one big jitter array up
-front, document the new baseline). Flagged, not recommended standalone.
+**Where:** `voronoi_diagram` (`generate_cell.py`), which jittered 504k seeds via a
+per-cell `Cell.jitter()` loop. **Applied** as a vectorised jitter — and, contrary
+to the original worry below, it is **byte-identical**, not a reproducibility break.
+
+The key: draw the perturbations as a single **`rng.uniform(-shift, shift,
+size=(n, 2))`**. A numpy `Generator` consumes the *same* random stream whether you
+call `uniform()` 2n times in a scalar loop or once with `size=(n, 2)` — the array
+is filled row-major, i.e. `[cell0.x, cell0.y, cell1.x, cell1.y, …]`, exactly the
+old loop's order. So every seed gets its old perturbation, and the RNG is left in
+the same state → nothing downstream shifts either. Matching the float ops exactly
+matters: `x + u*d`, angle `arctan2(y, x)`, radius **`sqrt(x**2 + y**2)`** (not
+`hypot`, which rounds differently).
+
+~~Vectorising the RNG draw would change the draw order → every `seed=0` golden
+changes.~~ **False for the `(n, 2)` formulation** — only a per-axis draw
+(`uniform(size=n)` for all x, then all y) would reorder the stream and break it.
+
+**Measured:** isolated microbench on 504k cells, jitter+coords step
+**1274 ms → 126 ms (~10×, ~1.1s per `generate_cells`)**; output coords + angle +
+radius identical bit-for-bit. `characterize.py` + the 7-config golden suite stay
+green. Building a full per-cell DataFrame just to slice x/y was folded away in the
+same method (the ⑤ win). `Cell.jitter` is left in place as a per-cell API but is no
+longer on the hot path.
 
 ## Not pursued here
 
@@ -262,3 +303,52 @@ front, document the new baseline). Flagged, not recommended standalone.
 Do **① then ②** (both byte-identical, ~25–35s / ~20–25% off `dicot_nettle`,
 verify with `characterize.py`). Treat ③ as a bundled golden-rebaseline follow-up.
 Leave ④ unless a reproducibility break is being taken anyway.
+
+---
+
+# Round 2 (2026-07-07, Linux) — profile after ①/②/F1 applied
+
+Re-profiled `dicot_nettle` on Linux with ①/②/F1 in place. Clean wall-clock
+(no cProfile), `generate_cells` per-phase, one run: total ~53s (this box is much
+faster than the Windows 145s baseline above). Phase split: **Voronoi grouping
+18.3s** · Cell seeds 11.5s · Vascular+organ 10.7s · Voronoi diagram 8s ·
+Intercellular 1.6s. cProfile `tottime` leaders: `_build_topology` 7.2s (×2),
+`voronoi_diagram` 7.2s, shapely dispatch wrapper 6.6M calls, per-group
+`union_all` 5.7s, `numpy.asarray` 5.3s, `maximum_inscribed_circle` 3.1s,
+`Cell.jitter` 1.5s.
+
+## ⑤ Drop the per-cell DataFrame in `voronoi_diagram`  *(DONE 2026-07-07 — byte-identical)*
+
+**Where:** `generate_cell.py` `voronoi_diagram`. **Was:** built a full
+`pd.DataFrame([cell.cell_to_dict() ...])` (every field, ~500k rows) just to slice
+`[["x","y"]]` for scipy. **Now:** `np.array([(c.x, c.y) for c in cells])` straight
+into `Voronoi(...)`. Voronoi input unchanged → byte-identical (`characterize` +
+golden suite green). ~5s of `tottime` removed (Voronoi phase 8.9s→7.9s; total
+masked by run-to-run noise but the phase win is real).
+
+## Findings — golden-changing levers, now measured on Linux
+
+- **P1 (seed density `n_points` 15/10 → 8/6): the single biggest lever.**
+  Measured `dicot_nettle` **54.4s → 38.0s (~28%)** — Cell seeds 12→7.6s, Voronoi
+  8→4.3s, grouping 18.8→11.7s all roughly halve. Biological cell count essentially
+  unchanged (dicot_primary stele 2891→2889; secondary 2508→2506) but **air-space
+  count drifts ~4%** (dicot_primary 845→877) and every cell boundary coarsens.
+  Rebaselines all goldens; needs a rendered-section sign-off. This is the change
+  to make if one golden-rebaseline is worth taking.
+- **`coverage_union_all` for the per-group union: faster but NOT byte-identical.**
+  The per-group Voronoi cells form a valid coverage, so `shapely.coverage_union_all`
+  replaces `unary_union` (the 5.7s hotspot) — but it shifts boundary nodes enough
+  to change the geometry hash *and* drop one air-space cell (dicot_secondary
+  826→825). So it is a golden-changing swap, only worth bundling with a P1-style
+  rebaseline, not a free win. Tested and reverted.
+
+## Still open (ranked)
+
+1. **P1 seed density** — ~28%, golden change, needs visual review. Biggest lever.
+2. **③ `maximum_inscribed_circle` tolerance 1e-4→1e-3** — ~3s in the packing path
+   (`Vascular+organ` phase), golden change. Bundle with P1.
+3. **`coverage_union_all` per group** — ~few s, golden change. Bundle with P1.
+4. **`_build_topology` micro-opts** (vectorise the 6-dp vertex rounding / dict
+   keying) — byte-identical in principle but high effort, modest ROI (~2–3s).
+
+*(④ batch `Cell.jitter` — DONE 2026-07-07, byte-identical after all; see above.)*

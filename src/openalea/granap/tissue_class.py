@@ -33,9 +33,9 @@ vascular tissue, layer tissue, or any future organ.  Higher-level "recipes"
 from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
+import shapely as sp
 from shapely.geometry import Point, Polygon
 from shapely.affinity import rotate as _shapely_rotate, translate as _shapely_translate
-from shapely.prepared import prep
 
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
@@ -207,14 +207,13 @@ def fill_by_rings(
     space    = cell_diameter / 2
     tang     = cell_width if cell_width else cell_diameter
     current  = erosion_polygon if erosion_polygon is not None else fill_zone
-    filter_z = prep(fill_zone) if erosion_polygon is not None else None
+    # When eroding from ``erosion_polygon`` the rings are filtered to stay inside
+    # ``fill_zone``; batch those point-in-polygon tests with ``contains_xy`` (one
+    # array call per ring) instead of a shapely ``Point`` + prepared ``.contains``
+    # per candidate
+    filter_active = erosion_polygon is not None
 
-    # Reject a seed that coincides with an already-placed one.  Where an eroded
-    # ring pinches to a thin sliver (a tapering tip, or a zone thinner than a
-    # cell), ``cells_on_layer`` seeds both near-touching edges, producing two
-    # cells whose border rings overlap — i.e. a Voronoi cell nested inside
-    # another.  Legitimate neighbours sit >= cell_width / cell_diameter apart, so
-    # a threshold below that drops only the pinch duplicates.
+    # Reject a seed that coincides with an already-placed one.
     placed_x: List[float] = []
     placed_y: List[float] = []
     min_spacing2 = (0.7 * min(cell_diameter, tang)) ** 2
@@ -231,8 +230,15 @@ def fill_by_rings(
                 continue
             seed_coords  = CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)
             border_rings = CellGenerator.cell_border(seed_coords, tang * 0.7, cell_diameter * 0.7)
-            for pt, border_pts in zip(seed_coords[1:], border_rings[1:]):
-                if filter_z is not None and not filter_z.contains(Point(pt[0], pt[1])):
+            seeds = seed_coords[1:]
+            rings = border_rings[1:]
+            seed_ok = None
+            if filter_active and len(seeds):
+                sx = np.fromiter((p[0] for p in seeds), float, len(seeds))
+                sy = np.fromiter((p[1] for p in seeds), float, len(seeds))
+                seed_ok = sp.contains_xy(fill_zone, sx, sy)
+            for si, (pt, border_pts) in enumerate(zip(seeds, rings)):
+                if filter_active and not seed_ok[si]:
                     continue
                 if placed_x:
                     dx = np.asarray(placed_x) - pt[0]
@@ -245,8 +251,14 @@ def fill_by_rings(
                 next_id    += 1
                 cell_angle  = np.arctan2(pt[1] - cy, pt[0] - cx)
                 cell_radius = np.sqrt((pt[0] - cx) ** 2 + (pt[1] - cy) ** 2)
-                for border_pt in border_pts[1:]:
-                    if filter_z is not None and not filter_z.contains(Point(border_pt[0], border_pt[1])):
+                border_pts = border_pts[1:]
+                border_ok = None
+                if filter_active and len(border_pts):
+                    bx = np.fromiter((b[0] for b in border_pts), float, len(border_pts))
+                    by = np.fromiter((b[1] for b in border_pts), float, len(border_pts))
+                    border_ok = sp.contains_xy(fill_zone, bx, by)
+                for bi, border_pt in enumerate(border_pts):
+                    if filter_active and not border_ok[bi]:
                         continue
                     target.add_cell(Cell(
                         type=cell_type,

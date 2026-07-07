@@ -9,6 +9,7 @@ depending on the ``planttype`` value in the input.  Both subclasses are
 
 import warnings
 import numpy as np
+import shapely as sp
 from typing import List, Dict, Any
 from collections import defaultdict
 
@@ -416,8 +417,7 @@ class RootAnatomy(Organ):
         if not getattr(self, "xylem_star", None) or not self.vascular_polygons:
             return
 
-        xylem_union     = unary_union(self.vascular_polygons)
-        xylem_star_prep = prep(self.xylem_star)
+        xylem_union = unary_union(self.vascular_polygons)
 
         groups: Dict[Any, list] = defaultdict(list)
         for c in self.all_cells.cells:
@@ -427,7 +427,10 @@ class RootAnatomy(Organ):
         to_delete: set = set()
         for gid, cells in groups.items():
             # Cheap prefilter: only cells reaching into the xylem star can qualify.
-            if not any(xylem_star_prep.contains(Point(c.x, c.y)) for c in cells):
+            # Vectorised containment over the group's seeds instead of a shapely
+            xs = np.fromiter((c.x for c in cells), float, len(cells))
+            ys = np.fromiter((c.y for c in cells), float, len(cells))
+            if not sp.contains_xy(self.xylem_star, xs, ys).any():
                 continue
             footprint = MultiPoint([(c.x, c.y) for c in cells]).convex_hull
             if footprint.area <= 0.0:

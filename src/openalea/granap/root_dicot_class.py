@@ -8,6 +8,7 @@ the factory in :mod:`openalea.granap.root_class` dispatches to this class when
 """
 
 import numpy as np
+import shapely as sp
 from typing import List, Dict, Any
 from collections import defaultdict
 
@@ -317,22 +318,18 @@ class DicotRootAnatomy(RootAnatomy):
         cell_width = p["cambium_cell_width"]
 
         thin_ring = visible_boundary.buffer(cell_diam / 2)
-        groups_to_delete = {
-            c.id_group
-            for c in self.all_cells.cells
-            if c.type in ("stele", "pericycle") and thin_ring.intersects(Point(c.x, c.y))
-        }
+        # Batch the per-cell ring test with intersects_xy over arrays instead of
+        # a shapely Point per cell
+        stele_cells = [c for c in self.all_cells.cells if c.type in ("stele", "pericycle")]
+        groups_to_delete = self._groups_intersecting(thin_ring, stele_cells)
         self.all_cells.cells = [
             c for c in self.all_cells.cells
             if c.type not in ("stele", "pericycle") or c.id_group not in groups_to_delete
         ]
 
         # Remove any phloem cells that encroach on the cambium ring
-        groups_to_delete = {
-            c.id_group
-            for c in self.vascular_cells.cells
-            if c.type == "phloem" and thin_ring.intersects(Point(c.x, c.y))
-        }
+        phloem_cells = [c for c in self.vascular_cells.cells if c.type == "phloem"]
+        groups_to_delete = self._groups_intersecting(thin_ring, phloem_cells)
         self.vascular_cells.cells = [
             c for c in self.vascular_cells.cells
             if c.type != "phloem" or c.id_group not in groups_to_delete
@@ -340,6 +337,20 @@ class DicotRootAnatomy(RootAnatomy):
 
         xylem_union = unary_union(self.vascular_polygons) if self.vascular_polygons else None
         self._render_layer(visible_boundary, cambium.tag, cell_diam, cell_width, cx, cy, xylem_union)
+
+    @staticmethod
+    def _groups_intersecting(zone, cells) -> set:
+        """id_groups of ``cells`` whose seed (x, y) intersects ``zone``.
+
+        Vectorised ``intersects_xy`` over the cells' coordinates — replaces a
+        per-cell ``zone.intersects(Point(c.x, c.y))`` (perf proposal ②).
+        """
+        if not cells:
+            return set()
+        xs = np.fromiter((c.x for c in cells), float, len(cells))
+        ys = np.fromiter((c.y for c in cells), float, len(cells))
+        hit = sp.intersects_xy(zone, xs, ys)
+        return {c.id_group for c, h in zip(cells, hit) if h}
 
     # ------------------------------------------------------------------
     # Secondary growth helpers
@@ -703,11 +714,12 @@ class DicotRootAnatomy(RootAnatomy):
         for geom in geoms:
             if geom.is_empty or geom.geom_type != "Polygon":
                 continue
-            geom_prep = prep(geom)
 
             radii   = [np.hypot(x - cx, y - cy) for x, y in geom.exterior.coords]
             r_inner = min(radii)
             r_outer = max(radii)
+
+            lanes = np.arange(n_lanes)
 
             # Start half a cell before the estimated inner boundary so the
             # first valid seed sits flush against the primary cambium edge
@@ -719,19 +731,21 @@ class DicotRootAnatomy(RootAnatomy):
                 theta_lo_r   = theta_c - half_angle_r
                 theta_hi_r   = theta_c + half_angle_r
 
+                # All lanes at this radius, one vectorised containment test
+                # instead of a shapely Point per lane
+                theta_mid = theta_lo_r + (lanes + 0.5) * (theta_hi_r - theta_lo_r) / n_lanes
+                px = cx + r * np.cos(theta_mid)
+                py = cy + r * np.sin(theta_mid)
+                inside = sp.contains_xy(geom, px, py)
+
                 for lane in range(n_lanes):
-                    theta_mid = theta_lo_r + (lane + 0.5) * (theta_hi_r - theta_lo_r) / n_lanes
-                    px = cx + r * np.cos(theta_mid)
-                    py = cy + r * np.sin(theta_mid)
-
-                    if not geom_prep.contains(Point(px, py)):
+                    if not inside[lane]:
                         continue
-
                     id_group = next_id
                     next_id += 1
                     self._seed_radial_cell(
-                        "medullar_ray", px, py, theta_mid, r, d_cell, lane_width,
-                        id_group, border_cos, border_sin,
+                        "medullar_ray", px[lane], py[lane], theta_mid[lane], r,
+                        d_cell, lane_width, id_group, border_cos, border_sin,
                     )
 
                 r += d_cell
@@ -822,20 +836,24 @@ class DicotRootAnatomy(RootAnatomy):
                 lines      = sorted(new_lines)
                 thresholds = new_thresholds
 
+                # One vectorised containment test over all segments at this
+                # radius instead of a shapely Point per segment
+                la = np.asarray(lines[:-1])
+                lb = np.asarray(lines[1:])
+                theta_mid_arr = (la + lb) / 2.0
+                px_arr = cx + r * np.cos(theta_mid_arr)
+                py_arr = cy + r * np.sin(theta_mid_arr)
+                inside = sp.contains_xy(ray_zone, px_arr, py_arr)
+
                 for i in range(len(lines) - 1):
-                    theta_mid      = (lines[i] + lines[i + 1]) / 2.0
-                    lane_arc_width = (lines[i + 1] - lines[i]) * r
-                    px = cx + r * np.cos(theta_mid)
-                    py = cy + r * np.sin(theta_mid)
-
-                    if not ray_zone.contains(Point(px, py)):
+                    if not inside[i]:
                         continue
-
+                    lane_arc_width = (lines[i + 1] - lines[i]) * r
                     id_group = next_id
                     next_id += 1
                     self._seed_radial_cell(
-                        "stele", px, py, theta_mid, r, d_cell, lane_arc_width,
-                        id_group, border_cos, border_sin,
+                        "stele", px_arr[i], py_arr[i], theta_mid_arr[i], r,
+                        d_cell, lane_arc_width, id_group, border_cos, border_sin,
                     )
 
                 r += d_cell
@@ -934,10 +952,18 @@ class DicotRootAnatomy(RootAnatomy):
             return medullar_ray_polys, None
         medullar_union = unary_union(all_mr_geoms)
         # Remove cambium seeds that fall inside the medullar ray corridors.
-        mr_cambium_zone = prep(medullar_union.buffer(sc["cell_diameter"]))
+        # Vectorised containment over the cambium seeds instead of a shapely
+        # Point per cell
+        mr_cambium_zone = medullar_union.buffer(sc["cell_diameter"])
+        cambium = [c for c in self.vascular_cells.cells if c.type == "cambium"]
+        remove_ids: set = set()
+        if cambium:
+            xs = np.fromiter((c.x for c in cambium), float, len(cambium))
+            ys = np.fromiter((c.y for c in cambium), float, len(cambium))
+            inside = sp.contains_xy(mr_cambium_zone, xs, ys)
+            remove_ids = {id(c) for c, h in zip(cambium, inside) if h}
         self.vascular_cells.cells = [
-            c for c in self.vascular_cells.cells
-            if not (c.type == "cambium" and mr_cambium_zone.contains(Point(c.x, c.y)))
+            c for c in self.vascular_cells.cells if id(c) not in remove_ids
         ]
         return medullar_ray_polys, medullar_union
 
