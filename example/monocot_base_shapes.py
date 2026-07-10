@@ -19,8 +19,8 @@ SHAPES = {
     "triangle":  {"shape": "triangle", "width": 1.6, "height": 1.6},
     "square":    {"shape": "square",   "width": 0.8},
     "ellipse":   {"shape": "ellipse",  "width": 1.0, "height": 1.6},
-    "star":      {"shape": "star", "n_peaks": 5, "inner_radius": 0.4,
-                  "outer_radius": 0.6, "arc_top": 0.05, "arc_bottom": 0.10},
+    "star":      {"shape": "star", "n_peaks": 5, "radius_valley_side": 0.4,
+                  "radius_peak_side": 0.6, "arc_peak_side": 0.05, "arc_valley_side": 0.10},
 }
 
 

@@ -30,10 +30,10 @@ def main(show=True):
 
     # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
     data.set_value("xylem", "n_vascular_peak",     6)
-    data.set_value("xylem", "inner_radius",        0.05)
-    data.set_value("xylem", "outer_radius",        0.155)
-    data.set_value("xylem", "arc_top",             0.01)
-    data.set_value("xylem", "arc_bottom",          0.015)
+    data.set_value("xylem", "radius_valley_side",        0.05)
+    data.set_value("xylem", "radius_peak_side",        0.155)
+    data.set_value("xylem", "arc_peak_side",             0.01)
+    data.set_value("xylem", "arc_valley_side",          0.015)
     data.set_value("xylem", "vessel_diameter",     0.03)
     data.set_value("xylem", "vessel_diameter_min", 0.01)
     data.set_value("xylem", "pith_radius",         0.0)
@@ -47,11 +47,11 @@ def main(show=True):
     data.set_value("phloem", "cluster_width",     0.03)
 
     # ── Primary cambium ring (valleys first, maturing outward) ─────────────
-    data.set_value("cambium", "inner_distance",   0.051)
-    data.set_value("cambium", "outer_distance",   0.14)
+    data.set_value("cambium", "radius_valley_side",   0.051)
+    data.set_value("cambium", "radius_peak_side",   0.14)
     data.set_value("cambium", "visible_distance", 0.1)
-    data.set_value("cambium", "arc_top",          0.026)
-    data.set_value("cambium", "arc_bottom",       0.036)
+    data.set_value("cambium", "arc_peak_side",          0.026)
+    data.set_value("cambium", "arc_valley_side",       0.036)
     data.set_value("cambium", "cell_diameter",    0.005)
     data.set_value("cambium", "cell_width",       0.01)
 

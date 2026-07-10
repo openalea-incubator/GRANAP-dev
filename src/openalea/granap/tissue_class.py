@@ -189,12 +189,19 @@ def fill_by_rings(
     cy: float,
     start_id: int,
     erosion_polygon=None,
+    initial_space: Optional[float] = None,
 ) -> int:
     """Fill a polygon zone with seeds on concentric inward rings.
 
     Buffers ``fill_zone`` (or ``erosion_polygon`` if given) inward one cell at a
     time, seeding each ring.  When ``erosion_polygon`` is supplied the rings are
     eroded from it but filtered to stay inside ``fill_zone``.
+
+    ``initial_space`` sets how far the *first* ring is inset from the boundary:
+    the first erosion is ``initial_space + cell_diameter/2`` (default
+    ``cell_diameter/2`` -> a full ``cell_diameter``).  Pass ``0.0`` to hug the
+    boundary (first ring half a cell in), so seeds sit right against a holed
+    zone's inner edges instead of leaving a cell-wide moat around each hole.
 
     Returns the next free ``id_group`` so callers can chain multiple zones.
     """
@@ -204,7 +211,7 @@ def fill_by_rings(
         return start_id
 
     next_id  = start_id
-    space    = cell_diameter / 2
+    space    = cell_diameter / 2 if initial_space is None else initial_space
     tang     = cell_width if cell_width else cell_diameter
     current  = erosion_polygon if erosion_polygon is not None else fill_zone
     # When eroding from ``erosion_polygon`` the rings are filtered to stay inside
@@ -228,7 +235,25 @@ def fill_by_rings(
         for geom in geoms:
             if geom.is_empty or geom.geom_type != "Polygon":
                 continue
-            seed_coords  = CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)
+            # Seed the exterior contour AND every interior hole boundary.
+            # ``cells_on_layer`` only traces a polygon's exterior, so without the
+            # interior rings a holed fill zone (e.g. parenchyma packed around
+            # carved-out sieve elements) leaves an unseeded moat around each hole
+            # that the hole's own Voronoi cell then balloons into. Tracing the
+            # interiors packs a ring of seeds hugging each hole so it renders at
+            # its true size.
+            coord_arrays = [CellGenerator.cells_on_layer(geom, cell_diameter, cell_width)]
+            for interior in geom.interiors:
+                ring_poly = Polygon(interior)
+                if ring_poly.is_empty:
+                    continue
+                coord_arrays.append(
+                    CellGenerator.cells_on_layer(ring_poly, cell_diameter, cell_width)
+                )
+            coord_arrays = [c for c in coord_arrays if len(c)]
+            if not coord_arrays:
+                continue
+            seed_coords  = np.vstack(coord_arrays)
             border_rings = CellGenerator.cell_border(seed_coords, tang * 0.7, cell_diameter * 0.7)
             seeds = seed_coords[1:]
             rings = border_rings[1:]

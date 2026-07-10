@@ -44,9 +44,9 @@ def _zone_geometry_ok(root: RootAnatomy) -> tuple[bool, bool]:
     sp = root.secondary_phloem_params
     n_peaks = root.vascular_params["n_vascular_peak"]
 
-    # Band starts at the cambium valley radius (~inner_distance) and extends
-    # outward by `height`; sample a point just inside it at the valley angle.
-    r_mid         = sc["inner_distance"] + sp["height"] * 0.4
+    # Band starts near the cambium's inner (primary-xylem-peak-side) radius and
+    # extends outward by `height`; sample a point just inside it at the valley angle.
+    r_mid         = sc["radius_peak_side"] + sp["height"] * 0.4
     valley_angle  = 2 * np.pi * 0.5 / n_peaks   # vessel zone centre (phloem arm)
     cam_arm_angle = 0.0                           # cambium arm centre (parenchyma ray)
 

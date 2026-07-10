@@ -254,6 +254,10 @@ class Organ(AbstractNetwork, ABC):
             t_start = time.time()
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
             grouped_cells = CellGenerator.simplify_cells(grouped_cells)
+            # simplify_cells rebuilds each polygon independently, which can distort
+            # small cells (few vertices) into a neighbour and leave them rendered
+            # one-inside-another; drop those, keeping the larger cell.
+            grouped_cells = CellGenerator.remove_nested_cells(grouped_cells)
             self.all_cells = CellManager()
             self.all_cells.cells = grouped_cells
             log.info("Voronoi grouping:        %.3fs", time.time() - t_start)

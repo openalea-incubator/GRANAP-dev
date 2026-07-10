@@ -46,10 +46,10 @@ class BaseShapeParams(BaseParams):
         description="Total height (y extent). 0 = auto (match the default circle's diameter). Used by ellipse/rectangle/triangle.")
     # Star outline (mirrors the xylem star parameters).
     n_peaks      : int   = Field(default=5,    ge=2,       title="Star Peaks",        description="Number of star arms. Only used when shape='star'.")
-    inner_radius : float = Field(default=0.4,  ge=0.00001, title="Star Inner Radius", description="Valley radius between arms. Only used when shape='star'.")
-    outer_radius : float = Field(default=0.6,  ge=0.00001, title="Star Outer Radius", description="Tip radius of each arm. Only used when shape='star'.")
-    arc_top      : float = Field(default=0.05, ge=0.00001, title="Star Arc at Tip",   description="Arc length of each arm at outer_radius. Only used when shape='star'.")
-    arc_bottom   : float = Field(default=0.10, ge=0.00001, title="Star Arc at Neck",  description="Arc length of each arm at inner_radius. Only used when shape='star'.")
+    radius_valley_side : float = Field(default=0.4,  ge=0.00001, title="Star Valley Radius", description="Valley radius between arms. Only used when shape='star'.")
+    radius_peak_side   : float = Field(default=0.6,  ge=0.00001, title="Star Peak Radius",   description="Tip (peak) radius of each arm. Only used when shape='star'.")
+    arc_peak_side      : float = Field(default=0.05, ge=0.00001, title="Star Arc at Peak",   description="Arc length of each arm at radius_peak_side. Only used when shape='star'.")
+    arc_valley_side    : float = Field(default=0.10, ge=0.00001, title="Star Arc at Valley", description="Arc length of each arm at radius_valley_side. Only used when shape='star'.")
 
 class InterCellularSpacesParams(BaseParams):
     name      : str             = "inter_cellular_spaces"
@@ -188,10 +188,10 @@ class SteleDicotParams(BaseParams):
 class DicotXylemParams(BaseParams):
     name                : str   = "xylem"
     n_vascular_peak     : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of xylem arms in the star pattern.")
-    inner_radius        : float = Field(default=0.1,  ge=0.00001, title="Inner Radius",             description="Inner radius of the xylem star arms from the stele centre.")
-    outer_radius        : float = Field(default=0.22,  ge=0.00001, title="Outer Radius",             description="Outer radius of the xylem star arms from the stele centre.")
-    arc_top             : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
-    arc_bottom          : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
+    radius_valley_side  : float = Field(default=0.1,  ge=0.00001, title="Valley Radius",            description="Valley-side radius of the xylem star arms from the stele centre.")
+    radius_peak_side    : float = Field(default=0.22,  ge=0.00001, title="Peak Radius",             description="Peak-side radius of the xylem star arms from the stele centre.")
+    arc_peak_side       : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Peak",       description="Arc length of each arm at radius_peak_side (peak width).")
+    arc_valley_side     : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Valley",     description="Arc length of each arm at radius_valley_side (valley/base width).")
     vessel_diameter     : float                        = Field(default=0.08,  ge=0.00001,        title="Vessel Diameter (max)",    description="Maximum vessel diameter at the star centre (upper bound of the size gradient).")
     vessel_diameter_min : float                        = Field(default=0.02,  ge=0.00001,        title="Vessel Diameter (min)",    description="Minimum vessel diameter at the star tips (lower bound of the size gradient).")
     vessel_diameter_sd  : float                        = Field(default=0.002, ge=0.0,            title="Vessel Diameter SD",       description="Standard deviation added to each vessel diameter.")
@@ -224,10 +224,10 @@ class DicotCambiumParams(BaseParams):
     cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     # for primary growth
     visible_distance : float = Field(default=0.8,  ge=0.0, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
-    inner_distance   : float = Field(default=0.11,  ge=0.00001, title="Primary Start Distance",   description="Inner radius of the cambium ring from the stele centre at primary growth.")
-    outer_distance   : float = Field(default=0.28,  ge=0.00001, title="Primary Outer Distance",   description="Outer radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
-    arc_top             : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Tip",        description="Arc length of each arm at outer_radius (tip width).")
-    arc_bottom          : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Base",       description="Arc length of each arm at inner_radius (base width).")
+    radius_valley_side : float = Field(default=0.11,  ge=0.00001, title="Primary Valley Radius",   description="Valley-side radius of the cambium ring from the stele centre at primary growth.")
+    radius_peak_side   : float = Field(default=0.28,  ge=0.00001, title="Primary Peak Radius",     description="Peak-side radius of the cambium star arms from the stele centre at primary growth. Should be close to the stele radius.")
+    arc_peak_side       : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Peak",       description="Arc length of each arm at radius_peak_side (peak width).")
+    arc_valley_side     : float = Field(default=0.07,  ge=0.00001, title="Arc Length at Valley",     description="Arc length of each arm at radius_valley_side (valley/base width).")
 
 # Dicotyledon-specific layers
 class DicotSecondarySteleParams(BaseParams):
@@ -283,7 +283,14 @@ class DicotSecondaryPhloemParams(BaseParams):
         description="Tangential arc length of each phloem trapeze at its outer (top) "
                     "edge. Smaller than the vessel-zone base width makes the arm taper "
                     "inward toward the outside; set close to the base width for a "
-                    "near-rectangular arm.")
+                    "near-rectangular arm. Only used when shape='trapeze'.")
+
+    shape: Literal["trapeze", "band"] = Field(default="trapeze", title="Phloem Shape",
+        description="'trapeze' = one tapering arm per compartment between the medullar "
+                    "rays (the botanical default; uses top_width). 'band' = a single "
+                    "continuous ring, the whole secondary cambium buffered outward by "
+                    "height, with no per-compartment trapeze carving. Medullar-ray strips "
+                    "still subdivide the band when secondary medullar rays are configured.")
 
     # ── Alive sieve zone ──────────────────────────────────────────────────────
     alive_distance: float = Field(default=0.1, ge=0.0, title="Alive Distance (mm)",
@@ -314,7 +321,7 @@ class DicotSecondaryCambiumParams(BaseParams):
 
     # Cambium contour family (orthogonal to n_vascular_peak).
     shape : Literal["star", "focus_ellipse"] = Field(default="star", title="Cambium Contour",
-        description="'star' = lobed cambium (inner/outer_distance + arcs). 'focus_ellipse' = a "
+        description="'star' = lobed cambium (radius_valley_side/radius_peak_side + arcs). 'focus_ellipse' = a "
                     "single smooth best-fit superellipse for a mature/ring-shaped secondary "
                     "cambium: the axes come from the measured profile and one exponent is "
                     "least-squares fitted to the rest (NOT an interpolation through every point).")
@@ -325,11 +332,17 @@ class DicotSecondaryCambiumParams(BaseParams):
                     "axis, the farthest point (tip, width→0) the major axis; the superellipse "
                     "exponent is best-fitted to the rest. The major axis runs along +y.")
 
-    # for secondary growth — must be larger than the primary cambium outer_distance
-    inner_distance : float = Field(default=0.40,  ge=0.00001, title="Secondary Inner Distance", description="Inner radius of the secondary cambium star from the stele centre. Must exceed the primary cambium outer_distance to enclose it.")
-    outer_distance : float = Field(default=0.45,  ge=0.00001, title="Secondary Outer Distance", description="Outer radius of the secondary cambium star from the stele centre. Must be ≤ the stele radius.")
-    arc_top        : float = Field(default=0.10,  ge=0.00001, title="Arc Length at Tip",   description="Arc length at outer_distance (tip width of each arm).")
-    arc_bottom     : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Base",  description="Arc length at inner_distance (base width of each arm).")
+    # For secondary growth. Unlike the xylem / primary cambium, the secondary
+    # cambium star is rotated half a period, so its peaks fall in the primary
+    # xylem valleys (where it produces secondary xylem and bulges outward). The
+    # radii are therefore named relative to the PRIMARY XYLEM orientation:
+    # radius_peak_side / arc_peak_side are on the primary-xylem-peak side (the
+    # narrower, inner side), radius_valley_side / arc_valley_side on the
+    # primary-xylem-valley side (the wider, bulging side).
+    radius_valley_side : float = Field(default=0.45,  ge=0.00001, title="Secondary Valley Radius", description="Radius on the primary-xylem-valley side, where the secondary cambium bulges outward producing secondary xylem. Must be ≤ the stele radius.")
+    radius_peak_side   : float = Field(default=0.40,  ge=0.00001, title="Secondary Peak Radius", description="Radius on the primary-xylem-peak side (the inner side of the rotated cambium star). Must exceed the primary cambium radius_peak_side so the secondary cambium encloses it.")
+    arc_peak_side      : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Peak",   description="Arc length at radius_peak_side (primary-xylem-peak side width of each arm).")
+    arc_valley_side    : float = Field(default=0.10,  ge=0.00001, title="Arc Length at Valley",  description="Arc length at radius_valley_side (primary-xylem-valley side width of each arm).")
     
 
 class DicotMedularRaysParams(BaseParams):
@@ -605,6 +618,20 @@ class OrganInputData(BaseModel):
             self.set_value(name, field, value)
         return self
 
+    def remove_param(self, name: str) -> "OrganInputData":
+        """Drop the param entry named ``name`` if present; returns ``self`` for chaining.
+
+        A tissue whose param entry is absent is skipped at build time (e.g. a root
+        with no ``secondary_phloem`` entry builds no secondary phloem), so removing
+        the entry is how you opt a tissue out entirely. Removing an absent name is a
+        no-op — the goal is simply "this param is not present".
+        """
+        self.params = [
+            p for p in self.params
+            if (p.get("name") if isinstance(p, dict) else getattr(p, "name", None)) != name
+        ]
+        return self
+
     def validate(self, raise_on_error: bool = False) -> List[str]:
         """Check cross-field geometry constraints that otherwise fail silently
         (an empty or distorted render rather than an error).
@@ -624,9 +651,8 @@ class OrganInputData(BaseModel):
 
         # A star's inner (valley) radius must be below its outer (tip) radius.
         for pname, inner, outer, label in (
-            ("xylem", "inner_radius", "outer_radius", "xylem star"),
-            ("cambium", "inner_distance", "outer_distance", "primary cambium"),
-            ("secondary_cambium", "inner_distance", "outer_distance", "secondary cambium"),
+            ("xylem", "radius_valley_side", "radius_peak_side", "xylem star"),
+            ("cambium", "radius_valley_side", "radius_peak_side", "primary cambium")
         ):
             lo, hi = fld(pname, inner), fld(pname, outer)
             # inner == outer is a valid degenerate star (a circle); only an
@@ -636,12 +662,12 @@ class OrganInputData(BaseModel):
 
         # Secondary cambium must enclose the primary cambium.
         if fld("secondary_growth", "value"):
-            sc_in = fld("secondary_cambium", "inner_distance")
-            pc_out = fld("cambium", "outer_distance")
-            if sc_in is not None and pc_out is not None and sc_in <= pc_out:
+            sc_in = fld("secondary_cambium", "radius_peak_side")
+            pc_out = fld("cambium", "radius_peak_side")
+            if sc_in is not None and pc_out is not None and sc_in < pc_out:
                 issues.append(
-                    f"secondary growth: secondary_cambium.inner_distance ({sc_in}) must "
-                    f"exceed the primary cambium.outer_distance ({pc_out}) so it encloses "
+                    f"secondary growth: secondary_cambium.radius_peak_side ({sc_in}) must "
+                    f"exceed or equal the primary cambium.radius_peak_side ({pc_out}) so it encloses "
                     "the primary cambium."
                 )
 

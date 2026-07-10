@@ -45,15 +45,18 @@ class DicotRootAnatomy(RootAnatomy):
         phloem  = self._get_param("phloem")
         cambium = self._get_param("cambium")
 
+        # Primary phloem is built only when its param entry is present (opt-out).
+        self.has_primary_phloem = bool(phloem)
+
         self.vascular_params.update({
             "xylem_diameter_max":        float(xylem.get("vessel_diameter",      0.09)),
             "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",  0.01)),
             "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",   0.002)),
             "n_vascular_peak":           int(xylem.get("n_vascular_peak",        3)),
-            "inner_radius_xylem":        float(xylem.get("inner_radius",         0.05)),
-            "outer_radius_xylem":        float(xylem.get("outer_radius",         0.22)),
-            "arc_top_xylem":             float(xylem.get("arc_top",              0.03)),
-            "arc_bottom_xylem":          float(xylem.get("arc_bottom",           0.03)),
+            "inner_radius_xylem":        float(xylem.get("radius_valley_side",   0.05)),
+            "outer_radius_xylem":        float(xylem.get("radius_peak_side",     0.22)),
+            "arc_top_xylem":             float(xylem.get("arc_peak_side",        0.03)),
+            "arc_bottom_xylem":          float(xylem.get("arc_valley_side",      0.03)),
             "xylem_gradient_function":   str(xylem.get("gradient_function",      "five_pl")),
             "xylem_gradient_inflection": float(xylem.get("gradient_inflection",  0.7)),
             "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",   5.0)),
@@ -72,15 +75,16 @@ class DicotRootAnatomy(RootAnatomy):
             "relative_phloem":           float(phloem.get("relative_distance",   0.2)),
             "cambium_cell_diameter":     float(cambium.get("cell_diameter",      0.015)),
             "cambium_cell_width":        float(cambium.get("cell_width",         0.03)),
-            "cambium_primary_inner_distance":   float(cambium.get("inner_distance",   0.10)),
-            "cambium_primary_outer_distance":   float(cambium.get("outer_distance",   0.28)),
+            "cambium_primary_radius_valley_side":   float(cambium.get("radius_valley_side", 0.10)),
+            "cambium_primary_radius_peak_side":   float(cambium.get("radius_peak_side",   0.28)),
             "cambium_primary_visible_distance": float(cambium.get("visible_distance", 0.15)),
-            "cambium_primary_arc_top":    float(cambium.get("arc_top",    0.1)),
-            "cambium_primary_arc_bottom": float(cambium.get("arc_bottom", 0.07)),
+            "cambium_primary_arc_peak_side":    float(cambium.get("arc_peak_side",   0.1)),
+            "cambium_primary_arc_valley_side": float(cambium.get("arc_valley_side", 0.07)),
         })
 
         sec_growth = self._get_param("secondary_growth")
         self.vascular_params["secondary_growth"] = bool(sec_growth.get("value", False))
+        self.has_secondary_phloem = False
 
         if self.vascular_params["secondary_growth"]:
             sec_xylem = self._get_param("secondary_xylem")
@@ -110,29 +114,39 @@ class DicotRootAnatomy(RootAnatomy):
             self.secondary_cambium_params = {
                 "cell_diameter":  float(sec_cam.get("cell_diameter",  0.015)),
                 "cell_width":     float(sec_cam.get("cell_width",     0.025)),
-                "inner_distance": float(sec_cam.get("inner_distance", 0.30)),
-                "outer_distance": float(sec_cam.get("outer_distance", 0.45)),
-                "arc_top":        float(sec_cam.get("arc_top",        0.05)),
-                "arc_bottom":     float(sec_cam.get("arc_bottom",     0.07)),
+                # Named relative to the primary xylem: radius_peak_side /
+                # arc_peak_side are on the primary-xylem-peak side, radius_valley_side
+                # / arc_valley_side on the primary-xylem-valley side.  The mapping to
+                # the star's geometric r_min/r_max is done in
+                # _build_secondary_cambium_polygon (the star is rotated half a period).
+                "radius_peak_side":   float(sec_cam.get("radius_peak_side",   0.40)),
+                "radius_valley_side": float(sec_cam.get("radius_valley_side", 0.45)),
+                "arc_peak_side":      float(sec_cam.get("arc_peak_side",      0.20)),
+                "arc_valley_side":    float(sec_cam.get("arc_valley_side",    0.10)),
                 "n_layers":       max(1, int(sec_cam.get("n_layers",  1))),
                 "shape":          str(sec_cam.get("shape", "star")),
                 "profile":        list(sec_cam.get("profile", []) or []),
             }
 
+            # Secondary phloem is built only when its param entry is present
+            # (opt-out): remove the "secondary_phloem" param to skip it entirely.
             sec_phloem = self._get_param("secondary_phloem")
-            self.secondary_phloem_params = {
-                "height":              float(sec_phloem.get("height",              0.1)),
-                "top_width":           float(sec_phloem.get("top_width",           0.3)),
-                "alive_distance":      float(sec_phloem.get("alive_distance",      0.05)),
-                "sieve_diameter":      float(sec_phloem.get("sieve_diameter",      0.015)),
-                "sieve_diameter_sd":   float(sec_phloem.get("sieve_diameter_sd",   0.001)),
-                "sieve_diameter_min":  float(sec_phloem.get("sieve_diameter_min",  0.008)),
-                "prop_sieve":          float(sec_phloem.get("prop_sieve",          0.35)),
-                "companion_diameter":  float(sec_phloem.get("companion_diameter",  0.008)),
-                "companion_width":     float(sec_phloem.get("companion_width",     0.008)),
-                "parenchyma_diameter": float(sec_phloem.get("parenchyma_diameter", 0.012)),
-                "parenchyma_width":    float(sec_phloem.get("parenchyma_width",    0.012)),
-            }
+            self.has_secondary_phloem = bool(sec_phloem)
+            if sec_phloem:
+                self.secondary_phloem_params = {
+                    "shape":               str(sec_phloem.get("shape",                "trapeze")),
+                    "height":              float(sec_phloem.get("height",              0.1)),
+                    "top_width":           float(sec_phloem.get("top_width",           0.3)),
+                    "alive_distance":      float(sec_phloem.get("alive_distance",      0.05)),
+                    "sieve_diameter":      float(sec_phloem.get("sieve_diameter",      0.015)),
+                    "sieve_diameter_sd":   float(sec_phloem.get("sieve_diameter_sd",   0.001)),
+                    "sieve_diameter_min":  float(sec_phloem.get("sieve_diameter_min",  0.008)),
+                    "prop_sieve":          float(sec_phloem.get("prop_sieve",          0.35)),
+                    "companion_diameter":  float(sec_phloem.get("companion_diameter",  0.008)),
+                    "companion_width":     float(sec_phloem.get("companion_width",     0.008)),
+                    "parenchyma_diameter": float(sec_phloem.get("parenchyma_diameter", 0.012)),
+                    "parenchyma_width":    float(sec_phloem.get("parenchyma_width",    0.012)),
+                }
 
             med_rays = self._get_param("medullar_rays")
             self.medullar_rays_params = {
@@ -167,17 +181,19 @@ class DicotRootAnatomy(RootAnatomy):
         # vessels by the unified point-level mask in Organ.generate_cells.
         recipe.cleanup("clear stele engulfed by xylem",
                        self._remove_stele_engulfed_by_xylem)
+        if self.has_primary_phloem:
+                self._add_phloem_step(recipe, polygon)
         if self.vascular_params.get("secondary_growth", False):
             # Secondary growth is bespoke (concentric ring fills + medullar rays +
             # companion cells), kept as `special` steps; see _build_*_polygon.
             recipe.special("secondary xylem",
                            lambda: self.fit_secondary_xylem(polygon),
                            produces=("xylem", "stele", "cambium", "medullar_ray"))
-            recipe.special("secondary phloem",
-                           lambda: self.fit_secondary_phloem(polygon),
-                           produces=("phloem", "companion_cell", "stele"))
+            if self.has_secondary_phloem:
+                recipe.special("secondary phloem",
+                               lambda: self.fit_secondary_phloem(polygon),
+                               produces=("phloem", "companion_cell", "stele"))
         else:
-            self._add_phloem_step(recipe, polygon)
             # Primary cambium is a line fill along the star's visible arc (bespoke).
             recipe.special("primary cambium",
                            lambda: self.fit_primary_cambium_elements(polygon),
@@ -205,9 +221,12 @@ class DicotRootAnatomy(RootAnatomy):
         height    = p["phloem_height"]
         cell_diam = p["phloem_diameter"]
         relative_distance = p["relative_phloem"]
-
+        if p["secondary_growth"]:
+            cambium_distance = self.secondary_cambium_params["radius_valley_side"]
+        else:
+            cambium_distance = p["cambium_primary_radius_valley_side"]
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        minimal_distance = min(p["cambium_primary_inner_distance"], stele_r * 0.95)
+        minimal_distance = min(cambium_distance, stele_r)
         adjustment = self._phloem_adjustment()
 
         r_center = (
@@ -241,7 +260,7 @@ class DicotRootAnatomy(RootAnatomy):
         One source of truth for both the valley geometry (:meth:`_phloem_valley_zones`)
         and the mask recording (:meth:`_add_phloem_step`).
         """
-        return self.vascular_params.get("cambium_cell_diameter", 0.0)
+        return self.vascular_params.get("cambium_cell_diameter", 0.0) if self.vascular_params.get("secondary_growth", False) else self.secondary_cambium_params.get("cell_diameter", 0.0)
 
     def _add_phloem_step(self, recipe: TissueRecipe, stele_polygon: Polygon) -> None:
         """Declarative phloem step: valley *regions* filled by circle-packing.
@@ -282,18 +301,14 @@ class DicotRootAnatomy(RootAnatomy):
         p = self.vascular_params
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
 
-        inner_r = p["cambium_primary_inner_distance"]
-        primary_arc_top    = p["cambium_primary_arc_top"]
-        primary_arc_bottom = p["cambium_primary_arc_bottom"]
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
 
-        outer_r = min(p["cambium_primary_outer_distance"], stele_r)
-        inner_r = min(inner_r, outer_r)
-
-        raw_star = GeometryProcessor.star_polygon(
+        raw_star = GeometryProcessor.oriented_star_polygon(
             n_branches=p["n_vascular_peak"],
-            r_min=inner_r, r_max=outer_r,
-            arc_base=primary_arc_bottom, arc_top=primary_arc_top,
+            radius_peak_side=min(p["cambium_primary_radius_peak_side"], stele_r),
+            radius_valley_side=min(p["cambium_primary_radius_valley_side"], stele_r),
+            arc_peak_side=p["cambium_primary_arc_peak_side"],
+            arc_valley_side=p["cambium_primary_arc_valley_side"],
         )
         star_coord = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
@@ -359,13 +374,12 @@ class DicotRootAnatomy(RootAnatomy):
     def _build_primary_cambium_polygon(self, stele_polygon: Polygon, cx: float, cy: float) -> Polygon:
         p = self.vascular_params
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        outer_r = min(p["cambium_primary_outer_distance"], stele_r)
-        inner_r = min(p["cambium_primary_inner_distance"], outer_r)
-
-        raw_star = GeometryProcessor.star_polygon(
+        raw_star = GeometryProcessor.oriented_star_polygon(
             n_branches=p["n_vascular_peak"],
-            r_min=inner_r, r_max=outer_r,
-            arc_base=p["cambium_primary_arc_bottom"], arc_top=p["cambium_primary_arc_top"],
+            radius_peak_side=min(p["cambium_primary_radius_peak_side"], stele_r),
+            radius_valley_side=min(p["cambium_primary_radius_valley_side"], stele_r),
+            arc_peak_side=p["cambium_primary_arc_peak_side"],
+            arc_valley_side=p["cambium_primary_arc_valley_side"],
         )
         star_coords = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
@@ -390,23 +404,20 @@ class DicotRootAnatomy(RootAnatomy):
             )
             return translate(contour, cx, cy).intersection(stele_polygon)
 
-        outer_r = sc["outer_distance"]
-        inner_r = min(sc["inner_distance"], outer_r)
-
         n_peaks = p["n_vascular_peak"]
-        raw_star = GeometryProcessor.star_polygon(
+        # oriented_star_polygon orients the arm toward whichever side owns the
+        # larger radius. With the default radius_valley_side > radius_peak_side
+        # the arm points to the primary-xylem *valleys*, where the cambium
+        # produces secondary xylem and bulges outward (the star is offset half a
+        # period). For a diarch (n_peaks == 2) this makes the secondary cambium
+        # run perpendicular to the primary xylem.
+        raw_star = GeometryProcessor.oriented_star_polygon(
             n_branches=n_peaks,
-            r_min=inner_r, r_max=outer_r,
-            arc_base=sc["arc_bottom"], arc_top=sc["arc_top"],
+            radius_peak_side=sc["radius_peak_side"],
+            radius_valley_side=sc["radius_valley_side"],
+            arc_peak_side=sc["arc_peak_side"],
+            arc_valley_side=sc["arc_valley_side"],
         )
-        # Offset the secondary cambium star by half a period so its peaks fall in
-        # the *valleys* of the primary xylem star (the secondary xylem vessel
-        # zones sit at 2*pi*(k+0.5)/n_peaks).  Botanically the cambium in those
-        # valleys produces secondary xylem and is pushed outward far more than the
-        # cambium at the primary-xylem peaks, so the secondary cambium bulges
-        # there.  For a diarch (n_peaks == 2) root this makes the secondary
-        # cambium run perpendicular to the primary xylem.
-        raw_star = rotate(raw_star, np.pi / n_peaks, origin=(0.0, 0.0), use_radians=True)
         star_coords = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
         )
@@ -799,7 +810,7 @@ class DicotRootAnatomy(RootAnatomy):
             theta_lo = theta_c - gap_half
             theta_hi = theta_c + gap_half
 
-            r_start = max(self.vascular_params["cambium_primary_inner_distance"], d_cell)
+            r_start = max(self.vascular_params["cambium_primary_radius_valley_side"], d_cell)
             init_spacing = w_cell / r_start
             n_init = max(1, int(np.ceil((theta_hi - theta_lo) / init_spacing)))
             lines  = list(np.linspace(theta_lo, theta_hi, n_init + 1))
@@ -1132,7 +1143,17 @@ class DicotRootAnatomy(RootAnatomy):
 
                     if zone_vessel_polys:
                         vessel_union_in_zone = unary_union(zone_vessel_polys)
-                        axial_zone = piece.difference(vessel_union_in_zone)
+                        # Vessels are seeded as an inset border ring, so each vessel's
+                        # final Voronoi cell grows slightly past its packed circle. An
+                        # axial-parenchyma seed dropped just outside the circle then gets
+                        # clipped to a sliver that renders inside the vessel (tagged
+                        # "stele"). Keep the axial fill clear of that rim by subtracting
+                        # the vessels buffered out by half a parenchyma cell, so no axial
+                        # seed lands where a vessel will expand.
+                        vessel_clearance = sx["cell_diameter"] * 0.5
+                        axial_zone = piece.difference(
+                            vessel_union_in_zone.buffer(vessel_clearance)
+                        )
                     else:
                         axial_zone = piece
 
@@ -1170,17 +1191,20 @@ class DicotRootAnatomy(RootAnatomy):
         self.vascular_polygons.extend(all_vessel_polys)
 
     def fit_secondary_phloem(self, stele_polygon: Polygon) -> None:
-        """Build secondary phloem as tapering trapezes outside the cambium.
+        """Build secondary phloem outside the cambium.
 
         The phloem occupies a band that follows the secondary cambium contour
-        (the cambium polygon buffered outward by ``height``).  Within the band,
-        one tapering trapeze sits in each *compartment* — the angular sector
-        between two consecutive rays (medullar↔medullar or medullar↔parenchyma).
-        Each trapeze has a wide base at the cambium narrowing to ``top_width`` at
-        the band's outer edge; the thin medullar-ray strips then separate the
-        compartment bases.  Every resulting arm is split radially into an alive
-        sub-zone (sieve tubes + companion cells + parenchyma) near the cambium
-        and a dead sub-zone (sieve tubes + parenchyma) beyond ``alive_distance``.
+        (the cambium polygon buffered outward by ``height``).  With
+        ``shape="trapeze"`` (default) one tapering trapeze sits in each
+        *compartment* — the angular sector between two consecutive rays
+        (medullar↔medullar or medullar↔parenchyma) — with a wide base at the
+        cambium narrowing to ``top_width`` at the band's outer edge.  With
+        ``shape="band"`` the whole buffered-cambium band is used directly as a
+        single continuous ring, skipping the per-compartment trapeze carving.
+        Either way the thin medullar-ray strips still subdivide the region, and
+        every resulting arm is split radially into an alive sub-zone (sieve tubes
+        + companion cells + parenchyma) near the cambium and a dead sub-zone
+        (sieve tubes + parenchyma) beyond ``alive_distance``.
         """
         sp = self.secondary_phloem_params
 
@@ -1200,9 +1224,12 @@ class DicotRootAnatomy(RootAnatomy):
         r_outer = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
 
         # One tapering trapeze per compartment (between consecutive rays), each
-        # standing perpendicular on the cambium surface
+        # standing perpendicular on the cambium surface — unless shape="band",
+        # which uses the whole buffered-cambium ring directly.
         cam_ext = secondary_cambium_polygon.exterior
-        if self._secondary_vessel_thetas:
+        if sp.get("shape", "trapeze") == "band":
+            arms = band
+        elif self._secondary_vessel_thetas:
             masks = []
             for center, comp_hw in self._phloem_compartments():
                 frame = self._cambium_local_frame(cam_ext, cx, cy, center, r_outer)
@@ -1251,7 +1278,16 @@ class DicotRootAnatomy(RootAnatomy):
         sp: dict,
         start_id: int,
     ) -> int:
-        """Pack sieve tubes (+ companion cells when alive=True) then fill parenchyma."""
+        """Place sieve tubes (+ companion cells when alive=True), then fill the
+        parenchyma ground tissue around them.
+
+        The sieve/companion circles are carved out of the parenchyma: the
+        parenchyma packs the arm minus their footprints, hugging them so every
+        sieve/companion stays bounded by neighbouring seeds and the Voronoi
+        renders it at its true size (filling the parenchyma as a free lattice and
+        merely deleting the cells under the sieves leaves voids the sieves and the
+        adjacent cambium balloon into).
+        """
         if zone is None or zone.is_empty:
             return start_id
 
@@ -1264,13 +1300,25 @@ class DicotRootAnatomy(RootAnatomy):
         min_area = np.pi * (sp["sieve_diameter_min"] / 2) ** 2
         next_id  = start_id
 
+        # The Voronoi renders a packed cell ~half a neighbouring parenchyma cell
+        # wider than its packed circle (negligible for big xylem vessels, but it
+        # visibly bloats the small sieve/companion — the parenchyma has to be small
+        # *relative to* the cell for it to render true, exactly as for xylem). We
+        # keep the packing at the requested diameter (so the count/spacing set by
+        # prop_sieve is unchanged), then shrink each seeded circle by this
+        # parenchyma-derived amount; it grows back to the requested size on render.
+        voronoi_grow = 0.25 * (sp["parenchyma_diameter"] + sp["parenchyma_width"])
+        sieve_r_floor = sp["parenchyma_diameter"] * 0.4
+
         for arm_zone in sub_zones:
             if arm_zone.is_empty or arm_zone.area < min_area:
                 continue
+            
+            proportion = sp["prop_sieve"] * sp["sieve_diameter"] ** 2 / (sp["sieve_diameter"]**2 + (sp["companion_diameter"] * sp["companion_width"]))
 
             packed = GeometryProcessor.pack_circles(
                 arm_zone,
-                proportion=sp["prop_sieve"],
+                proportion=proportion,
                 direction=None,
                 diameter_max=sp["sieve_diameter"],
                 diameter_min=sp["sieve_diameter_min"],
@@ -1279,15 +1327,32 @@ class DicotRootAnatomy(RootAnatomy):
                 rng=self.rng,
             )
 
-            sieve_polys:    list = []
-            sieve_centers:  list = []   # (pcx, pcy, r) of each placed sieve
+            sieve_polys:     list = []
+            sieve_centers:   list = []   # (pcx, pcy, r) of each placed sieve
             companion_polys: list = []
 
-            # Pass 1 — seed every sieve element.
+            # prop_sieve is the fraction of the arm occupied by sieve *and*
+            # companion cells together, the rest being parenchyma.
+            combined_budget = sp["prop_sieve"] * arm_zone.area
+            comp_area_each  = (np.pi * (sp["companion_diameter"] / 2) * (sp["companion_width"]/2)) if alive else 0.0
+            combined_area   = 0.0
+
+            # Pass 1 — seed every sieve element.  Packed at the requested diameter
+            # (so prop_sieve's count/spacing is unchanged), then each circle is
+            # scaled down by the parenchyma-derived voronoi growth (floored at
+            # sieve_r_floor, never grown past the packed radius) so it renders at
+            # its true size instead of ballooning into the surrounding parenchyma.
+            # The shrunk radius is what companions and the parenchyma fill hug.
             for pcx, pcy, r in packed:
-                actual_diam = r * 2
-                placed      = Point(pcx, pcy).buffer(r, resolution=32)
-                placed_buff = placed.buffer(-r * 0.15)
+                # Budget on the rendered (packed) size; keep at least one sieve.
+                increment = np.pi * r ** 2 + comp_area_each
+                if sieve_polys and combined_area + increment > combined_budget:
+                    break
+
+                r_draw      = min(r, max(r - voronoi_grow / 3, sieve_r_floor))
+                actual_diam = r_draw * 2
+                placed      = Point(pcx, pcy).buffer(r_draw, resolution=32)
+                placed_buff = placed.buffer(-r_draw * 0.15)
                 if placed_buff.is_empty:
                     continue
 
@@ -1302,7 +1367,8 @@ class DicotRootAnatomy(RootAnatomy):
                         "phloem", border_pt[0], border_pt[1], actual_diam, id_group, (cx, cy),
                     ))
                 sieve_polys.append(placed)
-                sieve_centers.append((pcx, pcy, r))
+                sieve_centers.append((pcx, pcy, r_draw))
+                combined_area += increment
 
             # Pass 2 — one companion cell beside each sieve (alive only).  Built
             # after all sieves so it can be rejected if it overlaps ANY sieve (not
@@ -1310,12 +1376,18 @@ class DicotRootAnatomy(RootAnatomy):
             # nested inside a neighbouring sieve.
             if alive and sieve_polys:
                 sieve_union = unary_union(sieve_polys)
+                comp_d = max(sp["companion_diameter"] - voronoi_grow, sp["companion_width"])
+                n_dirs = 8
                 for pcx, pcy, r in sieve_centers:
-                    comp_r    = sp["companion_diameter"] / 2
-                    theta_rad = np.arctan2(pcy - cy, pcx - cx)
-                    for side in (1, -1):
-                        ccx = pcx + (r + comp_r * 1.05) * np.cos(theta_rad + side * np.pi / 2)
-                        ccy = pcy + (r + comp_r * 1.05) * np.sin(theta_rad + side * np.pi / 2)
+                    comp_r = comp_d / 2
+                    # Try candidate positions spread all the way around the sieve,
+                    # starting from a random angle, so the companion sits on a random
+                    # side rather than always the same (tangential) one.
+                    theta0 = self.rng.uniform(0.0, 2 * np.pi)
+                    for k in range(n_dirs):
+                        angle = theta0 + 2 * np.pi * k / n_dirs
+                        ccx = pcx + (r + comp_r * 1.05) * np.cos(angle)
+                        ccy = pcy + (r + comp_r * 1.05) * np.sin(angle)
                         comp_pt = Point(ccx, ccy)
                         if not arm_zone.contains(comp_pt):
                             continue
@@ -1341,14 +1413,24 @@ class DicotRootAnatomy(RootAnatomy):
                         companion_polys.append(comp_circle)
                         break   # one companion per sieve
 
-            placed_union = unary_union(sieve_polys + companion_polys) if (sieve_polys or companion_polys) else Polygon()
-            fill_zone    = arm_zone.difference(placed_union)
+            # Parenchyma ground tissue — fill the arm minus the sieve/companion
+            # footprints so it packs around them (one hole per sieve/companion), no
+            # overlaps.  Hug the holes (initial_space=0): the default ring erosion
+            # leaves a cell-wide moat around every sieve that its Voronoi cell then
+            # balloons into (rendering far above prop_sieve); hugging bounds each
+            # sieve at its true size so the rendered split matches prop_sieve.
+            placed_union = (
+                unary_union(sieve_polys + companion_polys)
+                if (sieve_polys or companion_polys) else Polygon()
+            )
+            fill_zone = arm_zone.difference(placed_union)
             if not fill_zone.is_empty:
-                next_id = self._fill_zone_with_cells(
-                    fill_zone,
+                next_id = fill_by_rings(
+                    self.vascular_cells, fill_zone,
                     sp["parenchyma_diameter"], sp["parenchyma_width"],
                     "stele", cx, cy, next_id,
-                    erosion_polygon=arm_zone,
+                    erosion_polygon=fill_zone,
+                    initial_space=0.0,
                 )
 
         return next_id

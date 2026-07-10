@@ -97,6 +97,51 @@ class GeometryProcessor:
         return sp.Polygon(np.vstack(segments))
 
     @staticmethod
+    def oriented_star_polygon(
+        n_branches: int,
+        radius_peak_side: float,
+        radius_valley_side: float,
+        arc_peak_side: float,
+        arc_valley_side: float,
+        n_arc: int = 200,
+    ) -> Polygon:
+        """Star built from *peak-side* / *valley-side* radii and arcs.
+
+        The star's inner radius is ``min(radius_peak_side, radius_valley_side)``
+        and its outer radius (the arm tips) the ``max`` of the two. The arm
+        therefore points to whichever side owns the larger radius:
+
+        - ``radius_peak_side >= radius_valley_side``: the arm points along the
+          reference (peak) direction — branch tips at ``2*pi*k/n``, no offset.
+        - ``radius_valley_side > radius_peak_side``: the star is offset half a
+          period so the arm falls on the valley direction instead.
+
+        Each side's arc travels with its own radius. This keeps the peak/valley
+        naming meaningful regardless of which radius is larger.
+
+        Args:
+            n_branches:         Number of branches (>= 2)
+            radius_peak_side:   Radius on the peak (reference-direction) side
+            radius_valley_side: Radius on the valley (half-period) side
+            arc_peak_side:      Half arc length on the peak side
+            arc_valley_side:    Half arc length on the valley side
+            n_arc:              Number of points per arc segment
+        """
+        r_min = min(radius_peak_side, radius_valley_side)
+        r_max = max(radius_peak_side, radius_valley_side)
+        peak_is_outer = radius_peak_side >= radius_valley_side
+        arc_top  = arc_peak_side   if peak_is_outer else arc_valley_side  # arc at r_max
+        arc_base = arc_valley_side if peak_is_outer else arc_peak_side    # arc at r_min
+
+        star = GeometryProcessor.star_polygon(
+            n_branches=n_branches, r_min=r_min, r_max=r_max,
+            arc_base=arc_base, arc_top=arc_top, n_arc=n_arc,
+        )
+        if not peak_is_outer:
+            star = sp.affinity.rotate(star, np.pi / n_branches, origin=(0, 0), use_radians=True)
+        return star
+
+    @staticmethod
     def rectangle_polygon(width: float, height: float) -> Polygon:
         """
         Generate an axis-aligned rectangle centred on the origin.

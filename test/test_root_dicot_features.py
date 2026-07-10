@@ -27,17 +27,17 @@ def make_dicot_root(cambium_kwargs: dict = None, **xylem_kwargs) -> RootAnatomy:
 
 
 BASE_KWARGS = {
-    "arc_top":    0.04,
-    "arc_bottom": 0.06,
+    "arc_peak_side":    0.04,
+    "arc_valley_side": 0.06,
 }
 
 BASE_CAMBIUM = {
     "cell_diameter":    0.006,
     "cell_width":       0.01,
-    "inner_distance":   0.11,
+    "radius_valley_side":   0.11,
     "visible_distance": 0.27,
-    "arc_top":          0.05,
-    "arc_bottom":       0.07,
+    "arc_peak_side":          0.05,
+    "arc_valley_side":       0.07,
 }
 
 scenarios = [
@@ -45,15 +45,15 @@ scenarios = [
     {"label": "Tétrarch (4 peaks)", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4}, "cambium": BASE_CAMBIUM},
     {"label": "Heptarch (7 peaks)", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 7}, "cambium": BASE_CAMBIUM},
     {"label": "Narrow peaks",
-     "kwargs": {**BASE_KWARGS, "arc_bottom": 0.05, "arc_top": 0.05,
-                "vessel_diameter": 0.07, "vessel_diameter_min": 0.04, "inner_radius": 0.04},
+     "kwargs": {**BASE_KWARGS, "arc_valley_side": 0.05, "arc_peak_side": 0.05,
+                "vessel_diameter": 0.07, "vessel_diameter_min": 0.04, "radius_valley_side": 0.04},
      "cambium": BASE_CAMBIUM},
     {"label": "Wide star",
-     "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.20},
-     "cambium": {**BASE_CAMBIUM, "inner_distance": 0.19, "visible_distance": 0.40}},
+     "kwargs": {**BASE_KWARGS, "radius_valley_side": 0.15, "radius_peak_side": 0.20},
+     "cambium": {**BASE_CAMBIUM, "radius_valley_side": 0.19, "visible_distance": 0.40}},
     {"label": "Circle",
-     "kwargs": {**BASE_KWARGS, "inner_radius": 0.15, "outer_radius": 0.15},
-     "cambium": {**BASE_CAMBIUM, "inner_distance": 0.17, "visible_distance": 0.17}},
+     "kwargs": {**BASE_KWARGS, "radius_valley_side": 0.15, "radius_peak_side": 0.15},
+     "cambium": {**BASE_CAMBIUM, "radius_valley_side": 0.17, "visible_distance": 0.17}},
 ]
 
 

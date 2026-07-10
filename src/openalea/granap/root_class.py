@@ -105,6 +105,11 @@ class RootAnatomy(Organ):
         self.secondary_phloem_params: dict = {}
         self.medullar_rays_params: dict = {}
 
+        # Phloem is opt-out: absent param -> no phloem step in the recipe.
+        # Overwritten by _parse_vascular_params from the actual param presence.
+        self.has_primary_phloem: bool = True
+        self.has_secondary_phloem: bool = False
+
         # Geometry shared from fit_secondary_xylem -> fit_secondary_phloem.
         # Vessel-zone angles + half-width position each phloem trapeze; medullar
         # rays are the thin walls that subdivide them.
@@ -177,12 +182,12 @@ class RootAnatomy(Organ):
 
         if kind == "star":
             # Star outline uses the same parameters as the xylem star.
-            return GeometryProcessor.star_polygon(
+            return GeometryProcessor.oriented_star_polygon(
                 n_branches=int(shape_params.get("n_peaks", 5)),
-                r_min=float(shape_params.get("inner_radius", 0.4)),
-                r_max=float(shape_params.get("outer_radius", 0.6)),
-                arc_base=float(shape_params.get("arc_bottom", 0.10)),
-                arc_top=float(shape_params.get("arc_top", 0.05)),
+                radius_peak_side=float(shape_params.get("radius_peak_side", 0.6)),
+                radius_valley_side=float(shape_params.get("radius_valley_side", 0.4)),
+                arc_peak_side=float(shape_params.get("arc_peak_side", 0.05)),
+                arc_valley_side=float(shape_params.get("arc_valley_side", 0.10)),
             )
 
         # width/height define the bounding box; 0 (auto) falls back to the
@@ -300,23 +305,24 @@ class RootAnatomy(Organ):
         cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
 
         _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
-        outer_r = min(p["outer_radius_xylem"], stele_r)
-        inner_r = min(p["inner_radius_xylem"], stele_r)
-        pith_r  = max(0.0, min(p.get("pith_radius", 0.0), outer_r))
+        peak_r   = min(p["outer_radius_xylem"], stele_r)
+        valley_r = min(p["inner_radius_xylem"], stele_r)
+        outer_r  = max(peak_r, valley_r)
+        pith_r   = max(0.0, min(p.get("pith_radius", 0.0), outer_r))
 
         # The size gradient runs radially from the stele centre, normalized over
-        # [pith_r, outer_r] (i.e. outer_radius -> centre when there is no pith,
-        # outer_radius -> pith_radius otherwise) so the innermost vessels reach
-        # the full target diameter regardless of the pith.
+        # [pith_r, outer_r] (the star's outer radius -> centre when there is no
+        # pith, -> pith_radius otherwise) so the innermost vessels reach the full
+        # target diameter regardless of the pith.
         self._xylem_gradient_center = (cx, cy)
         self._xylem_gradient_radial_range = (pith_r, outer_r)
 
-        raw_star = GeometryProcessor.star_polygon(
+        raw_star = GeometryProcessor.oriented_star_polygon(
             n_branches=p["n_vascular_peak"],
-            r_min=inner_r,
-            r_max=outer_r,
-            arc_base=p["arc_bottom_xylem"],
-            arc_top=p["arc_top_xylem"],
+            radius_peak_side=peak_r,
+            radius_valley_side=valley_r,
+            arc_peak_side=p["arc_top_xylem"],
+            arc_valley_side=p["arc_bottom_xylem"],
         )
         star_coord = GeometryProcessor.smoothing_polygon(
             np.column_stack(raw_star.exterior.xy), smooth_factor=0.1, iterations=3,
@@ -399,13 +405,13 @@ class RootAnatomy(Organ):
         raw = rotate(raw, angle_deg - 90, origin=(0, 0))
         return translate(raw, tx, ty)
 
-    def _remove_stele_engulfed_by_xylem(self, area_fraction: float = 0.75) -> None:
+    def _remove_stele_engulfed_by_xylem(self, area_fraction: float = 0.6) -> None:
         """Drop stele cells whose footprint is mostly covered by xylem vessels.
 
         A *group-level* cleanup run before the unified point-level vascular mask.
         A stele cell is a ring of border seeds sharing an ``id_group`` (pre-Voronoi);
         its footprint is approximated by the convex hull of those seeds.  The whole
-        cell is dropped when at least ``area_fraction`` (default 0.75) of that
+        cell is dropped when at least ``area_fraction`` (default 0.6) of that
         footprint lies inside the xylem vessel union.
 
         Cells below the threshold are kept whole; the point-level mask in

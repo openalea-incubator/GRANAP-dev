@@ -594,6 +594,73 @@ class CellGenerator:
         return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
 
     @staticmethod
+    def remove_nested_cells(grouped_cells: List[Cell], min_overlap: float = 0.1) -> List[Cell]:
+        """Drop cells that sit (almost) entirely inside another cell, keeping the
+        bigger one.
+
+        Voronoi grouping can leave one group's cell overlapping and buried inside a
+        larger neighbour — e.g. a companion seeded right against a sieve, whose few
+        border points give it a Voronoi footprint the bigger cell's union swallows.
+        It then renders as one cell drawn inside another.
+
+        A cell ``i`` is treated as nested when a larger cell ``j`` contains ``i``'s
+        interior point *and* covers at least ``min_overlap`` of ``i``'s area — so
+        ordinary edge-sharing neighbours (whose overlap is ~0) are never touched.
+        The nested cell is removed and merged into the smallest such enclosing cell
+        (a no-op when it is already fully covered), keeping the larger cell intact.
+        """
+        valid = [c for c in grouped_cells
+                 if c.polygon is not None and not c.polygon.is_empty]
+        if len(valid) < 2:
+            return grouped_cells
+
+        polys = [c.polygon for c in valid]
+        areas = [p.area for p in polys]
+        tree  = STRtree(polys)
+
+        # An interior point of a Voronoi-partitioned cell only falls inside another
+        # cell when the two genuinely overlap (nesting), so querying by that point
+        # keeps the (rare) candidate set tiny; the area check then confirms it.
+        parent = [None] * len(valid)
+        for i, poly in enumerate(polys):
+            pt = poly.representative_point()
+            best, best_area = None, None
+            for pos in tree.query(pt):
+                j = int(pos)
+                if j == i or areas[j] <= areas[i]:
+                    continue
+                if polys[j].contains(pt) and \
+                        poly.intersection(polys[j]).area >= min_overlap * areas[i]:
+                    if best is None or areas[j] < best_area:
+                        best, best_area = j, areas[j]
+            parent[i] = best
+
+        if not any(p is not None for p in parent):
+            return grouped_cells
+
+        def _ancestor(i):
+            while parent[i] is not None:
+                i = parent[i]
+            return i
+
+        merge_into: Dict[int, list] = {}
+        removed = set()
+        for i in range(len(valid)):
+            if parent[i] is not None:
+                removed.add(i)
+                merge_into.setdefault(_ancestor(i), []).append(polys[i])
+
+        result = [c for c in grouped_cells if c.polygon is None or c.polygon.is_empty]
+        for i, c in enumerate(valid):
+            if i in removed:
+                continue
+            if i in merge_into:
+                c.polygon = unary_union([c.polygon, *merge_into[i]])
+                c.area = c.polygon.area
+            result.append(c)
+        return result
+
+    @staticmethod
     def simplify_cells(grouped_cells: List[Cell]) -> List[Cell]:
         """
         Simplify cell boundaries by retaining only junction vertices.
