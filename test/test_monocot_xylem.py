@@ -1,6 +1,8 @@
-"""Tests for monocot arch-mode xylem (metaxylem ring + protoxylem) + pith.
+"""Tests for monocot arch-mode xylem (metaxylem ring + protoxylem) + pith, and
+star-mode xylem (star-shaped vessel region + phloem in the valleys).
 
-Visual scenario gallery lives in ``example/monocot_iris.py``.
+Visual scenario gallery lives in ``example/monocot_iris.py`` (arch) and
+``example/monocot_xylem_gallery.py`` (all modes).
 """
 
 import os
@@ -20,6 +22,16 @@ SEED = 0
 def make_arch_root(**xylem_overrides) -> RootAnatomy:
     data = OrganInputData.for_root()
     data.set_value("xylem", "xylem_shape", "arch")
+    for field, value in xylem_overrides.items():
+        data.set_value("xylem", field, value)
+    root = RootAnatomy(data, seed=SEED)
+    root.generate_cells()
+    return root
+
+
+def make_star_root(**xylem_overrides) -> RootAnatomy:
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "xylem_shape", "star")
     for field, value in xylem_overrides.items():
         data.set_value("xylem", field, value)
     root = RootAnatomy(data, seed=SEED)
@@ -82,3 +94,55 @@ def test_arch_vs_default_both_produce_cells():
 
     assert sum(counts_default.values()) > 10, "Default mode produced too few cells"
     assert sum(counts_arch.values()) > 10, "Arch mode produced too few cells"
+
+
+def test_star_mode_produces_xylem_and_phloem():
+    """Star mode packs xylem vessels into the star and phloem into the valleys."""
+    root = make_star_root()
+    counts = cell_type_counts(root)
+    assert counts.get("xylem", 0) > 0, "Expected star xylem vessels"
+    assert counts.get("phloem", 0) > 0, "Expected phloem strands in the valleys"
+
+
+def test_star_mode_with_pith():
+    """Star mode with a pith: no xylem vessels inside the pith circle, but stele
+    (pith parenchyma) cells are present there."""
+    pith_r = 0.04
+    root = make_star_root(pith_radius=pith_r, radius_valley_side=0.05)
+
+    pith_circle = Point(0.0, 0.0).buffer(pith_r)
+
+    xylem_in_pith = [
+        c for c in root.all_cells.cells
+        if c.type == "xylem" and pith_circle.contains(Point(c.x, c.y))
+    ]
+    assert len(xylem_in_pith) == 0, (
+        f"Found {len(xylem_in_pith)} xylem vessels inside the pith circle — expected 0"
+    )
+
+    stele_in_pith = [
+        c for c in root.all_cells.cells
+        if c.type == "stele" and pith_circle.contains(Point(c.x, c.y))
+    ]
+    assert len(stele_in_pith) > 0, "Expected stele (pith) cells inside the pith circle"
+
+
+def test_star_phloem_sits_between_arms():
+    """Phloem strands fall in the valleys (between arms), not on the arm axes."""
+    n_peaks = 5
+    root = make_star_root(n_vascular_peak=n_peaks)
+    phloem = [c for c in root.all_cells.cells if c.type == "phloem"]
+    assert phloem, "Expected phloem cells"
+
+    # Arms point along 2*pi*k/n; valleys at the half-offset. Each phloem cell
+    # should be nearer a valley angle than an arm angle.
+    import numpy as np
+    for c in phloem:
+        theta = np.arctan2(c.y, c.x) % (2 * np.pi)
+        # angular distance to the closest arm axis
+        arm_gap = min(abs((theta - 2 * np.pi * k / n_peaks + np.pi) % (2 * np.pi) - np.pi)
+                      for k in range(n_peaks))
+        half = np.pi / n_peaks
+        assert arm_gap > half * 0.5, (
+            f"Phloem at theta={theta:.2f} too close to an arm axis (gap={arm_gap:.2f})"
+        )

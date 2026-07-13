@@ -583,15 +583,17 @@ class DicotRootAnatomy(RootAnatomy):
         prop_stele: float,
         mr_params: dict,
     ) -> list:
-        """Build wedge-shaped polygons for each medullar ray.
+        """Build constant-width radial-strip polygons for each medullar ray.
 
         When allow_non_vascular=False, rays are distributed evenly within the
         secondary xylem pizza slices (n_medullar / n_peaks per slice).
         When allow_non_vascular=True, rays are placed uniformly around the
         full circle (2π / n_medullar spacing) and span the full annular zone.
 
-        The inner boundary comes from intersecting with the primary cambium
-        polygon; no explicit r_inner is needed.
+        Each corridor is a rectangle of constant tangential width ``base_width``
+        (via ``_radial_strip``), not an angular wedge — so the ray keeps the same
+        physical width whatever the root/cambium radius, rather than fanning out
+        wider as the radius grows.
 
         Returns a list of (polygon, theta_c) tuples.
         """
@@ -601,7 +603,6 @@ class DicotRootAnatomy(RootAnatomy):
 
         base_width         = mr_params["base_width"]
         allow_non_vascular = mr_params["allow_non_vascular"]
-        cambium_exterior   = primary_cambium_polygon.exterior
 
         if allow_non_vascular:
             # Uniform angular spacing around the full annular zone
@@ -636,26 +637,10 @@ class DicotRootAnatomy(RootAnatomy):
 
         result = []
         for theta_c in thetas:
-            ray_tip  = (cx + r_outer_wedge * np.cos(theta_c),
-                        cy + r_outer_wedge * np.sin(theta_c))
-            ray_line = LineString([(cx, cy), ray_tip])
-            rim      = cambium_exterior.intersection(ray_line)
-
-            if rim.is_empty:
-                r_inner = max(np.hypot(x - cx, y - cy) for x, y in cambium_exterior.coords)
-            elif rim.geom_type == "Point":
-                r_inner = np.hypot(rim.x - cx, rim.y - cy)
-            else:
-                pts = [pt for pt in rim.geoms if pt.geom_type == "Point"]
-                r_inner = (
-                    max(np.hypot(pt.x - cx, pt.y - cy) for pt in pts)
-                    if pts else
-                    max(np.hypot(x - cx, y - cy) for x, y in cambium_exterior.coords)
-                )
-
-            half_angle = base_width / (2.0 * max(r_inner, 1e-9))
-            raw_wedge  = self._angular_wedge(cx, cy, theta_c, half_angle, r_outer_wedge)
-            poly       = raw_wedge.intersection(clip_zone)
+            # Constant tangential width at every radius (rectangle, not wedge),
+            # so the corridor does not fan out wider as the radius grows.
+            raw_strip = self._radial_strip(cx, cy, theta_c, base_width, r_outer_wedge)
+            poly      = raw_strip.intersection(clip_zone)
             if not poly.is_empty:
                 result.append((poly, theta_c))
         return result

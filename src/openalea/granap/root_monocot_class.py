@@ -57,8 +57,38 @@ class MonocotRootAnatomy(RootAnatomy):
             "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",     0.001)),
             "phloem_width":           float(phloem.get("cluster_width",         0.02)),
             "phloem_height":          float(phloem.get("cluster_height",        0.03)),
+            "relative_phloem":        float(phloem.get("relative_distance",     0.5)),
             "xylem_shape":            str(xylem.get("xylem_shape", "default")),
         })
+
+        # Primary phloem is built only when its param entry is present (opt-out).
+        self.has_primary_phloem = bool(phloem)
+
+        if self.vascular_params["xylem_shape"] == "star":
+            # Star (actinostele) xylem: a star-shaped region packed with
+            # size-graded vessels (shared base-class machinery), phloem in the
+            # valleys.  Field names mirror the dicot xylem star.
+            self.vascular_params.update({
+                "n_vascular_peak":           int(xylem.get("n_vascular_peak",          5)),
+                "inner_radius_xylem":        float(xylem.get("radius_valley_side",     0.05)),
+                "outer_radius_xylem":        float(xylem.get("radius_peak_side",       0.22)),
+                "arc_top_xylem":             float(xylem.get("arc_peak_side",          0.03)),
+                "arc_bottom_xylem":          float(xylem.get("arc_valley_side",        0.03)),
+                "pith_radius":               float(xylem.get("pith_radius",            0.0)),
+                "xylem_diameter_max":        float(xylem.get("vessel_diameter",        0.06)),
+                "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",    0.01)),
+                "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",     0.005)),
+                "xylem_gradient_function":   str(xylem.get("gradient_function",        "five_pl")),
+                "xylem_gradient_inflection": float(xylem.get("gradient_inflection",    0.7)),
+                "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",     5.0)),
+                "xylem_gradient_asymmetry":  float(xylem.get("gradient_asymmetry",     1.0)),
+                "xylem_enforce_gradient_min": float(xylem.get("enforce_gradient_min",  0.0)),
+                "xylem_allow_ellipse":       bool(xylem.get("allow_ellipse",           True)),
+                "xylem_ellipse_max_aspect":  float(xylem.get("ellipse_max_aspect",     2.0)),
+                "xylem_packing_strategy":    str(xylem.get("packing_strategy",         "space")),
+                "xylem_first_vessel_shift":  float(xylem.get("first_vessel_shift",     0.7)),
+                "xylem_direction":           str(xylem.get("direction",                "center")),
+            })
 
         if self.vascular_params["xylem_shape"] == "arch":
             self.vascular_params.update({
@@ -100,9 +130,27 @@ class MonocotRootAnatomy(RootAnatomy):
         ``recipe.plan()``.
         """
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
-        if self.vascular_params.get("n_vascular_bundles", 0) == 0:
+        shape = self.vascular_params.get("xylem_shape", "default")
+        if shape != "star" and self.vascular_params.get("n_vascular_bundles", 0) == 0:
             return recipe                       # no vascular bundles -> empty
-        if self.vascular_params.get("xylem_shape", "default") == "arch":
+        if shape == "star":
+            # Star (actinostele) mode: a star-shaped xylem region packed with
+            # size-graded vessels (shared base-class machinery, same as the dicot
+            # primary xylem), then phloem strands in the valleys between arms.
+            # No cambium — the phloem is positioned relative to the xylem star's
+            # valley radius (see _phloem_valley_zones).
+            if self.vascular_params.get("n_vascular_peak", 0) == 0:
+                return recipe                   # no xylem arms -> empty
+            recipe.fill("xylem star", self._xylem_star_region(polygon),
+                        strategy="packing", produces=("xylem", "stele"),
+                        record=self._record_xylem_vessels, **self._xylem_pack_kwargs())
+            # Drop stele cells that are mostly engulfed by xylem vessels; the
+            # point-level mask in generate_cells clips the rest.
+            recipe.cleanup("clear stele engulfed by xylem",
+                           self._remove_stele_engulfed_by_xylem)
+            if self.has_primary_phloem:
+                self._add_phloem_step(recipe, polygon)
+        elif self.vascular_params.get("xylem_shape", "default") == "arch":
             # Arch mode, built inside-out: (1) evenly-spaced metaxylem ring,
             # (2) a stele-cell sheath around each metaxylem, (3) a graded
             # protoxylem chain per pole directed to its nearest metaxylem.
@@ -129,6 +177,86 @@ class MonocotRootAnatomy(RootAnatomy):
                            lambda: self.fit_phloem_protoxylem_elements(polygon),
                            produces=("phloem", "protoxylem"))
         return recipe
+
+    # ------------------------------------------------------------------
+    # Star-mode phloem (valleys between the xylem star arms)
+    # ------------------------------------------------------------------
+
+    def _phloem_valley_zones(self, stele_polygon: Polygon):
+        """Phloem regions in the valleys between the xylem star arms.
+
+        Monocot roots have no cambium, so — unlike the dicot — the phloem band
+        is positioned relative to the xylem star's *valley radius* (the arm
+        bases) rather than a cambium radius: it sits between that valley radius
+        and the stele edge, interpolated by ``relative_distance``.  Shape-first:
+        each valley starts as an oriented ellipse, is clipped to the stele and
+        carved out of the xylem star.  Returns the list of phloem
+        :class:`Tissue`s (the recipe fills them by circle-packing).
+        """
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        n_peaks = p["n_vascular_peak"]
+
+        width     = p["phloem_width"]
+        height    = p["phloem_height"]
+        cell_diam = p["phloem_diameter"]
+        relative_distance = p["relative_phloem"]
+
+        _, _, stele_r = GeometryProcessor._chebyshev_center(stele_polygon)
+        # Inner bound of the phloem band = the xylem star's valley radius; there
+        # is no cambium to offset from (the dicot uses its cambium valley radius).
+        valley_r = min(p["inner_radius_xylem"], stele_r)
+        r_center = (
+            valley_r + (height / 2)
+            + (stele_r - height - valley_r) * relative_distance
+        )
+
+        xylem_star = getattr(self, "xylem_star", None)
+        min_area = np.pi * (cell_diam / 2) ** 2 * (1 - 0.0015)
+        tissues = []
+        for k in range(n_peaks):
+            theta = 2 * np.pi * (k + 0.5) / n_peaks   # valleys sit between arms
+
+            raw = self._oriented_ellipse(
+                cx + r_center * np.cos(theta), cy + r_center * np.sin(theta),
+                width, height, np.degrees(theta),
+            )
+
+            tissue = Tissue("phloem", raw).intersection(stele_polygon)
+            if xylem_star is not None and not xylem_star.is_empty:
+                tissue.difference(xylem_star)
+            if tissue.is_empty or tissue.area < min_area:
+                continue
+            tissues.append(tissue)
+
+        return tissues
+
+    def _add_phloem_step(self, recipe: TissueRecipe, stele_polygon: Polygon) -> None:
+        """Declarative phloem step: valley *regions* filled by circle-packing.
+
+        Mirrors the dicot phloem step but with no cambium clearance (monocot has
+        no cambium): the recorded region — used by the unified vascular mask in
+        ``generate_cells`` to clear the stele seeds underneath — is the phloem
+        footprint itself.  The regions are built lazily at build time because
+        they are carved from the xylem star placed by the earlier fill step.
+        """
+        p = self.vascular_params
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        cell_diam = p["phloem_diameter"]
+        cell_sd   = p["phloem_diameter_sd"]
+
+        def record(tissue, _result):
+            self.vascular_tissue_polygons.setdefault(tissue.tag, []).append(tissue.shape)
+
+        recipe.fill_each(
+            "phloem in valleys",
+            lambda: self._phloem_valley_zones(stele_polygon),
+            strategy="packing", produces=("phloem",), record=record,
+            n_border=25, angle_center=(cx, cy),
+            proportion=1.0, direction=None,
+            diameter_max=cell_diam, diameter_min=cell_diam,
+            diameter_sd=cell_sd, gradient_function="normal",
+        )
 
     # ------------------------------------------------------------------
     # Default ring-bundle methods

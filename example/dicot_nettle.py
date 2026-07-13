@@ -123,7 +123,7 @@ def main(show=True):
 
     # ── Phellogen layer ────────────────────────────────────────────────────
     data.params.append({
-        "name": "phellen",
+        "name": "phellem",
         "cell_diameter": 0.013,
         "cell_width": 0.04,
         "n_layers": 1,
