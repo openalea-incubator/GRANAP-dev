@@ -151,6 +151,9 @@ class DicotRootAnatomy(RootAnatomy):
             med_rays = self._get_param("medullar_rays")
             self.medullar_rays_params = {
                 "n_medullar":         int(med_rays.get("n_medullar",         0)),
+                "n_medullar_rate":    float(med_rays.get("n_medullar_rate",   0.0)),
+                "start_radius":       float(med_rays.get("start_radius",      0.0)),
+                "start_radius_sd":    float(med_rays.get("start_radius_sd",   0.0)),
                 "base_width":         float(med_rays.get("base_width",       0.005)),
                 "cell_diameter":      float(med_rays.get("cell_diameter",    0.025)),
                 "cell_width":         float(med_rays.get("cell_width",       0.005)),
@@ -425,16 +428,18 @@ class DicotRootAnatomy(RootAnatomy):
         return translate(star, cx, cy).intersection(stele_polygon)
 
     @staticmethod
-    def _radial_strip(cx: float, cy: float, theta: float, width: float, r_outer: float) -> Polygon:
+    def _radial_strip(cx: float, cy: float, theta: float, width: float, r_outer: float,
+                      r_inner: float = 0.0) -> Polygon:
         """Constant-tangential-width radial strip centred on ``theta``.
 
-        A rectangle of tangential width ``width`` running from the stele centre
-        out to ``r_outer`` along the ``theta`` direction — the phloem-band
-        footprint of a medullar ray, whose cells are filled at constant
+        A rectangle of tangential width ``width`` running from ``r_inner`` (default
+        the stele centre) out to ``r_outer`` along the ``theta`` direction — the
+        phloem-band footprint of a medullar ray, whose cells are filled at constant
         tangential ``base_width`` (so a rectangle matches the ray better than an
-        angular wedge, which would taper).
+        angular wedge, which would taper).  ``r_inner`` lets a ray start partway out
+        (rate-driven rays that appear as the root thickens).
         """
-        strip = box(0.0, -width / 2.0, r_outer, width / 2.0)
+        strip = box(r_inner, -width / 2.0, r_outer, width / 2.0)
         strip = rotate(strip, theta, origin=(0.0, 0.0), use_radians=True)
         return translate(strip, cx, cy)
 
@@ -571,6 +576,61 @@ class DicotRootAnatomy(RootAnatomy):
             (cx + r_outer * np.cos(a), cy + r_outer * np.sin(a)) for a in arc_angles
         ])
 
+    @staticmethod
+    def _bisect_circular(occupied: list) -> float:
+        """Midpoint of the widest gap around a circle of thetas in ``[0, 2π)``.
+
+        ``occupied`` is a sorted list; returns the angle that splits the largest
+        arc between consecutive rays (opposite the sole ray when there is one, and
+        ``0`` when empty).  Used to place a newly-initiated medullar ray so it
+        subdivides the coarsest existing gap.
+        """
+        m = len(occupied)
+        if m == 0:
+            return 0.0
+        if m == 1:
+            return (occupied[0] + np.pi) % (2.0 * np.pi)
+        best_mid, best_gap = 0.0, -1.0
+        for i in range(m):
+            lo = occupied[i]
+            hi = occupied[(i + 1) % m] + (2.0 * np.pi if i + 1 == m else 0.0)
+            if hi - lo > best_gap:
+                best_gap = hi - lo
+                best_mid = (lo + hi) / 2.0
+        return best_mid % (2.0 * np.pi)
+
+    @staticmethod
+    def _bisect_bounded(bounds: list) -> float:
+        """Midpoint of the widest interior gap in a sorted, bounded list.
+
+        ``bounds`` includes the two slice edges (the parenchyma rays); returns the
+        angle bisecting the largest interval, so a new ray stays inside the pizza
+        slice and evenly subdivides it.
+        """
+        best_mid, best_gap = bounds[0], -1.0
+        for lo, hi in zip(bounds[:-1], bounds[1:]):
+            if hi - lo > best_gap:
+                best_gap = hi - lo
+                best_mid = (lo + hi) / 2.0
+        return best_mid
+
+    def _new_ray_start_radii(self, n_new: int, span_base: float, span: float,
+                             sd_mm: float, pc_r: float, r_outer: float) -> list:
+        """Start radii for the ``n_new`` rate-driven rays.
+
+        Spread evenly across ``[span_base, r_outer]`` (density = the rate, so the
+        ray count grows linearly with radius) then jittered by ``sd_mm`` and sorted
+        ascending, so inner-appearing rays are placed before outer ones.
+        """
+        radii = []
+        for j in range(n_new):
+            r = span_base + (j + 0.5) / n_new * span
+            if sd_mm > 0.0:
+                r += self.rng.normal(0.0, sd_mm)
+            radii.append(max(pc_r, min(r_outer * 0.999, r)))
+        radii.sort()
+        return radii
+
     def _build_medullar_ray_polygons(
         self,
         annular_zone,
@@ -579,34 +639,47 @@ class DicotRootAnatomy(RootAnatomy):
         cx: float,
         cy: float,
         r_outer_wedge: float,
+        r_outer: float,
         n_peaks: int,
         prop_stele: float,
         mr_params: dict,
     ) -> list:
         """Build constant-width radial-strip polygons for each medullar ray.
 
-        When allow_non_vascular=False, rays are distributed evenly within the
-        secondary xylem pizza slices (n_medullar / n_peaks per slice).
-        When allow_non_vascular=True, rays are placed uniformly around the
-        full circle (2π / n_medullar spacing) and span the full annular zone.
+        ``n_medullar`` initial rays start at the primary cambium (full radial
+        extent); ``n_medullar_rate`` adds more rays that *start* further out
+        (``r_inner = r_j``), so ray density grows toward the periphery as in real
+        wood.  New rays are placed by bisecting the widest current angular gap.
+
+        When allow_non_vascular=False, rays live within the secondary xylem pizza
+        slices (initial rays even per slice, new rays round-robin + bisected within
+        a slice).  When allow_non_vascular=True (or prop_stele >= 1) they span the
+        full circle.
 
         Each corridor is a rectangle of constant tangential width ``base_width``
         (via ``_radial_strip``), not an angular wedge — so the ray keeps the same
-        physical width whatever the root/cambium radius, rather than fanning out
-        wider as the radius grows.
+        physical width whatever the radius.
 
         Returns a list of (polygon, theta_c) tuples.
         """
         n_medullar = mr_params["n_medullar"]
-        if n_medullar <= 0:
+        rate       = mr_params.get("n_medullar_rate", 0.0)
+        if n_medullar <= 0 and rate <= 0.0:
             return []
 
         base_width         = mr_params["base_width"]
         allow_non_vascular = mr_params["allow_non_vascular"]
 
+        # Radial span over which rate-driven rays are initiated, and their count.
+        _, _, pc_r = GeometryProcessor._chebyshev_center(primary_cambium_polygon)
+        annulus    = max(r_outer - pc_r, 0.0)
+        span_base  = pc_r + mr_params.get("start_radius", 0.0) * annulus
+        span       = max(r_outer - span_base, 0.0)
+        n_new      = int(round(rate * span)) if rate > 0.0 else 0
+        sd_mm      = mr_params.get("start_radius_sd", 0.0) * annulus
+
+        # Clip zone: full annulus, or the union of the vessel pizza slices.
         if allow_non_vascular:
-            # Uniform angular spacing around the full annular zone
-            thetas    = [2.0 * np.pi * k / n_medullar for k in range(n_medullar)]
             clip_zone = annular_zone
         else:
             valid_zones = [z for z in vessel_zones if z is not None and not z.is_empty]
@@ -614,32 +687,54 @@ class DicotRootAnatomy(RootAnatomy):
                 return []
             clip_zone = unary_union(valid_zones)
 
-            if prop_stele >= 1.0:
-                # Full ring — distribute uniformly (same as allow_non_vascular=True)
-                thetas = [2.0 * np.pi * k / n_medullar for k in range(n_medullar)]
-            else:
-                # Distribute n_medullar rays evenly across the n_peaks pizza slices
-                full_angle  = 2.0 * np.pi / n_peaks
-                half_width  = full_angle * prop_stele / 2.0
-                rays_pp     = n_medullar // n_peaks      # rays per peak
-                extra       = n_medullar % n_peaks       # first `extra` peaks get one more
-                thetas = []
-                for pk in range(n_peaks):
-                    theta_zone = 2.0 * np.pi * (pk + 0.5) / n_peaks
-                    n_r        = rays_pp + (1 if pk < extra else 0)
-                    for j in range(n_r):
-                        # Even spacing including the parenchyma rays at the zone
-                        # edges: split the zone into n_r + 1 equal intervals and
-                        # place a medullar ray at each internal node, so the
-                        # medullar↔parenchyma gaps match the medullar↔medullar gap.
-                        offset = (2.0 * (j + 1) / (n_r + 1) - 1.0) * half_width
-                        thetas.append(theta_zone + offset)
+        # rays :: list of (theta, r_inner) — initial rays start at 0 (clipped to
+        # the annulus inner edge = the cambium); rate-driven rays start at r_j.
+        rays: list = []
+
+        if allow_non_vascular or prop_stele >= 1.0:
+            # One circular container.
+            initial = [2.0 * np.pi * k / n_medullar for k in range(n_medullar)] \
+                if n_medullar > 0 else []
+            rays.extend((th, 0.0) for th in initial)
+            occupied = sorted(t % (2.0 * np.pi) for t in initial)
+            for r_j in self._new_ray_start_radii(n_new, span_base, span, sd_mm, pc_r, r_outer):
+                th = self._bisect_circular(occupied)
+                occupied.append(th)
+                occupied.sort()
+                rays.append((th, r_j))
+        else:
+            # Per-pizza-slice containers; slice edges act as parenchyma-ray bounds.
+            full_angle = 2.0 * np.pi / n_peaks
+            half_width = full_angle * prop_stele / 2.0
+            rays_pp    = n_medullar // n_peaks      # initial rays per peak
+            extra      = n_medullar % n_peaks       # first `extra` peaks get one more
+            slice_bounds: list = []
+            for pk in range(n_peaks):
+                theta_zone = 2.0 * np.pi * (pk + 0.5) / n_peaks
+                n_r        = rays_pp + (1 if pk < extra else 0)
+                slice_initial = []
+                for j in range(n_r):
+                    offset = (2.0 * (j + 1) / (n_r + 1) - 1.0) * half_width
+                    th = theta_zone + offset
+                    slice_initial.append(th)
+                    rays.append((th, 0.0))
+                slice_bounds.append(
+                    [theta_zone - half_width, *sorted(slice_initial), theta_zone + half_width]
+                )
+            for i, r_j in enumerate(
+                self._new_ray_start_radii(n_new, span_base, span, sd_mm, pc_r, r_outer)
+            ):
+                bounds = slice_bounds[i % n_peaks]   # round-robin across slices
+                th = self._bisect_bounded(bounds)
+                bounds.append(th)
+                bounds.sort()
+                rays.append((th, r_j))
 
         result = []
-        for theta_c in thetas:
-            # Constant tangential width at every radius (rectangle, not wedge),
-            # so the corridor does not fan out wider as the radius grows.
-            raw_strip = self._radial_strip(cx, cy, theta_c, base_width, r_outer_wedge)
+        for theta_c, r_inner in rays:
+            # Constant tangential width at every radius (rectangle, not wedge); a
+            # rate-driven ray starts partway out at r_inner.
+            raw_strip = self._radial_strip(cx, cy, theta_c, base_width, r_outer_wedge, r_inner)
             poly      = raw_strip.intersection(clip_zone)
             if not poly.is_empty:
                 result.append((poly, theta_c))
@@ -917,20 +1012,21 @@ class DicotRootAnatomy(RootAnatomy):
         return vessel_zones
 
     def _prepare_medullar_rays(self, annular_zone, vessel_zones, primary_cambium_polygon,
-                               cx: float, cy: float, r_outer_wedge: float, n_peaks: int,
-                               sx: dict, sc: dict, mr_params: dict):
+                               cx: float, cy: float, r_outer_wedge: float, r_outer: float,
+                               n_peaks: int, sx: dict, sc: dict, mr_params: dict):
         """Build the medullar-ray corridor polygons (before vessel packing so they
         can cut the vessel zones), share their angles/width with
         :meth:`fit_secondary_phloem`, and clear cambium seeds inside them.
 
         Returns ``(medullar_ray_polys, medullar_union)`` — ``([], None)`` when no
-        medullar rays are requested.
+        medullar rays are requested.  ``r_outer`` is the real outer xylem radius,
+        over which rate-driven rays are initiated.
         """
-        if mr_params.get("n_medullar", 0) <= 0:
+        if mr_params.get("n_medullar", 0) <= 0 and mr_params.get("n_medullar_rate", 0.0) <= 0.0:
             return [], None
         medullar_ray_polys = self._build_medullar_ray_polygons(
             annular_zone, vessel_zones, primary_cambium_polygon,
-            cx, cy, r_outer_wedge, n_peaks, sx["prop_stele"], mr_params,
+            cx, cy, r_outer_wedge, r_outer, n_peaks, sx["prop_stele"], mr_params,
         )
         # Share medullar-ray angles + width with fit_secondary_phloem
         # (they are the thin walls between phloem trapezes).
@@ -1044,6 +1140,13 @@ class DicotRootAnatomy(RootAnatomy):
         minx, miny, maxx, maxy = secondary_cambium_polygon.bounds
         r_outer_wedge = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
 
+        # Real outer xylem radius (inner edge of the cambium band); the span over
+        # which rate-driven medullar rays are initiated.
+        r_outer = max(
+            np.hypot(x - cx, y - cy)
+            for x, y in secondary_cambium_polygon.exterior.coords
+        ) - cambium_band_depth
+
         vessel_zones = self._build_secondary_vessel_zones(
             annular_zone, half_width, r_outer_wedge, n_peaks, sx, cx, cy,
         )
@@ -1052,7 +1155,7 @@ class DicotRootAnatomy(RootAnatomy):
         mr_params = self.medullar_rays_params
         medullar_ray_polys, medullar_union = self._prepare_medullar_rays(
             annular_zone, vessel_zones, primary_cambium_polygon,
-            cx, cy, r_outer_wedge, n_peaks, sx, sc, mr_params,
+            cx, cy, r_outer_wedge, r_outer, n_peaks, sx, sc, mr_params,
         )
 
         all_vessel_polys: List[Polygon] = []
@@ -1147,11 +1250,6 @@ class DicotRootAnatomy(RootAnatomy):
                         axial_zone, sx["cell_diameter"], sx["cell_width"], "stele",
                         cx, cy, next_id, erosion_polygon=erosion_poly,
                     )
-
-        r_outer = max(
-            np.hypot(x - cx, y - cy)
-            for x, y in secondary_cambium_polygon.exterior.coords
-        ) - cambium_band_depth
 
         ray_annular_zone = xylem_boundary.difference(primary_cambium_polygon)
         # Only exclude medullar areas from the ray zone when they can extend

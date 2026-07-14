@@ -386,7 +386,10 @@ class DicotSecondaryCambiumParams(BaseParams):
 
 class DicotMedularRaysParams(BaseParams):
     name               : str   = "medullar_rays"
-    n_medullar         : int   = Field(default=6,     ge=0,       title="Number of Medullar Rays",  description="Number of medullar rays. When allow_non_vascular is False they are distributed evenly within the vessel zones; when True they are distributed uniformly around the full circle.")
+    n_medullar         : int   = Field(default=6,     ge=0,       title="Number of Medullar Rays",  description="Initial number of medullar rays present from the primary cambium. When allow_non_vascular is False they are distributed evenly within the vessel zones; when True they are distributed uniformly around the full circle. Additional rays that appear further out are set by n_medullar_rate.")
+    n_medullar_rate    : float = Field(default=0.0,   ge=0.0,     title="Medullar Ray Rate",        description="Rate of new medullar rays initiated per mm of radius across the secondary-xylem annulus, so ray density increases toward the periphery (as in real wood). E.g. 50 adds ~10 new rays every 0.2 mm. 0 disables it (fixed n_medullar).")
+    start_radius       : float = Field(default=0.0,   ge=0.0, le=1.0, title="New-Ray Start Radius", description="Fraction of the secondary-xylem annulus (0 = primary cambium, 1 = secondary cambium) at which rate-driven rays begin to appear.")
+    start_radius_sd    : float = Field(default=0.0,   ge=0.0,     title="New-Ray Start Radius SD",  description="Per-ray random jitter on the start radius of rate-driven rays, as a fraction of the annulus span, so new rays appear gradually rather than all at once.")
     base_width         : float = Field(default=0.005, ge=0.00001, title="Base Width",               description="Constant tangential width of each medullar ray.")
     cell_diameter      : float = Field(default=0.025, ge=0.00001, title="Cell Diameter",            description="Radial diameter of medullar ray cells.")
     cell_width         : float = Field(default=0.005, ge=0.00001, title="Cell Width",               description="Tangential width of each lane within the ray (determines number of lanes = base_width / cell_width).")
@@ -867,7 +870,7 @@ class OrganInputData(BaseModel):
         return data
     
     @classmethod
-    def for_woody_root(cls) -> "OrganInputData":
+    def for_woody_dicot(cls) -> "OrganInputData":
         """Return OrganInputData pre-loaded with default dicot root anatomy parameters.
 
         Secondary growth is disabled by default (DicotSecondaryGrowthParams value=False).

@@ -21,7 +21,7 @@ SEED = 0
 
 
 def main(show=True):
-    data = OrganInputData.for_woody_root()
+    data = OrganInputData.for_woody_dicot()
     data.remove_param("phloem")
 
     data.set_value("stele", "thickness", 5 + 0.4 + 0.01)
@@ -34,7 +34,8 @@ def main(show=True):
                     prop_stele = 0.9,
                     n_ring = 4)
     data.set_values("medullar_rays",
-                    n_medullar = 16,
+                    n_medullar = 3,
+                    n_medullar_rate = 16,  
                     allow_non_vascular = False)
 
     # Build once, after all configuration is in place.

@@ -5,7 +5,7 @@ Covers the presets exposed by ``OrganInputData``:
     * monocot root            (``for_root``)
     * dicot root, primary     (``for_dicot_root``)
     * dicot root, secondary   (``for_dicot_secondary``)
-    * dicot root, annual ring (``for_dicot_annual``)
+    * dicot root, woody       (``for_woody_dicot``)
 
 Each case is built, generated, and checked for the tissues that *define* it
 (rather than exact counts, which the golden suite pins).  Run as a script to
@@ -37,15 +37,15 @@ def dicot_secondary() -> RootAnatomy:
     return RootAnatomy(OrganInputData.for_dicot_secondary(), seed=SEED)
 
 
-def dicot_annual() -> RootAnatomy:
-    return RootAnatomy(OrganInputData.for_dicot_annual(), seed=SEED)
+def dicot_woody() -> RootAnatomy:
+    return RootAnatomy(OrganInputData.for_woody_dicot(), seed=SEED)
 
 
 CASES = {
     "monocot":         monocot,
     "dicot_primary":   dicot_primary,
     "dicot_secondary": dicot_secondary,
-    "dicot_annual":    dicot_annual,
+    "dicot_woody":     dicot_woody,
 }
 
 
@@ -98,12 +98,13 @@ def test_dicot_secondary_structure():
         assert c.get(t, 0) > 0, f"dicot_secondary missing {t}"
 
 
-def test_dicot_annual_has_more_vessels_than_secondary():
-    """N annual rings repeat the vessel packing, so annual has more xylem cells."""
+def test_dicot_woody_has_more_vessels_than_secondary():
+    """Woody growth thickens the stele and repeats vessel packing, so it has
+    more xylem cells than the single-ring secondary case."""
     sec = _census(dicot_secondary)
-    ann = _census(dicot_annual)
-    assert ann.get("cambium", 0) > 0, "dicot_annual missing cambium"
-    assert ann.get("xylem", 0) > sec.get("xylem", 0), (
-        f"annual xylem ({ann.get('xylem', 0)}) should exceed "
+    woody = _census(dicot_woody)
+    assert woody.get("cambium", 0) > 0, "dicot_woody missing cambium"
+    assert woody.get("xylem", 0) > sec.get("xylem", 0), (
+        f"woody xylem ({woody.get('xylem', 0)}) should exceed "
         f"secondary xylem ({sec.get('xylem', 0)})"
     )
