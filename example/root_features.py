@@ -8,18 +8,24 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath('..'))
 
 from openalea.granap.root_class import RootAnatomy
+from openalea.granap.input_data import OrganInputData
 
-def test_root_features(show=False):
+SEED = 0
+
+
+def main(show=False):
     t_start = time.time()
-    # Create a root anatomy
-    root = RootAnatomy()
-    root.update_params("cortex", "n_layers", 5)
-    root.update_params("inter_cellular_spaces", "tissue", "cortex")
-    root.update_params("inter_cellular_spaces", "smoothness", 0.05)
-    root.update_params("aerenchyma", "aerenchyma_proportion", 0.1)
-    root.update_params("aerenchyma", "n_files", 20)
-    # root.plot_layers(show=True, title=f"Root Layers")
+    # Configure the input data, then build once.
+    data = OrganInputData.for_root()
+    data.set_value("cortex", "n_layers", 5)
+    # Set the scalar smoothness before narrowing `tissue` so the cross-field
+    # length validator (smoothness vs tissue) stays satisfied at each step.
+    data.set_value("inter_cellular_spaces", "smoothness", 0.05)
+    data.set_value("inter_cellular_spaces", "tissue", ["cortex"])
+    data.set_value("aerenchyma", "aerenchyma_proportion", 0.1)
+    data.set_value("aerenchyma", "n_files", 20)
 
+    root = RootAnatomy(data, seed=SEED)
     root.generate_cells()
     t_end = time.time()
     print("Time to generate cells:", t_end - t_start)
@@ -50,4 +56,4 @@ def test_root_features(show=False):
 
 
 if __name__ == "__main__":
-    test_root_features(show=True)
+    main(show=True)

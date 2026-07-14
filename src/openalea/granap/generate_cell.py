@@ -3,9 +3,7 @@ Cell generator module for creating cells using Voronoi tessellation.
 """
 
 import numpy as np
-import pandas as pd
 import shapely as sp
-import geopandas as gpd
 from scipy.spatial import Voronoi
 from typing import List, Dict, Any, Tuple
 from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
@@ -27,8 +25,8 @@ class CellGenerator:
     """
     
     @staticmethod
-    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float, 
-                      cell_width: float = 0, shift: float = 0) -> np.ndarray:
+    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float,
+                      cell_width: float = 0, shift: float = 0, rng=None) -> np.ndarray:
         """
         Generate cell center positions along a layer polygon.
         
@@ -52,7 +50,8 @@ class CellGenerator:
         # Calculate shift distance: shift of 1.0 = 1 cell width displacement
         # Randomized between 0 and shift * cell_width
         max_shift = shift * cell_width
-        shift_distance = np.random.uniform(0, max_shift) if max_shift > 0 else 0
+        _rng = rng if rng is not None else np.random
+        shift_distance = _rng.uniform(0, max_shift) if max_shift > 0 else 0
         
         cells_coords = GeometryProcessor.resample_coords(
             np.column_stack((x, y)), n_cells, shift_distance=shift_distance
@@ -100,8 +99,8 @@ class CellGenerator:
         return cells_border
     
     @staticmethod
-    def generate_cells_info(layers_polygons: List[Dict[str, Any]], 
-                           center: Point):
+    def generate_cells_info(layers_polygons: List[Dict[str, Any]],
+                           center: Point, rng=None):
         """
         Generate cell information from layer polygons.
         
@@ -116,12 +115,14 @@ class CellGenerator:
         id_cell = 1
         id_group = 1
         
+        _rng = rng if rng is not None else np.random
         for i_layer, layer in enumerate(layers_polygons):
             cells_coords = CellGenerator.cells_on_layer(
                 layer["polygon"],
                 layer["cell_diameter"],
                 layer["cell_width"],
-                layer.get("shift", 0)
+                layer.get("shift", 0),
+                rng=rng,
             )
 
             if layer.get("transfusion_type"):
@@ -141,11 +142,12 @@ class CellGenerator:
                 tp_d = layer["tp_diameter"]
                 p_tt = layer["p_tt"]
                 layer_poly = layer["polygon"]
+                sp.prepare(layer_poly)  # speeds the repeated covers() queries below
 
                 for i, cell_coord in enumerate(cells_coords[1:]):
                     seed_type = (
                         "transfusion tracheid"
-                        if np.random.random() < p_tt
+                        if _rng.random() < p_tt
                         else "transfusion parenchyma"
                     )
                     d = tt_d if seed_type == "transfusion tracheid" else tp_d
@@ -160,8 +162,12 @@ class CellGenerator:
                         (cell_coord[0] - center.x) ** 2
                         + (cell_coord[1] - center.y) ** 2
                     )
-                    for border_point in border_pts[1:]:
-                        if not layer_poly.covers(Point(border_point[0], border_point[1])):
+                    # Vectorised covers(): one C call for the whole ring of border
+                    # points instead of constructing a shapely Point per point.
+                    ring = border_pts[1:]
+                    covered = sp.covers(layer_poly, sp.points(ring[:, 0], ring[:, 1]))
+                    for border_point, is_covered in zip(ring, covered):
+                        if not is_covered:
                             continue
                         new_cell = Cell(
                             type=seed_type,
@@ -193,6 +199,16 @@ class CellGenerator:
                     layer["cell_width"] * 0.7,
                 )
 
+            # The next-inner layer polygon is loop-invariant — fetch and prepare
+            # it once (prepared geometry speeds the per-group contains() queries).
+            next_inner = (
+                layers_polygons[i_layer + 1]["polygon"]
+                if i_layer + 1 < len(layers_polygons)
+                else None
+            )
+            if next_inner is not None:
+                sp.prepare(next_inner)
+
             for i, cell_coord in enumerate(cells_coords[1:]):
                 if layer["name"] == "parenchyma":
                     new_cell = Cell(
@@ -214,7 +230,17 @@ class CellGenerator:
                     id_group += 1
                 else:
                     cell_border_points = layer_cell_borders[i]
-                    for border_point in cell_border_points[1:]:
+                    ring = cell_border_points[1:]
+                    # Discard border points that bleed into the next inner layer —
+                    # they would create seeds inside the wrong tissue zone.  One
+                    # vectorised contains_xy() call replaces a shapely Point per point.
+                    if next_inner is not None and len(ring):
+                        bleeds = sp.contains_xy(next_inner, ring[:, 0], ring[:, 1])
+                    else:
+                        bleeds = np.zeros(len(ring), dtype=bool)
+                    for border_point, bleed in zip(ring, bleeds):
+                        if bleed:
+                            continue
                         new_cell = Cell(
                             type=layer["name"],
                             x=border_point[0],
@@ -299,21 +325,26 @@ class CellGenerator:
         tree = STRtree(polys)
 
         ids_to_remove: set = set()
+        cells = all_cells.cells
         for i, high in enumerate(valid_groups):
             high_poly = polys[i]
+            sp.prepare(high_poly)  # repeated contains() queries below
             # query returns indices whose bounding boxes overlap high_poly
             for j in tree.query(high_poly):
                 if j <= i:          # only lower-priority groups
                     continue
-                low = valid_groups[j]
                 if not high_poly.intersects(polys[j]):
                     continue
-                for idx in low["indices"]:
-                    if idx in ids_to_remove:
-                        continue
-                    cell = all_cells.cells[idx]
-                    if high_poly.contains(Point(cell.x, cell.y)):
-                        ids_to_remove.add(idx)
+                idxs = [idx for idx in valid_groups[j]["indices"]
+                        if idx not in ids_to_remove]
+                if not idxs:
+                    continue
+                # One vectorised contains_xy() for the whole low group instead of
+                # constructing a shapely Point per candidate cell.
+                xs = np.fromiter((cells[idx].x for idx in idxs), float, len(idxs))
+                ys = np.fromiter((cells[idx].y for idx in idxs), float, len(idxs))
+                inside = sp.contains_xy(high_poly, xs, ys)
+                ids_to_remove.update(idx for idx, ins in zip(idxs, inside) if ins)
 
         if ids_to_remove:
             all_cells.cells = [
@@ -324,13 +355,24 @@ class CellGenerator:
         return all_cells
 
     @staticmethod
-    def voronoi_diagram(all_cells: CellManager) -> Voronoi:
-        # get all x and y coordinates
-        for cell in all_cells.cells:
-            cell.jitter()
-        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells.cells])
-        vor = Voronoi(cells_df[["x", "y"]])
-        return vor
+    def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
+        cells = all_cells.cells
+        n = len(cells)
+        if n == 0:
+            return Voronoi(np.empty((0, 2)))
+        _rng = rng if rng is not None else np.random
+        shift = 0.0001
+        xs    = np.fromiter((c.x for c in cells),        float, n)
+        ys    = np.fromiter((c.y for c in cells),        float, n)
+        diams = np.fromiter((c.diameter for c in cells), float, n)
+        draws = _rng.uniform(-shift, shift, size=(n, 2))
+        xs = xs + draws[:, 0] * diams
+        ys = ys + draws[:, 1] * diams
+        angles = np.arctan2(ys, xs)
+        radii  = np.sqrt(xs ** 2 + ys ** 2)
+        for c, x, y, a, r in zip(cells, xs, ys, angles, radii):
+            c.x, c.y, c.angle, c.radius = x, y, a, r
+        return Voronoi(np.column_stack((xs, ys)))
     
     @staticmethod
     def process_voronoi_groups(all_cells: CellManager, 
@@ -355,51 +397,48 @@ class CellGenerator:
                 cell.polygon = None
             else:
                 vertices = vor.vertices[region_vertices_indices]
-                poly = sp.Polygon(vertices)
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                cell.polygon = poly
+                # Voronoi regions are convex by construction, hence always valid,
+                # so the per-polygon is_valid check + buffer(0) repair (~one call
+                # per seed) was a no-op in the normal case — dropped (perf
+                # proposal F1). The -1 / empty-region guard above already handles
+                # unbounded / degenerate regions.
+                cell.polygon = sp.Polygon(vertices)
             
             if cell.type != "outside" and cell.polygon is not None:
                 updated_cells.add_cell(cell)
                 
-        # Group handling is trickier with objects. 
-        # The original code used GeoPandas dissolve to union polygons by group.
-       
-        # return a list of 'biological' cells (one per group).
-        
-        cell_dicts = [c.cell_to_dict() for c in updated_cells.cells]
-        for i, c in enumerate(updated_cells.cells):
-            cell_dicts[i]['geometry'] = c.polygon
-            
-        gdf = gpd.GeoDataFrame(cell_dicts)
-        
-        # Dissolve by id_group
-        grouped_gdf = gdf.dissolve(by="id_group", as_index=False)
-        grouped_gdf["area"] = grouped_gdf.geometry.area
-        
-        # Now create new Cell objects from the grouped results
+        # Union the per-seed Voronoi polygons into one 'biological' cell per
+        # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
+        # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
+        # ~13s of pure overhead (see doc/performance_proposals.md ①). Plain
+        # Python grouping + shapely ``unary_union`` (what dissolve calls
+        # internally) is byte-identical: dissolve's default aggregation is
+        # 'first' per group, so the representative cell is the first-seen one;
+        # groups are emitted in sorted id_group order to match dissolve.
+        groups: Dict[Any, List] = {}
+        rep: Dict[Any, Cell] = {}
+        for c in updated_cells.cells:
+            groups.setdefault(c.id_group, []).append(c.polygon)
+            rep.setdefault(c.id_group, c)  # first-seen == dissolve's 'first'
+
         final_cells = CellManager()
-        for _, row in grouped_gdf.iterrows():
-            # Find a representative original cell to get non-geometric attributes
-            # (or use the aggregated ones, but dissolve aggregates strategy might be needed for some?)
-            # simple 'first' strategy is default for dissolve.
-            
-            new_cell = Cell(
-                type=row['type'],
-                x=row['x'], # Centroid might be better?
-                y=row['y'],
-                diameter=row['cell_diameter'],
-                id_cell=row['id_cell'],
-                id_layer=row['id_layer'],
-                id_group=row['id_group'],
-                angle=row['angle'],
-                radius=row['radius'],
-                area=row['area'],
-                polygon=row['geometry']
-            )
-            final_cells.add_cell(new_cell)
-            
+        for gid in sorted(groups):
+            poly = unary_union(groups[gid])
+            r = rep[gid]
+            final_cells.add_cell(Cell(
+                type=r.type,
+                x=r.x,
+                y=r.y,
+                diameter=r.diameter,
+                id_cell=r.id_cell,
+                id_layer=r.id_layer,
+                id_group=gid,
+                angle=r.angle,
+                radius=r.radius,
+                area=poly.area,
+                polygon=poly,
+            ))
+
         return final_cells
     
     @staticmethod
@@ -464,30 +503,35 @@ class CellGenerator:
         coords_arr = np.array(all_raw_verts)
         kd_tree = cKDTree(coords_arr)
 
-        # Snap tolerance: 1 % of 5th-percentile edge length
-        edge_lengths = []
+        # Snap tolerance: 1 % of 5th-percentile edge length.  Edge lengths are
+        # computed vectorised per cell (one np.hypot over the whole ring) rather
+        # than scalar-by-scalar in a Python loop; the resulting set is identical.
+        edge_chunks = []
         for coords in raw_cell_data.values():
-            n = len(coords)
-            for k in range(n):
-                el = np.hypot(
-                    coords[(k + 1) % n][0] - coords[k][0],
-                    coords[(k + 1) % n][1] - coords[k][1],
-                )
-                if el > 0:
-                    edge_lengths.append(el)
+            pts = np.asarray(coords, dtype=float)
+            diffs = pts - np.roll(pts, -1, axis=0)
+            el = np.hypot(diffs[:, 0], diffs[:, 1])
+            edge_chunks.append(el[el > 0])
+        all_edges = (
+            np.concatenate(edge_chunks) if edge_chunks else np.empty(0)
+        )
         snap_tol = (
-            np.percentile(edge_lengths, 5) * 0.01
-            if edge_lengths
+            np.percentile(all_edges, 5) * 0.01
+            if all_edges.size
             else 1e-4
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate
+        # Cluster nearby vertices → canonical snapped coordinate.  All ball
+        # queries are issued in one parallel C batch; the greedy single-pass
+        # assignment below is byte-identical to querying point-by-point (each
+        # seed's cluster is still exactly the points within snap_tol of it).
+        neighbors = kd_tree.query_ball_point(coords_arr, snap_tol, workers=-1)
         canonical: List = [None] * len(all_raw_verts)
         visited_snap = [False] * len(all_raw_verts)
         for i in range(len(all_raw_verts)):
             if visited_snap[i]:
                 continue
-            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
+            cluster = neighbors[i]
             cx = float(np.mean(coords_arr[cluster, 0]))
             cy = float(np.mean(coords_arr[cluster, 1]))
             snapped = (round(cx, n_dec), round(cy, n_dec))
@@ -548,6 +592,73 @@ class CellGenerator:
                 junction_set.add(vk)
 
         return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
+
+    @staticmethod
+    def remove_nested_cells(grouped_cells: List[Cell], min_overlap: float = 0.1) -> List[Cell]:
+        """Drop cells that sit (almost) entirely inside another cell, keeping the
+        bigger one.
+
+        Voronoi grouping can leave one group's cell overlapping and buried inside a
+        larger neighbour — e.g. a companion seeded right against a sieve, whose few
+        border points give it a Voronoi footprint the bigger cell's union swallows.
+        It then renders as one cell drawn inside another.
+
+        A cell ``i`` is treated as nested when a larger cell ``j`` contains ``i``'s
+        interior point *and* covers at least ``min_overlap`` of ``i``'s area — so
+        ordinary edge-sharing neighbours (whose overlap is ~0) are never touched.
+        The nested cell is removed and merged into the smallest such enclosing cell
+        (a no-op when it is already fully covered), keeping the larger cell intact.
+        """
+        valid = [c for c in grouped_cells
+                 if c.polygon is not None and not c.polygon.is_empty]
+        if len(valid) < 2:
+            return grouped_cells
+
+        polys = [c.polygon for c in valid]
+        areas = [p.area for p in polys]
+        tree  = STRtree(polys)
+
+        # An interior point of a Voronoi-partitioned cell only falls inside another
+        # cell when the two genuinely overlap (nesting), so querying by that point
+        # keeps the (rare) candidate set tiny; the area check then confirms it.
+        parent = [None] * len(valid)
+        for i, poly in enumerate(polys):
+            pt = poly.representative_point()
+            best, best_area = None, None
+            for pos in tree.query(pt):
+                j = int(pos)
+                if j == i or areas[j] <= areas[i]:
+                    continue
+                if polys[j].contains(pt) and \
+                        poly.intersection(polys[j]).area >= min_overlap * areas[i]:
+                    if best is None or areas[j] < best_area:
+                        best, best_area = j, areas[j]
+            parent[i] = best
+
+        if not any(p is not None for p in parent):
+            return grouped_cells
+
+        def _ancestor(i):
+            while parent[i] is not None:
+                i = parent[i]
+            return i
+
+        merge_into: Dict[int, list] = {}
+        removed = set()
+        for i in range(len(valid)):
+            if parent[i] is not None:
+                removed.add(i)
+                merge_into.setdefault(_ancestor(i), []).append(polys[i])
+
+        result = [c for c in grouped_cells if c.polygon is None or c.polygon.is_empty]
+        for i, c in enumerate(valid):
+            if i in removed:
+                continue
+            if i in merge_into:
+                c.polygon = unary_union([c.polygon, *merge_into[i]])
+                c.area = c.polygon.area
+            result.append(c)
+        return result
 
     @staticmethod
     def simplify_cells(grouped_cells: List[Cell]) -> List[Cell]:

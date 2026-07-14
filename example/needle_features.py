@@ -6,14 +6,16 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath('..'))
 
 from openalea.granap.needle_class import NeedleAnatomy
+from openalea.granap.input_data import OrganInputData
 from openalea.granap.visualization import plot_layers_simple, plot_section
 
-def test_needle(show=False):
-# Create a needle anatomy
-    needle = NeedleAnatomy()
+def main(show=False):
+    # Configure the input data, then build once.
+    data = OrganInputData.for_needle()
+    data.set_value("resin_duct", "n_files", 2)
+    data.set_value("stomata", "n_files", 10)
+    needle = NeedleAnatomy(data)
 
-    needle.update_params("resin_duct", "n_files", 2)
-    needle.update_params("stomata", "n_files", 10)
     needle.plot_layers(show=show, title=f"Needle Layers")
 
     needle.plot_cells(show=show, title=f"Needle Cells")
@@ -22,4 +24,4 @@ def test_needle(show=False):
     needle.plot_network(show=show, title="Needle Network")
 
 if __name__ == "__main__":
-    test_needle(show=True)
+    main(show=True)

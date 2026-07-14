@@ -23,15 +23,41 @@ class Cell:
         self.polygon = polygon if polygon != None else None
         self.axis = axis if axis != None else None
 
+    @classmethod
+    def radial(cls, type: str, x: float, y: float, diameter: float,
+               id_group: int, center, *, id_cell: int = None, id_layer: int = -1) -> "Cell":
+        """Build a seed cell whose ``angle``/``radius`` are measured from ``center``.
+
+        This is the ubiquitous seeding idiom — a cell placed at ``(x, y)`` with its
+        polar attributes relative to a tissue centre ``center`` (a shapely
+        ``Point`` or an ``(cx, cy)`` tuple).  ``area`` defaults to a disc of
+        ``diameter`` (as everywhere it is used); ``id_cell`` defaults to
+        ``id_group`` (one seed per Voronoi group) unless an explicit running id is
+        given.
+        """
+        cx, cy = (center.x, center.y) if hasattr(center, "x") else center
+        return cls(
+            type=type, x=x, y=y, diameter=diameter,
+            id_cell=id_group if id_cell is None else id_cell,
+            id_layer=id_layer, id_group=id_group,
+            angle=np.arctan2(y - cy, x - cx),
+            radius=np.sqrt((x - cx) ** 2 + (y - cy) ** 2),
+        )
+
     @property
     def point(self):
         return Point(self.x, self.y)
 
-    def jitter(self, shift: float = 0.0001):
-        """Jitter the cell position."""
+    def jitter(self, shift: float = 0.0001, rng=None):
+        """Jitter the cell position.
+
+        Uses ``rng`` (the organ's seeded generator) when supplied so the
+        perturbation is reproducible; falls back to the global ``np.random``.
+        """
         if shift != 0:
-            self.x += np.random.uniform(-shift, shift)*self.diameter
-            self.y += np.random.uniform(-shift, shift)*self.diameter
+            _rng = rng if rng is not None else np.random
+            self.x += _rng.uniform(-shift, shift)*self.diameter
+            self.y += _rng.uniform(-shift, shift)*self.diameter
             self.angle = np.arctan2(self.y, self.x)
             self.radius = np.sqrt(self.x**2 + self.y**2)
 

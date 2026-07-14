@@ -15,13 +15,16 @@ scenarios = [
 ]
 
 
-def test_pack_circles_directions(show=False):
+SEED = 0
+
+
+def main(show=False):
     fig, axs = plt.subplots(1, len(scenarios), figsize=(5 * len(scenarios), 5))
 
     for ax, s in zip(axs, scenarios):
         data = OrganInputData.for_dicot_root()
         data.set_value("xylem", "direction", s["direction"])
-        root = RootAnatomy(data)
+        root = RootAnatomy(data, seed=SEED)
         root.generate_cells()
 
         types = {c.type for c in root.all_cells.cells}
@@ -41,4 +44,4 @@ def test_pack_circles_directions(show=False):
 
 
 if __name__ == "__main__":
-    test_pack_circles_directions(show=True)
+    main(show=True)

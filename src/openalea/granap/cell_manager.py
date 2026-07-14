@@ -1,10 +1,11 @@
-
+import copy
 from typing import List, Optional
 from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon, Point, MultiPoint
 from scipy.spatial import Delaunay
 from shapely.affinity import translate
 import numpy as np
+import shapely
 
 class CellManager:
     def __init__(self):
@@ -26,17 +27,19 @@ class CellManager:
         return [cell for cell in self.cells if cell.id_cell in ids]
 
     def extend_cells(self, cells: List[Cell]):
+        if not self.cells:
+            self.cells.extend(copy.copy(c) for c in cells)
+            return
 
-        max_id_layer = max([c.id_layer for c in self.cells])
-        max_id_cell = max([c.id_cell for c in self.cells])
-        max_id_group = max([c.id_group for c in self.cells])
+        max_id_cell  = max(c.id_cell  for c in self.cells)
+        max_id_group = max(c.id_group for c in self.cells)
 
-        # add a list of cells to the current list
         for cell in cells:
-            cell.id_layer = max_id_layer + cell.id_layer +1
-            cell.id_cell = max_id_cell + cell.id_cell+1 
-            cell.id_group = max_id_group + cell.id_group+1
-            self.cells.append(cell)
+            new_cell = copy.copy(cell)
+            # id_layer is an absolute layer index — preserve it as-is
+            new_cell.id_cell  = max_id_cell  + cell.id_cell  + 1
+            new_cell.id_group = max_id_group + cell.id_group + 1
+            self.cells.append(new_cell)
 
     def get_cells_by_type(self, type: str):
         return [cell for cell in self.cells if cell.type == type]
@@ -60,31 +63,38 @@ class CellManager:
 
     def get_centroid_of_group(self, id_group: int):
         group_cells = self.get_cells_by_group(id_group)
-        cx = np.mean([cell.x for cell in group_cells])
-        cy = np.mean([cell.y for cell in group_cells])
-        return cx, cy
+        if not group_cells:
+            raise KeyError(f"No cells found for id_group={id_group}")
+        return np.mean([c.x for c in group_cells]), np.mean([c.y for c in group_cells])
 
     def get_polygons(self):
         return [cell.polygon for cell in self.cells if cell.polygon is not None]
     
     def remove_cells_by_polygon(self, polygon: Polygon):
+        """Drop every cell that intersects ``polygon``.
+
+        A cell's footprint is its Voronoi polygon if it has one, else its seed
+        point.  Both predicates are evaluated in bulk (vectorised shapely) rather
+        than one shapely call per cell — same result, far fewer Python-level
+        shapely dispatches.
+        """
         if not self.cells:
             return
 
-        # Check the first cell to decide strategy, assuming homogeneity
-        # Or better, handle both cases robustly
-        
-        cells_to_keep = []
-        for cell in self.cells:
-            if cell.polygon is not None:
-                if not cell.polygon.intersects(polygon):
-                    cells_to_keep.append(cell)
-            else:
-                point = Point(cell.x, cell.y)
-                if not point.intersects(polygon):
-                    cells_to_keep.append(cell)
-        
-        self.cells = cells_to_keep
+        remove = np.zeros(len(self.cells), dtype=bool)
+
+        poly_idx  = [i for i, c in enumerate(self.cells) if c.polygon is not None]
+        point_idx = [i for i, c in enumerate(self.cells) if c.polygon is None]
+
+        if poly_idx:
+            polys = np.array([self.cells[i].polygon for i in poly_idx], dtype=object)
+            remove[poly_idx] = shapely.intersects(polys, polygon)
+        if point_idx:
+            xs = np.array([self.cells[i].x for i in point_idx], dtype=float)
+            ys = np.array([self.cells[i].y for i in point_idx], dtype=float)
+            remove[point_idx] = shapely.intersects_xy(polygon, xs, ys)
+
+        self.cells = [c for c, drop in zip(self.cells, remove) if not drop]
     
     def recalculate_cell_properties(self):
         """Recalculate the properties of all cells in the list."""
@@ -100,16 +110,28 @@ class CellManager:
             cell.id_cell = i
 
     def remove_cells_in_polygon(self, polygon: Polygon):
-        # Filter cells that do not intersect the polygon
-        # This creates a new list, avoiding modification during iteration
-        self.cells = [cell for cell in self.cells if not cell.point.intersects(polygon)]
+        """Drop every cell whose seed point intersects ``polygon`` (bulk predicate)."""
+        if not self.cells:
+            return
+        xs = np.fromiter((c.x for c in self.cells), dtype=float, count=len(self.cells))
+        ys = np.fromiter((c.y for c in self.cells), dtype=float, count=len(self.cells))
+        remove = shapely.intersects_xy(polygon, xs, ys)
+        self.cells = [c for c, drop in zip(self.cells, remove) if not drop]
 
     def remove_cells_by_ids(self, ids: []):
         # filter cells
         self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
     
     def get_last_id_group(self):
-        return max([cell.id_group for cell in self.cells])
+        return max((c.id_group for c in self.cells), default=0)
+
+    def next_group_id(self):
+        """Next free ``id_group`` for appending a new cell group.
+
+        ``get_last_id_group() + 1`` when there are cells, else 0 — the idiom
+        used everywhere vascular tissue is seeded group by group.
+        """
+        return self.get_last_id_group() + 1 if self.cells else 0
 
     def recenter_cells(self):
         # re position cells to the center of the global cell population

@@ -5,21 +5,28 @@ Plant anatomy base module providing abstract interface.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union
 import geopandas as gpd
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 from collections import defaultdict
 from scipy.sparse import lil_matrix
+import copy
+import heapq
 import time
-from openalea.granap.layer_class import Layer
+from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.layer_manager import LayerManager
+
+log = logging.getLogger(__name__)
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.input_data import OrganInputData
+from openalea.granap.tissue_class import TissueRecipe, retag_tissue
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -29,20 +36,27 @@ class Organ(AbstractNetwork, ABC):
     cross-sectional anatomy of different plant types.
     Inherits from AbstractNetwork for hydraulic network construction.
     """
-    
-    def __init__(self, randomness: float = 1.0):
+
+    #: Smoothing applied when peeling each concentric layer ring in
+    #: :meth:`_build_layer_polygons`. Subclasses override per organ shape
+    #: (e.g. roots use 0.0 to keep ring thickness exact; needles round corners).
+    LAYER_SMOOTH_FACTOR: float = 0.5
+
+    def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
-        
+
         Args:
             randomness: Degree of randomness in cell placement (0-3)
+            seed:       Optional integer seed for reproducible cell placement.
         """
         AbstractNetwork.__init__(self)
+        self.rng = np.random.default_rng(seed)
         self.layer_manager = LayerManager()
         self.randomness = randomness
         self.params: List[Dict[str, Any]] = []
         self._base_polygon: Optional[Polygon] = None
-        self._layers_polygons: List[Dict[str, Any]] = []
+        self._layers_polygons: List[LayerPolygon] = []
         self._cells_gdf: Optional[gpd.GeoDataFrame] = None
         self.all_cells = CellManager()
 
@@ -90,35 +104,7 @@ class Organ(AbstractNetwork, ABC):
         """
         self.layer_manager.add_layer(layer, position)
         self._invalidate_geometry()
-    
-    def update_params(self, param_name: str, attribute: str, value: Any) -> None:
-        """
-        Update a parameter of the organ.
-    
-        self.params = [{"name": "param_name_1", "attribute_1": 0.0, "attribute_2": 0.0, ...},
-                       {"name": "param_name_2", "attribute_1": 0.0, "attribute_2": 0.0, ...},
-                       ...]
-    
-        Args:
-            param_name: Name of the parameter to update
-            attribute: Name of the attribute to update
-            value: New value of the parameter
-        """
-        for p in self.params:
-            if p["name"] == param_name:
-                p[attribute] = value
-                # Sync the corresponding Layer object in layer_manager if one exists
-                layer = self.layer_manager.get_layer(param_name)
-                if layer is not None:
-                    if hasattr(layer, attribute):
-                        setattr(layer, attribute, value)
-                    else:
-                        layer.additional_params[attribute] = value
-                self._invalidate_geometry()
-                return
-        raise ValueError(f"Parameter '{param_name}' not found in params.")
 
-    
     def remove_layer(self, name: str) -> Layer:
         """
         Remove a tissue layer by name.
@@ -158,7 +144,7 @@ class Organ(AbstractNetwork, ABC):
             self._base_polygon = self._create_base_shape()
         return self._base_polygon
     
-    def generate_layer_polygons(self) -> List[Dict[str, Any]]:
+    def generate_layer_polygons(self) -> List[LayerPolygon]:
         """
         Generate polygons for all layers.
         
@@ -169,7 +155,7 @@ class Organ(AbstractNetwork, ABC):
             self._layers_polygons = self._build_layer_polygons()
         return self._layers_polygons
     
-    def _build_layer_polygons(self) -> List[Dict[str, Any]]:
+    def _build_layer_polygons(self) -> List[LayerPolygon]:
         """Build layer polygons from current layer configuration."""
         layers_polygons = []
         layer_array = self.layer_manager.expand_layers()
@@ -183,31 +169,33 @@ class Organ(AbstractNetwork, ABC):
                 polygon = GeometryProcessor.buffer_polygon(
                     polygon, space_increment, smooth_factor=0.01
                 )
-                layers_polygons.append({
-                    "name": "outside",
-                    "polygon": polygon,
-                    "cell_diameter": layer["cell_diameter"] / 3,
-                    "id_layer": i_layer,
-                    "cell_width": 0
-                })
-            
-            # Add the layer polygon
+                layers_polygons.append(LayerPolygon(
+                    name="outside",
+                    polygon=polygon,
+                    cell_diameter=layer["cell_diameter"] / 3,
+                    id_layer=i_layer,
+                ))
+
+            # Add the layer polygon.  Keep smoothing light: smoothing_polygon
+            # corner-cuts slightly *past* the requested buffer distance, so a high
+            # factor applied once per peeled ring accumulates and shrinks the
+            # innermost region (the stele) well below its nominal thickness.
             polygon = GeometryProcessor.buffer_polygon(
-                polygon, 
-                -space_increment - layer["cell_diameter"]/2,
-                smooth_factor=0.5
+                polygon,
+                -space_increment - layer["cell_diameter"] / 2,
+                smooth_factor=self.LAYER_SMOOTH_FACTOR,
             )
-            
+
             space_increment = layer["cell_diameter"] / 2
-            
-            layers_polygons.append({
-                "name": layer["name"],
-                "polygon": polygon,
-                "cell_diameter": layer["cell_diameter"],
-                "id_layer": i_layer + 1,
-                "cell_width": layer["cell_width"],
-                "shift": layer["shift"]
-            })
+
+            layers_polygons.append(LayerPolygon(
+                name=layer["name"],
+                polygon=polygon,
+                cell_diameter=layer["cell_diameter"],
+                id_layer=i_layer + 1,
+                cell_width=layer["cell_width"],
+                shift=layer["shift"],
+            ))
         
         # Add central layers (vascular, parenchyma, etc.)
         params = [l.to_dict() for l in self.layer_manager.get_layers()]
@@ -227,83 +215,95 @@ class Organ(AbstractNetwork, ABC):
             GeoDataFrame with cell geometries
         """
         if self._cells_gdf is None:
-            t_start = time.time()   
+            t_start = time.time()
             layers_polygons = self.generate_layer_polygons()
-            t_end = time.time()
-            print("Time to generate layer polygons:", t_end - t_start)
+            log.info("Layer polygons:          %.3fs", time.time() - t_start)
             center = layers_polygons[0]["polygon"].centroid
 
             t_start = time.time()
-            # Clear existing cells in layers
             for layer in self.layer_manager.get_layers():
                 layer.cells = []
-            
-            self.all_cells = CellGenerator.generate_cells_info(
-                layers_polygons, center
-            )
-            t_end = time.time()
-            print("Time to generate cells info:", t_end - t_start)
+            self.all_cells = CellGenerator.generate_cells_info(layers_polygons, center, rng=self.rng)
+            log.info("Cell seeds:              %.3fs", time.time() - t_start)
 
             t_start = time.time()
-            # add vascular tissue
+            self.vascular_cells = CellManager()
+            self.vascular_polygons = []
+            self.vascular_tissue_polygons: Dict[str, list] = {}
             self.allocate_vascular_tissue(layers_polygons)
 
-            # add organ specific tissues
+            # Vascular elements take priority: remove every layer seed that falls
+            # inside any vascular zone (xylem vessels + phloem + any other named
+            # tissue tracked in vascular_tissue_polygons).
+            all_vascular_polys = list(self.vascular_polygons)
+            for poly_list in self.vascular_tissue_polygons.values():
+                all_vascular_polys.extend(poly_list)
+            if all_vascular_polys:
+                vascular_mask = unary_union(all_vascular_polys)
+                self.all_cells.remove_cells_in_polygon(vascular_mask)
+
+            if self.vascular_cells.cells:
+                self.all_cells.extend_cells(self.vascular_cells.cells)
             self._organ_specific_tissues()
-            t_end = time.time()
-            print("Time to add vascular and organ specific tissues:", t_end - t_start)
+            log.info("Vascular + organ tissues: %.3fs", time.time() - t_start)
 
             t_start = time.time()
-            vor = CellGenerator.voronoi_diagram(self.all_cells)
-            t_end = time.time()
-            print("Time to generate voronoi diagram:", t_end - t_start)
+            vor = CellGenerator.voronoi_diagram(self.all_cells, rng=self.rng)
+            log.info("Voronoi diagram:         %.3fs", time.time() - t_start)
 
             t_start = time.time()
             grouped_cells = CellGenerator.process_voronoi_groups(self.all_cells, vor).cells
             grouped_cells = CellGenerator.simplify_cells(grouped_cells)
-            # repopulate all_cells with the grouped cells
+            # simplify_cells rebuilds each polygon independently, which can distort
+            # small cells (few vertices) into a neighbour and leave them rendered
+            # one-inside-another; drop those, keeping the larger cell.
+            grouped_cells = CellGenerator.remove_nested_cells(grouped_cells)
             self.all_cells = CellManager()
             self.all_cells.cells = grouped_cells
-            t_end = time.time()
-            print("Time to process voronoi groups and simplify cells:", t_end - t_start)
+            log.info("Voronoi grouping:        %.3fs", time.time() - t_start)
 
             t_start = time.time()
             self.add_intercellular_spaces()
-            t_end = time.time()
-            print("Time to add intercellular spaces:", t_end - t_start)
-            
+            log.info("Intercellular spaces:    %.3fs", time.time() - t_start)
+
             t_start = time.time()
             for cell in self.all_cells.cells:
-                # Find the layer name from layers_polygons using id_layer
-                # id_layer is 0-indexed index of layers_polygons list
                 if 0 <= cell.id_layer < len(layers_polygons):
                     layer_name = layers_polygons[cell.id_layer]["name"]
                     if layer_name != "outside":
                         layer = self.get_layer(layer_name)
                         if layer:
                             layer.cells.append(cell)
-            t_end = time.time()
-            print("Time to populate layers with cells:", t_end - t_start)
+            log.info("Layer population:        %.3fs", time.time() - t_start)
 
             t_start = time.time()
             self.all_cells.recalculate_cell_properties()
-            t_end = time.time()
-            print("Time to recalculate cell properties:", t_end - t_start)
-            
+            log.info("Cell properties:         %.3fs", time.time() - t_start)
+
             t_start = time.time()
-            # Convert to GeoDataFrame
             cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
             for i, c in enumerate(self.all_cells.cells):
                 cell_dicts[i]['geometry'] = c.polygon
-                
             self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
-            t_end = time.time()
-            print("Time to convert to GeoDataFrame:", t_end - t_start)
+            log.info("GeoDataFrame export:     %.3fs", time.time() - t_start)
         
         return self._cells_gdf
-    
+
+    def retag_cells(self, old_tag: str, new_tag: str) -> int:
+        """Rename every cell tagged ``old_tag`` to ``new_tag``.
+
+        Retags the live cells in ``all_cells`` and, when the cells have
+        already been materialised, the cached ``_cells_gdf`` too — so plots
+        and exports reflect the new tag without a full regeneration.
+        Returns the number of cells retagged.
+        """
+        n = retag_tissue(self.all_cells, old_tag, new_tag)
+        if self._cells_gdf is not None and "type" in self._cells_gdf.columns:
+            self._cells_gdf.loc[self._cells_gdf["type"] == old_tag, "type"] = new_tag
+        return n
+
     @abstractmethod
-    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
         Optionally reshape layer polygons after they have been built.
 
@@ -313,15 +313,14 @@ class Organ(AbstractNetwork, ABC):
         ellipse so that the central cylinder has a different cross-section.
 
         Args:
-            layers_polygons: List of layer polygon dictionaries as produced
-                by ``_build_layer_polygons``.
+            layers_polygons: Layer polygons as produced by ``_build_layer_polygons``.
 
         Returns:
-            The (potentially modified) list of layer polygon dictionaries.
+            The (potentially modified) list of LayerPolygon objects.
         """
         return layers_polygons
 
-    def allocate_vascular_tissue(self, layers_polygons: List[Dict[str, Any]]):
+    def allocate_vascular_tissue(self, layers_polygons: List[LayerPolygon]):
         """
         Allocate vascular tissue.
         Define the region where vascular tissue will be allocated.
@@ -335,7 +334,7 @@ class Organ(AbstractNetwork, ABC):
         self._create_vascular_tissue(polygon_for_vascular)
 
     @abstractmethod
-    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+    def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         """
         Find the layer where vascular tissue will be allocated.
         
@@ -344,24 +343,40 @@ class Organ(AbstractNetwork, ABC):
         """
         pass
 
-    @abstractmethod
     def _create_vascular_tissue(self, polygon: Polygon):
-        """
-        Create vascular tissue.
-        
-        Args:
-            polygon: Polygon boundary
-        """
-        pass
+        """Create vascular tissue by building this organ's vascular recipe.
 
-    @abstractmethod
+        Shared scaffold for every organ: each subclass supplies only
+        :meth:`_vascular_recipe`; the remove-mask + extend step runs once in
+        :meth:`generate_cells` after this returns.
+        """
+        self._vascular_recipe(polygon).build()
+
+    def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
+        """Return the ordered recipe that builds this organ's vascular tissue.
+
+        Default: an empty recipe (no vascular tissue).  Monocot / dicot / needle
+        override this; the build order is data, inspectable via
+        ``recipe.describe()`` / ``recipe.plan()``.
+        """
+        return TissueRecipe()
+
     def _organ_specific_tissues(self):
+        """Add organ-specific tissues by building this organ's organ recipe."""
+        self._organ_recipe().build()
+
+    def _organ_recipe(self) -> TissueRecipe:
+        """Return the recipe of organ-specific (post-fill) tissues.
+
+        Default: empty (root organs have none).  Needle overrides it with resin
+        ducts + stomata.
         """
-        Add organ specific tissues.
-        
-        Returns:
-        """
-        pass
+        return TissueRecipe()
+
+    def _extra_tissue_polygons(self, layers_polygons: List[LayerPolygon]) -> Dict[str, list]:
+        """Return extra tissue polygons for visualization without placing cells.
+        Subclasses override to expose organ-specific structures (e.g. stomata, resin ducts)."""
+        return {}
 
     def _get_param(self, name: str) -> dict:
         """Return the params dict whose 'name' key matches, or an empty dict."""
@@ -370,8 +385,89 @@ class Organ(AbstractNetwork, ABC):
     def add_intercellular_spaces(self):
         """Orchestrate intercellular space and aerenchyma generation."""
         self.add_intercellular()
-        self.add_aerenchyma()
-        self.merge_intercellular_aerenchyma()
+        self._add_aerenchyma_to_proportion()
+
+    def _measure_air_proportion(self, tissues: List[str]) -> float:
+        """Air-space fraction of the tissue band, ``air / (air + tissue)``,
+        measured from the current cell polygons. This is the quantity the
+        aerenchyma request refers to."""
+        tissue_area = sum(
+            c.polygon.area
+            for t in tissues
+            for c in self.all_cells.get_cells_by_type(t)
+            if c.polygon is not None
+        )
+        air_area = sum(
+            c.polygon.area
+            for c in self.all_cells.get_cells_by_type("air space")
+            if c.polygon is not None
+        )
+        denom = tissue_area + air_area
+        return air_area / denom if denom > 0 else 0.0
+
+    def _add_aerenchyma_to_proportion(self, tol: float = 5e-3, max_iter: int = 20):
+        """Place aerenchyma so the realized air proportion matches the request.
+
+        The fuse-and-smooth step in :meth:`merge_intercellular_aerenchyma` grows
+        the air lacunae, so simply filling to the requested area overshoots
+        the final proportion. Because that overshoot depends on the emergent
+        geometry it cannot be predicted cleanly, so we calibrate: fill + fuse +
+        smooth for a trial target, measure the *realized* proportion, and bisect
+        the internal target until it lands on the requested value. Each attempt
+        restores the clean pre-aerenchyma tessellation, and the sector angle is
+        fixed once, so the attempts differ only in how much air is placed and the
+        realized proportion is monotone in the internal target.
+        """
+        requested = self.aerenchyma_params.get("aerenchyma_proportion", 0)
+        if not requested:
+            # No aerenchyma requested — still fuse/simplify the intercellular air.
+            self.merge_intercellular_aerenchyma()
+            return
+
+        tissue = self.aerenchyma_params.get("tissue")
+        tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
+
+        # Clean, non-overlapping tessellation to restore before every attempt,
+        # and a fixed sector angle so attempts are comparable.
+        snapshot = copy.deepcopy(self.all_cells.cells)
+        self._aerenchyma_start_angle = float(self.rng.uniform(0, 2 * np.pi))
+
+        def attempt(internal_target: float) -> float:
+            self.all_cells.cells = copy.deepcopy(snapshot)
+            self.add_aerenchyma(prop_override=internal_target)
+            self.merge_intercellular_aerenchyma()
+            return self._measure_air_proportion(tissues)
+
+        best_target, best_realized = requested, attempt(requested)
+        best_err = abs(best_realized - requested)
+
+        # Bracket the requested proportion. The realized value at the requested
+        # target is normally already above it (bubble inflation), so search
+        # downward; guard the rare undershoot by expanding the upper bound.
+        lo, hi = 0.0, requested
+        if best_realized < requested:
+            lo, hi = requested, 1.0
+
+        for _ in range(max_iter):
+            if best_err <= tol or (hi - lo) < 1e-4:
+                break
+            mid = 0.5 * (lo + hi)
+            realized = attempt(mid)
+            err = abs(realized - requested)
+            if err < best_err:
+                best_target, best_realized, best_err = mid, realized, err
+            if realized > requested:
+                hi = mid
+            else:
+                lo = mid
+
+        # Rebuild the cells in the best-calibrated state (the last attempt was
+        # not necessarily the best one).
+        best_realized = attempt(best_target)
+        log.debug(
+            "Calibrated aerenchyma: requested %.3f -> realized %.3f (internal target %.3f)",
+            requested, best_realized, best_target,
+        )
 
     def add_intercellular(self):
         """Compute air spaces for each inter_cellular_spaces entry."""
@@ -477,18 +573,93 @@ class Organ(AbstractNetwork, ABC):
         """Denominator for the per-quadrant aerenchyma target area. Override in subclasses."""
         return float(n_files)
 
-    def add_aerenchyma(self):
-        """Generate aerenchyma in the tissue defined in aerenchyma_params."""
-        aerenchyma_prop = self.aerenchyma_params.get("aerenchyma_proportion", 0)
+    @staticmethod
+    def _connected_radial_order(cells: list, central_angle: float) -> list:
+        """Order ``cells`` so that every prefix is a connected region, growing
+        outward from the cell nearest ``central_angle``.
+
+        Used to fill an aerenchyma file as one connected radial channel. Cells
+        are treated as adjacent when their polygons touch (across tissue types),
+        so growth bridges tissue boundaries; expansion is prioritised by angular
+        distance to ``central_angle`` to keep the channel centred. When a
+        connected component is exhausted before all cells are placed, growth
+        restarts from the next-nearest unused cell (a fresh component).
+        """
+        n = len(cells)
+        if n <= 1:
+            return list(cells)
+
+        def ang_dist(cell):
+            a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
+            d = abs(a - central_angle)
+            return min(d, 2 * np.pi - d)
+
+        polys = [c.polygon for c in cells]
+        tree = STRtree(polys)
+        neighbors: list = [[] for _ in range(n)]
+        for i, poly_i in enumerate(polys):
+            if poly_i is None:
+                continue
+            for j in tree.query(poly_i):
+                if j != i and polys[j] is not None and poly_i.intersects(polys[j]):
+                    neighbors[i].append(j)
+
+        priorities = [ang_dist(c) for c in cells]
+        seeds = sorted(range(n), key=lambda i: priorities[i])
+        visited = [False] * n
+        heap: list = []
+        counter = 0
+        order: list = []
+        seed_ptr = 0
+
+        def _push(i):
+            nonlocal counter
+            heapq.heappush(heap, (priorities[i], counter, i))
+            counter += 1
+
+        while len(order) < n:
+            if not heap:
+                while seed_ptr < n and visited[seeds[seed_ptr]]:
+                    seed_ptr += 1
+                if seed_ptr >= n:
+                    break
+                _push(seeds[seed_ptr])
+            _, _, i = heapq.heappop(heap)
+            if visited[i]:
+                continue
+            visited[i] = True
+            order.append(cells[i])
+            for j in neighbors[i]:
+                if not visited[j]:
+                    _push(j)
+
+        return order
+
+    def add_aerenchyma(self, prop_override: Optional[float] = None):
+        """Generate aerenchyma in the tissue defined in aerenchyma_params.
+
+        ``prop_override`` replaces the requested ``aerenchyma_proportion`` with an
+        internal working target; :meth:`_add_aerenchyma_to_proportion` uses it to
+        calibrate the fill so the *realized* proportion (measured after the fuse
+        and smoothing) matches what the user asked for. The sector start angle is
+        drawn once and then reused, so repeated calibration attempts share the
+        same geometry and only differ in how much air is placed.
+        """
+        aerenchyma_prop = (
+            prop_override if prop_override is not None
+            else self.aerenchyma_params.get("aerenchyma_proportion", 0)
+        )
         if not aerenchyma_prop:
             return
 
         tissue = self.aerenchyma_params.get("tissue")
+        tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
         n_files = int(self.aerenchyma_params.get("n_files", 1))
         aerenchyma_type = int(self.aerenchyma_params.get("aerenchyma_type", 1))
 
         self._aerenchyma_n_files = n_files
-        self._aerenchyma_start_angle = np.random.uniform(0, 2 * np.pi)
+        if getattr(self, "_aerenchyma_start_angle", None) is None:
+            self._aerenchyma_start_angle = float(self.rng.uniform(0, 2 * np.pi))
         start_angle = self._aerenchyma_start_angle
 
         def cell_quadrant(cell):
@@ -500,10 +671,13 @@ class Organ(AbstractNetwork, ABC):
             print("Aerenchyma proportion is greater than 1, setting it to 1")
             aerenchyma_prop = 1
 
-        tissue_cells = self.all_cells.get_cells_by_type(tissue)
+        tissue_cells = [c for t in tissues for c in self.all_cells.get_cells_by_type(t)]
         if not tissue_cells:
             return
 
+        # id_layer grows radially inward, so the single global max is the
+        # innermost ring of the combined region: listed tissues act as one
+        # contiguous band and only that inner boundary ring is preserved.
         max_tissue_layer = max(c.id_layer for c in tissue_cells)
         candidates = [c for c in tissue_cells if c.id_layer < max_tissue_layer]
         candidates.extend(self.all_cells.get_cells_by_type("air space"))
@@ -518,11 +692,14 @@ class Organ(AbstractNetwork, ABC):
         target_aerenchyma_area = (total_tissue_area + total_air_area) * aerenchyma_prop
 
         if target_aerenchyma_area > max_possible_area:
-            print(f"Warning: asked proportion ({aerenchyma_prop:.2f}) requires {target_aerenchyma_area:.2f} area, which is greater than available cells ({max_possible_area:.2f}). Lowering aerenchyma_proportion.")
+            log.warning(
+                "Requested aerenchyma proportion %.2f requires %.4f area but only %.4f is available; clamping.",
+                aerenchyma_prop, target_aerenchyma_area, max_possible_area,
+            )
             aerenchyma_prop = max_possible_area / (total_tissue_area + total_air_area)
             target_aerenchyma_area = max_possible_area
 
-        print(f"Targeted aerenchyma prop: {(target_aerenchyma_area / (total_tissue_area + total_air_area)):.3f}")
+        log.debug("Targeted aerenchyma proportion: %.3f", target_aerenchyma_area / (total_tissue_area + total_air_area))
 
         target_per_quadrant = (target_aerenchyma_area - total_air_area) / self._aerenchyma_target_denominator(n_files)
 
@@ -531,13 +708,10 @@ class Organ(AbstractNetwork, ABC):
             quadrant_buckets[cell_quadrant(c)].append(c)
 
         if aerenchyma_type == 1:
+            # Order each file as a *connected* radial channel rather than by raw angular distance. 
             for q, bucket in enumerate(quadrant_buckets):
                 central_angle = (start_angle + (q + 0.5) * 2 * np.pi / n_files) % (2 * np.pi)
-                def _ang_dist(cell, ca=central_angle):
-                    a = np.arctan2(cell.y, cell.x) % (2 * np.pi)
-                    d = abs(a - ca)
-                    return min(d, 2 * np.pi - d)
-                bucket.sort(key=_ang_dist)
+                quadrant_buckets[q] = self._connected_radial_order(bucket, central_angle)
         elif aerenchyma_type == 2:
             for q, bucket in enumerate(quadrant_buckets):
                 if not bucket:
@@ -569,10 +743,14 @@ class Organ(AbstractNetwork, ABC):
                         changed = True
                         break
 
-        tissue = self.aerenchyma_params.get("tissue")
-        total_tissue_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type(tissue) if c.polygon is not None)
+        total_tissue_area = sum(
+            c.polygon.area
+            for t in tissues
+            for c in self.all_cells.get_cells_by_type(t)
+            if c.polygon is not None
+        )
         total_air_area = sum(c.polygon.area for c in self.all_cells.get_cells_by_type("air space") if c.polygon is not None)
-        print(f"Actual aerenchyma prop: {(total_air_area / (total_tissue_area + total_air_area)):.3f}")
+        log.debug("Actual aerenchyma proportion: %.3f", total_air_area / (total_tissue_area + total_air_area))
 
     def merge_intercellular_aerenchyma(self):
         """Fuse touching air-space cells within the same angular sector, then carve tissue cells."""
@@ -610,11 +788,16 @@ class Organ(AbstractNetwork, ABC):
                 if ri != rj:
                     parent[ri] = rj
 
+            # Only test pairs whose bounding boxes overlap (an STRtree query);
+            pool_polys = [c.polygon for c in merge_pool]
+            tree = STRtree(pool_polys)
             for i in range(n_pool):
-                for j in range(i + 1, n_pool):
-                    if cell_quadrants[i] != cell_quadrants[j]:
+                poly_i = pool_polys[i]
+                quad_i = cell_quadrants[i]
+                for j in tree.query(poly_i):
+                    if j <= i or cell_quadrants[j] != quad_i:
                         continue
-                    if merge_pool[i].polygon.touches(merge_pool[j].polygon) or merge_pool[i].polygon.intersects(merge_pool[j].polygon):
+                    if poly_i.intersects(pool_polys[j]):
                         _union(i, j)
 
             groups: dict = defaultdict(list)
@@ -784,6 +967,21 @@ class Organ(AbstractNetwork, ABC):
         AnatomyWriter(self).write_to_geo(path, **kwargs)
 
 
+    def build_anatomy_tissues(self) -> List[Dict[str, Any]]:
+        """Return tissue zone descriptors (layer rings + vascular polygons).
+        See :func:`openalea.granap.visualization.build_anatomy_tissues`."""
+        from openalea.granap.visualization import build_anatomy_tissues
+        return build_anatomy_tissues(self)
+
+    def plot_tissues(self, ax=None, show: bool = True, labels: bool = True,
+                     show_effective: bool = False,
+                     fuse: bool = False) -> Optional[plt.Figure]:
+        """Plot every tissue zone before placing any cell.
+        See :func:`openalea.granap.visualization.plot_tissues`."""
+        from openalea.granap.visualization import plot_tissues
+        return plot_tissues(self, ax=ax, show=show, labels=labels,
+                            show_effective=show_effective, fuse=fuse)
+
     def export_to_adjencymatrix(self) -> lil_matrix:
         """
         Build the hydraulic network from cell geometry and return
@@ -845,18 +1043,15 @@ class Organ(AbstractNetwork, ABC):
     
     @abstractmethod
     def _create_central_layers(self, current_polygon: Polygon,
-                               params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                               params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         """
         Create central tissue layers (vascular, parenchyma, etc.).
-        
-        This method must be implemented by subclasses to define
-        organ-specific central structures.
-        
+
         Args:
             current_polygon: Current inner polygon boundary
             params: Parameter dictionaries
-        
+
         Returns:
-            List of central layer polygon dictionaries
+            List of LayerPolygon objects for the central zone.
         """
         pass
