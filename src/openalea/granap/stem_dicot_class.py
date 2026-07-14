@@ -34,36 +34,13 @@ class DicotStemAnatomy(StemAnatomy):
     """Dicot stem: a ring of discrete collateral bundles (xylem in / phloem out /
     cambium between) around a central pith (eustele)."""
 
-    def _parse_vascular_params(self) -> None:
-        xylem = self._get_param("xylem")
-        phloem = self._get_param("phloem")
-        cambium = self._get_param("cambium")
-
-        self.vascular_params.update({
-            # Number of bundles evenly spaced around the eustele ring.
-            "n_bundles":              int(xylem.get("n_vascular_peak",          8)),
-            # Xylem vessels of one bundle (centre-to-tip size gradient).
-            "xylem_diameter_max":     float(xylem.get("vessel_diameter",        0.08)),
-            "xylem_diameter_min":     float(xylem.get("vessel_diameter_min",    0.02)),
-            "xylem_diameter_sd":      float(xylem.get("vessel_diameter_sd",     0.002)),
-            # Phloem cap of one bundle.
-            "phloem_diameter":        float(phloem.get("sieve_diameter",        0.012)),
-            "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",     0.001)),
-            "phloem_width":           float(phloem.get("cluster_width",         0.1)),
-            "phloem_height":          float(phloem.get("cluster_height",        0.05)),
-            # Fascicular cambium strip between xylem and phloem.
-            "cambium_cell_diameter":  float(cambium.get("cell_diameter",        0.01)),
-            "cambium_cell_width":     float(cambium.get("cell_width",           0.02)),
-        })
-
-        # Primary phloem / cambium are built only when their param entries are
-        # present (opt-out).
-        self.has_primary_phloem = bool(phloem)
-        self.has_cambium = bool(cambium)
-
     # ------------------------------------------------------------------
     # Vascular tissue
     # ------------------------------------------------------------------
+    #
+    # No _parse_vascular_params override: build_bundle reads the raw xylem /
+    # phloem / cambium param dicts directly, and the bundle count is the
+    # vascular_bundle.n_bundles field — so there is nothing to pre-parse.
 
     def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
         """Declarative description of how the eustele bundle ring is assembled.
@@ -76,7 +53,8 @@ class DicotStemAnatomy(StemAnatomy):
         (:meth:`_build_bundle_ring`) that places no cells yet.
         """
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
-        if self.vascular_params.get("n_bundles", 0) == 0:
+        bp = self._get_param("vascular_bundle")
+        if not bp or int(bp.get("n_bundles", 0)) == 0:
             return recipe                       # no bundles -> empty
         recipe.special(
             "collateral bundle ring",
@@ -92,7 +70,7 @@ class DicotStemAnatomy(StemAnatomy):
         their outer (phloem) half toward the cortex.  ``theta`` is each slot's
         polar angle (radial orientation).
         """
-        n = int(self.vascular_params.get("n_bundles", 0))
+        n = int(self._get_param("vascular_bundle").get("n_bundles", 0))
         if n <= 0:
             return []
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y

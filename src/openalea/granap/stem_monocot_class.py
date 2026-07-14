@@ -35,34 +35,13 @@ class MonocotStemAnatomy(StemAnatomy):
     """Monocot stem: vascular bundles scattered through the ground tissue
     (atactostele), collateral, with no cambium."""
 
-    def _parse_vascular_params(self) -> None:
-        xylem = self._get_param("xylem")
-        phloem = self._get_param("phloem")
-
-        self.vascular_params.update({
-            # Metaxylem vessels (the two wide vessels of a monocot bundle).
-            "xylem_diameter":         float(xylem.get("vessel_diameter",        0.06)),
-            "xylem_diameter_sd":      float(xylem.get("vessel_diameter_sd",     0.005)),
-            # Protoxylem (smaller, inner) elements.
-            "protoxylem_diameter":    float(xylem.get("protoxylem_diameter",    0.01)),
-            "protoxylem_diameter_sd": float(xylem.get("protoxylem_diameter_sd", 0.002)),
-            "protoxylem_width":       float(xylem.get("protoxylem_cluster_width",  0.03)),
-            "protoxylem_height":      float(xylem.get("protoxylem_cluster_height", 0.05)),
-            # Number of scattered bundles across the ground tissue.
-            "n_vascular_bundles":     int(xylem.get("n_vascular_bundles",       12)),
-            # Phloem cap of each collateral bundle.
-            "phloem_diameter":        float(phloem.get("sieve_diameter",        0.005)),
-            "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",     0.001)),
-            "phloem_width":           float(phloem.get("cluster_width",         0.02)),
-            "phloem_height":          float(phloem.get("cluster_height",        0.03)),
-        })
-
-        # Primary phloem is built only when its param entry is present (opt-out).
-        self.has_primary_phloem = bool(phloem)
-
     # ------------------------------------------------------------------
     # Vascular tissue
     # ------------------------------------------------------------------
+    #
+    # No _parse_vascular_params override: build_bundle reads the raw xylem /
+    # phloem / cambium param dicts directly, and the bundle count is the
+    # vascular_bundle.n_bundles field — so there is nothing to pre-parse.
 
     def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
         """Declarative description of how the scattered bundles are assembled.

@@ -30,6 +30,7 @@ import numpy as np
 from typing import List, Dict, Any
 
 from shapely.geometry import Polygon, Point
+from shapely.ops import unary_union
 
 from openalea.granap.organ_class import Organ
 from openalea.granap.layer_class import Layer, LayerPolygon
@@ -37,6 +38,7 @@ from openalea.granap.cell_manager import CellManager
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
+from openalea.granap.special_tissues import consider_as_cell
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +107,6 @@ class StemAnatomy(Organ):
         else:
             self.params = OrganInputData.for_monocot_stem().to_dict_list()
 
-        # Primary phloem is opt-out: absent param -> no phloem step in the recipe.
-        # Overwritten by _parse_vascular_params from the actual param presence.
-        self.has_primary_phloem: bool = True
-
         # Containers for vascular tissue building (populated by _create_vascular_tissue)
         self.vascular_cells: CellManager = CellManager()
         self.vascular_polygons: list = []
@@ -118,7 +116,7 @@ class StemAnatomy(Organ):
         self.pith_cavity_polygon = None
 
         self._parse_shared_params()
-        self._parse_vascular_params()   # overridden per subclass
+        self._parse_vascular_params()   # optional per-subclass hook (see below)
         self._initialize_default_layers()
 
     @property
@@ -164,7 +162,14 @@ class StemAnatomy(Organ):
         self.layers = sorted(self.layers, key=lambda x: float(x["order"]))
 
     def _parse_vascular_params(self) -> None:
-        """Parse plant-type-specific vascular parameters. Overridden in subclasses."""
+        """Optional per-subclass hook for extra vascular parsing.
+
+        Not needed by the stem subclasses: the bundle cell-level sizes are read
+        straight from the raw ``xylem`` / ``phloem`` / ``cambium`` param dicts by
+        :func:`vascular_bundle.build_bundle`, and the bundle *count* is the
+        ``vascular_bundle.n_bundles`` field — so there is a single source of truth
+        for each and nothing to pre-parse here.
+        """
         pass
 
     def _initialize_default_layers(self) -> None:
@@ -291,6 +296,81 @@ class StemAnatomy(Organ):
             if geom is not None and not geom.is_empty:
                 self.vascular_tissue_polygons.setdefault(role, []).append(geom)
         self.vascular_polygons.extend(res.vessel_polygons)
+
+    def add_intercellular_spaces(self):
+        """Add cortex air spaces, then tidy the hollow cavity + the lacunae.
+
+        The pith itself is left exactly as the plain stele-style parenchyma (same
+        machinery as the root stele — no special central cell).  Run after the
+        normal intercellular/aerenchyma pass so it has the final say on the centre.
+        """
+        super().add_intercellular_spaces()
+        self._finalize_pith_and_lacunae()
+
+    def _pith_is_aerenchyma(self) -> bool:
+        """True only when aerenchyma is explicitly requested for the pith.
+
+        (An ``aerenchyma`` param targeting ``pith`` with a non-zero proportion.)
+        Aerenchyma is never the silent default of a plain stem.
+        """
+        aer = self.aerenchyma_params or {}
+        tissue = aer.get("tissue")
+        tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
+        return "pith" in tissues and float(aer.get("aerenchyma_proportion", 0) or 0) > 0.0
+
+    @staticmethod
+    def _largest_piece(geom):
+        """Largest Polygon piece of a (possibly Multi)Polygon, or None."""
+        if geom is None or geom.is_empty:
+            return None
+        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+        parts = [g for g in parts if g.geom_type == "Polygon" and not g.is_empty]
+        return max(parts, key=lambda g: g.area) if parts else None
+
+    def _finalize_pith_and_lacunae(self) -> None:
+        """Post-Voronoi tidy-up of the pith centre and the protoxylem lacunae.
+
+        The solid pith is left untouched — plain stele-style parenchyma, like the
+        root stele.  Two exceptions to that:
+
+        * a hollow (fistular) pith: pith cells are clipped out of the medullary
+          cavity so it stays a clean void instead of a fan of slivers spilling in;
+        * aerenchyma explicitly requested for the pith: the whole pith collapses
+          into one ``air space`` zone.
+
+        Each protoxylem lacuna is a gas cavity: the cells under it are removed and
+        it becomes one ``air space`` cell (the tag the root/organ aerenchyma path
+        uses too).
+        """
+        pith_cells = [c for c in self.all_cells.get_cells_by_type("pith")
+                      if c.polygon is not None and not c.polygon.is_empty]
+        cavity = self.pith_cavity_polygon
+        cavity = cavity if (cavity is not None and not cavity.is_empty) else None
+
+        if pith_cells and self._pith_is_aerenchyma():
+            # Opt-in: whole pith -> one air-space zone.
+            region = unary_union([c.polygon for c in pith_cells])
+            if cavity is not None:
+                region = region.difference(cavity)
+            id_layer = pith_cells[0].id_layer
+            self.all_cells.cells = [c for c in self.all_cells.cells if c.type != "pith"]
+            consider_as_cell(self.all_cells, region, "air space",
+                             id_layer=id_layer, replace=False)
+
+        elif pith_cells and cavity is not None:
+            # Hollow culm: clip pith cells out of the cavity so it stays a void.
+            kept = []
+            for c in self.all_cells.cells:
+                if c.type == "pith" and c.polygon is not None and c.polygon.intersects(cavity):
+                    piece = self._largest_piece(c.polygon.difference(cavity))
+                    if piece is None:
+                        continue                    # cell was entirely inside the cavity
+                    c.polygon = piece
+                kept.append(c)
+            self.all_cells.cells = kept
+
+        # (Protoxylem lacunae are seeded as ordinary 'air space' cells by the
+        # bundle builder, so they need no post-Voronoi carving here.)
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         return layers_polygons

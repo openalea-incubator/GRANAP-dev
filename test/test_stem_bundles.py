@@ -60,14 +60,14 @@ def _mean_dist(cells, tag):
 
 def test_collateral_phloem_outer_of_xylem():
     cells, _ = _build(bundle_type="collateral", has_cambium=True, xylem_layout="packed")
-    assert _mean_x(cells, "phloem") > _mean_x(cells, "xylem"), "phloem must sit outer of xylem"
+    assert _mean_x(cells, "sieve element") > _mean_x(cells, "xylem"), "phloem must sit outer of xylem"
     assert any(c.type == "cambium" for c in cells.cells), "open collateral has a cambium strip"
 
 
 def test_bicollateral_phloem_both_sides():
     cells, _ = _build(bundle_type="bicollateral", inner_phloem_fraction=0.2, xylem_layout="packed")
     xc = _mean_x(cells, "xylem")
-    ph_x = [c.x for c in cells.cells if c.type == "phloem"]
+    ph_x = [c.x for c in cells.cells if c.type == "sieve element"]
     assert any(x > xc for x in ph_x) and any(x < xc for x in ph_x), \
         "bicollateral must have phloem on both radial sides of the xylem"
 
@@ -75,14 +75,14 @@ def test_bicollateral_phloem_both_sides():
 def test_amphivasal_xylem_rings_phloem():
     cells, _ = _build(bundle_type="concentric", concentric_type="amphivasal",
                       shape="circle", width=0.16, height=0.16)
-    assert _mean_dist(cells, "xylem") > _mean_dist(cells, "phloem"), \
+    assert _mean_dist(cells, "xylem") > _mean_dist(cells, "sieve element"), \
         "amphivasal: xylem ring is farther from the bundle centre than the phloem core"
 
 
 def test_amphicribral_phloem_rings_xylem():
     cells, _ = _build(bundle_type="concentric", concentric_type="amphicribral",
                       shape="circle", width=0.16, height=0.16)
-    assert _mean_dist(cells, "phloem") > _mean_dist(cells, "xylem"), \
+    assert _mean_dist(cells, "sieve element") > _mean_dist(cells, "xylem"), \
         "amphicribral: phloem ring is farther from the bundle centre than the xylem core"
 
 
@@ -91,7 +91,9 @@ def test_face_metaxylem_outer_of_protoxylem_with_lacuna():
                         lacuna=True, xylem_maturation="endarch")
     assert _mean_x(cells, "metaxylem") > _mean_x(cells, "protoxylem"), \
         "endarch face: metaxylem sits outer of protoxylem"
-    assert len(res.cavity_polygons) == 1, "lacuna=True must carve one protoxylem lacuna void"
+    # The lacuna is seeded as an ordinary 'air space' cell just below the protoxylem.
+    assert any(c.type == "air space" for c in cells.cells), \
+        "lacuna=True must place an air-space lacuna cell"
 
 
 def test_sheath_produces_sclerenchyma():
@@ -111,25 +113,33 @@ def _census(organ):
 
 def test_dicot_eustele_generates():
     c = _census(StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED))
-    for t in ("xylem", "phloem", "cambium", "pith", "cortex", "epidermis"):
+    # The pith is rendered as a single 'pith' zone (not aerenchyma by default,
+    # not a spoke-mesh); see StemAnatomy._render_pith_as_single_zone.
+    for t in ("xylem", "sieve element", "cambium", "pith", "cortex", "epidermis"):
         assert c.get(t, 0) > 0, f"dicot stem missing {t}"
+    assert c.get("aerenchyma", 0) == 0, "a plain dicot stem must not default to aerenchyma"
 
 
 def test_monocot_atactostele_generates():
     data = OrganInputData.for_monocot_stem()
     data.set_value("vascular_bundle", "n_bundles", 6)   # fewer -> faster test
     c = _census(StemAnatomy(data, seed=SEED))
+    # Pith rendered as one 'pith' zone (not a pith-cell mesh).
     for t in ("metaxylem", "protoxylem", "sclerenchyma", "pith", "epidermis"):
         assert c.get(t, 0) > 0, f"monocot stem missing {t}"
     assert c.get("cambium", 0) == 0, "monocot bundles are closed (no cambium)"
 
 
 def test_hollow_pith_leaves_cavity_empty():
+    from shapely.geometry import Point
     data = OrganInputData.for_monocot_stem()
     data.set_value("vascular_bundle", "n_bundles", 6)
     data.set_value("pith", "cavity_radius", 0.12)
     organ = StemAnatomy(data, seed=SEED)
     organ.generate_cells()
-    pith_r = [np.hypot(c.x, c.y) for c in organ.all_cells.cells if c.type == "pith"]
-    assert pith_r, "expected pith cells outside the cavity"
-    assert min(pith_r) >= 0.12 * 0.9, "no pith cells should fall inside the medullary cavity"
+    # The hollow (fistular) cavity stays a true void: the pith aerenchyma zone is
+    # an annulus with a hole there, so no cell polygon covers the centre.
+    center = Point(0.0, 0.0)
+    covering = [c for c in organ.all_cells.cells
+                if c.polygon is not None and c.polygon.contains(center)]
+    assert not covering, "no cell should fill the hollow medullary cavity"
