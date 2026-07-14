@@ -260,9 +260,21 @@ def plot_tissues(organ: "Organ",
             ax.plot(*geom.exterior.xy, color="navy", linewidth=0.7)
 
     # Named tissue polygons (cambium → green, phloem → goldenrod, …)
-    _tissue_colors = {"cambium": "limegreen", "phloem": "goldenrod"}
+    _tissue_colors = {
+        "cambium": "limegreen", "phloem": "goldenrod",
+        "xylem": "lightsteelblue",      # bundle xylem zone (vessels overlaid steel-blue)
+        "sclerenchyma": "silver",       # bundle sheath / caps (fibres)
+        "bundle sheath": "yellowgreen", # parenchyma bundle sheath (no fibres)
+        "bundle": "khaki",              # stem vascular-bundle envelope (drawn underneath)
+        "medullary cavity": "white",    # hollow pith / protoxylem lacuna = void
+    }
     for tissue_name, poly_list in vascular_tissue_polys.items():
         color = _tissue_colors.get(tissue_name, "orange")
+        # Cavities (hollow pith / protoxylem lacuna) are voids: draw them nearly
+        # opaque so they read as empty rather than tinting the pith beneath.
+        is_void = tissue_name == "medullary cavity"
+        alpha = 0.95 if is_void else 0.35
+        edge = "gray" if is_void else color
         for vpoly in poly_list:
             if vpoly.is_empty:
                 continue
@@ -270,8 +282,8 @@ def plot_tissues(organ: "Organ",
             for geom in geoms:
                 if geom.geom_type != "Polygon":
                     continue
-                ax.fill(*geom.exterior.xy, color=color, alpha=0.35)
-                ax.plot(*geom.exterior.xy, color=color, linewidth=1.2)
+                ax.fill(*geom.exterior.xy, color=color, alpha=alpha)
+                ax.plot(*geom.exterior.xy, color=edge, linewidth=1.0)
 
     if show_effective and vascular_polys:
         mask = unary_union(vascular_polys)

@@ -393,17 +393,13 @@ class RootAnatomy(Organ):
     @staticmethod
     def _oriented_ellipse(tx: float, ty: float, width: float, height: float,
                           angle_deg: float, resolution: int = 64) -> Polygon:
-        """Axis-aligned unit disc scaled to ``width``x``height``, rotated so its
-        major (height) axis points along ``angle_deg`` (minus the 90° that maps the
-        +y major axis to the radial direction), then translated to ``(tx, ty)``.
+        """Oriented vascular-cluster ellipse (thin delegator).
 
-        The one source for every oriented vascular cluster ellipse (phloem valleys,
-        arch phloem, proto/phloem bundles).
+        The one source now lives in :meth:`GeometryProcessor.oriented_ellipse`
+        (shared with the stem package); kept here so the root vascular code and
+        its subclasses keep calling ``self._oriented_ellipse(...)`` unchanged.
         """
-        raw = Point(0, 0).buffer(1, resolution=resolution)
-        raw = affine_scale(raw, width / 2, height / 2)
-        raw = rotate(raw, angle_deg - 90, origin=(0, 0))
-        return translate(raw, tx, ty)
+        return GeometryProcessor.oriented_ellipse(tx, ty, width, height, angle_deg, resolution)
 
     def _remove_stele_engulfed_by_xylem(self, area_fraction: float = 0.6) -> None:
         """Drop stele cells whose footprint is mostly covered by xylem vessels.

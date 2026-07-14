@@ -6,6 +6,7 @@ import numpy as np
 import shapely as sp
 from typing import Tuple, List, Optional
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
+from shapely.affinity import translate as _shapely_translate, rotate as _shapely_rotate, scale as _shapely_scale
 from cv2 import fitEllipse
 from scipy.optimize import minimize
 from scipy.spatial import Delaunay, ConvexHull
@@ -56,7 +57,41 @@ class GeometryProcessor:
         x = radius * np.cos(theta)
         y = radius * np.sin(theta)
         return sp.Polygon(np.column_stack((x, y)))
-    
+
+    @staticmethod
+    def oriented_ellipse(tx: float, ty: float, width: float, height: float,
+                         angle_deg: float, resolution: int = 64) -> Polygon:
+        """Axis-aligned unit disc scaled to ``width`` x ``height``, rotated so its
+        major (``height``) axis points along ``angle_deg`` (minus the 90° that maps
+        the +y major axis to the radial direction), then translated to ``(tx, ty)``.
+
+        The one source for every oriented vascular cluster ellipse (phloem
+        valleys, arch phloem, proto/phloem bundles, whole vascular-bundle
+        envelopes).  See :meth:`place_local` for the matching transform applied to
+        a *set* of local-frame geometries.
+        """
+        raw = Point(0, 0).buffer(1, resolution=resolution)
+        raw = _shapely_scale(raw, width / 2, height / 2)
+        raw = _shapely_rotate(raw, angle_deg - 90, origin=(0, 0))
+        return _shapely_translate(raw, tx, ty)
+
+    @staticmethod
+    def place_local(geoms, cx: float, cy: float, angle_deg: float):
+        """Map local-frame geometries (radial axis = local +y) to their place.
+
+        Applies the same transform as :meth:`oriented_ellipse` — ``rotate(angle_deg
+        - 90, origin=0)`` then ``translate(cx, cy)`` — to every geometry in
+        ``geoms``, so an envelope built at the origin with its radial axis along
+        +y and all of its interior sub-zones move together to ``(cx, cy)`` at
+        orientation ``angle_deg``.  Returns a list of transformed geometries.
+        """
+        out = []
+        for g in geoms:
+            g = _shapely_rotate(g, angle_deg - 90, origin=(0, 0))
+            g = _shapely_translate(g, cx, cy)
+            out.append(g)
+        return out
+
     @staticmethod
     def star_polygon(
         n_branches: int,

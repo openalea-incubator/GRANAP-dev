@@ -18,6 +18,7 @@ sys.path.append(os.path.abspath(".."))
 
 from openalea.granap.root_class import RootAnatomy
 from openalea.granap.needle_class import NeedleAnatomy
+from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.input_data import OrganInputData
 
 SEED = 0
@@ -61,6 +62,16 @@ def needle_features() -> NeedleAnatomy:
     return NeedleAnatomy(data, seed=SEED)
 
 
+def dicot_stem() -> StemAnatomy:
+    """Dicot stem eustele: a ring of open collateral bundles around a pith."""
+    return StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED)
+
+
+def monocot_stem() -> StemAnatomy:
+    """Monocot stem atactostele: scattered 'face' bundles + sclerenchyma."""
+    return StemAnatomy(OrganInputData.for_monocot_stem(), seed=SEED)
+
+
 # -- golden census (seed=0) --------------------------------------------------
 
 GOLDEN = {
@@ -90,6 +101,14 @@ GOLDEN = {
         "endodermis": 49, "epidermis": 219, "guard cell": 20, "hypodermis": 366,
         "mesophyll": 230, "parenchyma": 244, "phloem": 310, "pore": 10,
         "resin duct": 28, "transfusion": 103, "xylem": 270,
+    }),
+    "dicot_stem": (dicot_stem, {
+        "air space": 130, "cambium": 28, "cortex": 132, "epidermis": 158,
+        "phloem": 87, "pith": 309, "xylem": 15,
+    }),
+    "monocot_stem": (monocot_stem, {
+        "air space": 52, "cortex": 84, "epidermis": 148, "metaxylem": 28,
+        "phloem": 15, "pith": 218, "protoxylem": 42, "sclerenchyma": 1019,
     }),
 }
 
@@ -145,3 +164,11 @@ def test_needle_default_golden():
 
 def test_needle_features_golden():
     _check("needle_features")
+
+
+def test_dicot_stem_golden():
+    _check("dicot_stem")
+
+
+def test_monocot_stem_golden():
+    _check("monocot_stem")

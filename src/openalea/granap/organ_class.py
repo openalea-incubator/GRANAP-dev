@@ -74,7 +74,12 @@ class Organ(AbstractNetwork, ABC):
         organ_type = None
 
         if ptype_param:
-            if ptype_param.get("organ") == "needle" or ptype_param.get("value") == 3:
+            # Check 'stem' before the value-based root test: stems share
+            # planttype values 1/2 with roots, so they are distinguished only by
+            # the explicit organ tag.
+            if ptype_param.get("organ") == "stem":
+                organ_type = "stem"
+            elif ptype_param.get("organ") == "needle" or ptype_param.get("value") == 3:
                 organ_type = "needle"
             elif ptype_param.get("organ") == "root" or ptype_param.get("value") in [1, 2, 1.0, 2.0]:
                 organ_type = "root"
@@ -82,7 +87,9 @@ class Organ(AbstractNetwork, ABC):
         # Fallback to duck-typing the input parameters if 'organ' isn't explicitly defined
         if not organ_type:
             names = {p["name"] for p in params}
-            if "stele" in names or "cortex" in names:
+            if "pith" in names:
+                organ_type = "stem"
+            elif "stele" in names or "cortex" in names:
                 organ_type = "root"
             else:
                 organ_type = "needle"
@@ -90,6 +97,9 @@ class Organ(AbstractNetwork, ABC):
         if organ_type == "needle":
             from openalea.granap.needle_class import NeedleAnatomy
             return NeedleAnatomy(input_data)
+        elif organ_type == "stem":
+            from openalea.granap.stem_class import StemAnatomy
+            return StemAnatomy(input_data)
         else:
             from openalea.granap.root_class import RootAnatomy
             return RootAnatomy(input_data)

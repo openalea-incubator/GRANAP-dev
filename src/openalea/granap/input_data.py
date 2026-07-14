@@ -144,6 +144,87 @@ class PhellodermParams(BaseParams):
     shift        : float = Field(default=0.0, ge=0.0, le=1.0, title = "Shift", description = "Shift of the phelloderm cells from 0 to 1")
     order        : int   = Field(default=2, ge=0, title = "Order", description = "Order of the phelloderm cells")
 
+# Stem central ground tissue (pith).  Mirrors SteleParams: the central region
+# thickness + a radial cell-size gradient.  Used by StemAnatomy (monocot ground
+# tissue / dicot pith) the way the "stele" param drives the root centre.
+class PithParams(BaseParams):
+    name                     : str                        = "pith"
+    thickness                : float                      = Field(default=0.5,        ge=0.00001,        title="Thickness")
+    cavity_radius            : float                      = Field(default=0.0,        ge=0.0,            title="Medullary Cavity Radius", description="Radius (mm) of the central medullary cavity (hollow/fistular pith). 0 = solid pith of parenchyma cells; >0 hollows the centre out to this radius (the wheat-culm / bamboo case). The cavity is a true void — no cells — like a large protoxylem lacuna.")
+    cell_diameter            : float                      = Field(default=0.02,       ge=0.00001,        title="Cell Diameter (edge)",        description="Cell diameter at the pith periphery (lower bound of the size gradient).")
+    cell_diameter_center     : float                      = Field(default=0.05,       ge=0.00001,        title="Cell Diameter (center)",      description="Cell diameter at the pith center (upper bound). Set equal to cell_diameter to disable the gradient.")
+    size_gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",                  title="Size Gradient Function",      description="Shape function used for the radial cell-size gradient.")
+    size_gradient_inflection : float                      = Field(default=0.3,        ge=0.001, le=1.0,  title="Size Gradient Inflection",    description="Normalized radial position of the gradient inflection point (0 = center, 1 = edge). Used by five_pl.")
+    size_gradient_steepness  : float                      = Field(default=3.0,        ge=0.1,            title="Size Gradient Steepness",     description="Hill coefficient — sharpness of the size transition. Used by five_pl.")
+    size_gradient_asymmetry  : float                      = Field(default=1.0,        ge=0.1,            title="Size Gradient Asymmetry",     description="Asymmetry exponent of the size gradient. Used by five_pl.")
+
+
+# Sclerenchyma (fibres / sclereids): a structural tissue of small, densely
+# packed cells.  As an *ordered layer* it forms a subepidermal / hypodermal fibre
+# ring; the same tissue also appears as a bundle sheath / cap (see
+# VascularBundleParams.sheath), built by the bundle machinery, not as a layer.
+class SclerenchymaParams(BaseParams):
+    name         : str   = "sclerenchyma"
+    cell_diameter: float = Field(default=0.008, ge=0.00001, title="Cell Diameter", description="Diameter of the sclerenchyma (fibre) cells — small, thick-walled.")
+    cell_width   : float = Field(default=0.008, ge=0.00001, title="Cell Width",    description="Tangential width of the sclerenchyma cells.")
+    n_layers     : int   = Field(default=2,     ge=1,       title="Number of Layers", description="Number of sclerenchyma layers in the subepidermal ring.")
+    shift        : float = Field(default=0.0, ge=0.0, le=1.0, title="Shift",       description="Shift of the sclerenchyma cells from 0 to 1")
+    order        : int   = Field(default=5, ge=0, title="Order",                   description="Order of the sclerenchyma ring (between cortex and epidermis).")
+
+
+# One vascular bundle's internal arrangement (the *topology* of xylem / phloem /
+# cambium within an envelope).  Cell-level sizing (vessel / sieve / cambium cell
+# diameters + gradients) is read from the reused xylem / phloem / cambium params;
+# this class only says how those tissues are laid out.  Fields are grouped by the
+# mode that uses them (same convention as RootXylemParams' default/arch/star).
+class VascularBundleParams(BaseParams):
+    name             : str = "vascular_bundle"
+    # -- type ---------------------------------------------------------------
+    bundle_type      : Literal["collateral", "bicollateral", "concentric"] = Field(default="collateral", title="Bundle Type", description="'collateral' = xylem inner / phloem outer (± cambium between); 'bicollateral' = phloem on both sides of the xylem; 'concentric' = one tissue rings the other (see concentric_type).")
+    concentric_type  : Literal["amphivasal", "amphicribral"] = Field(default="amphivasal", title="Concentric Type", description="Concentric only. 'amphivasal' = xylem surrounds a phloem core; 'amphicribral' = phloem surrounds a xylem core.")
+    has_cambium      : bool  = Field(default=True,  title="Has Cambium", description="Banded types only. True = open bundle (a fascicular cambium strip between xylem and outer phloem); False = closed (no cambium, e.g. monocots).")
+    # -- envelope -----------------------------------------------------------
+    width            : float = Field(default=0.12, ge=0.00001, title="Envelope Width",  description="Tangential extent of the bundle envelope (mm).")
+    height           : float = Field(default=0.18, ge=0.00001, title="Envelope Height", description="Radial extent of the bundle envelope (mm).")
+    shape            : Literal["ellipse", "circle"] = Field(default="ellipse", title="Envelope Shape", description="Envelope outline. 'circle' is natural for concentric bundles.")
+    phloem_outward   : bool  = Field(default=True, title="Phloem Outward", description="True (default) = phloem faces the organ surface, xylem faces the centre (normal orientation); False flips it.")
+    xylem_maturation : Literal["endarch", "exarch"] = Field(default="endarch", title="Xylem Maturation", description="Which pole the protoxylem sits at. 'endarch' (stems) = protoxylem toward the centre; 'exarch' (roots) = protoxylem toward the surface.")
+    # -- banded layout (collateral / bicollateral): radial shares, auto-normalised
+    xylem_fraction   : float = Field(default=0.5,  ge=0.0, le=1.0, title="Xylem Fraction",   description="Banded types: radial share of the envelope given to xylem.")
+    phloem_fraction  : float = Field(default=0.35, ge=0.0, le=1.0, title="Phloem Fraction",  description="Banded types: radial share given to the (outer) phloem.")
+    cambium_fraction : float = Field(default=0.08, ge=0.0, le=1.0, title="Cambium Fraction", description="Banded open bundles: radial share given to the fascicular cambium strip.")
+    inner_phloem_fraction : float = Field(default=0.0, ge=0.0, le=1.0, title="Inner Phloem Fraction", description="Bicollateral only: radial share given to the inner phloem band.")
+    inner_cambium    : bool  = Field(default=False, title="Inner Cambium", description="Bicollateral only: add a cambium strip on the inner phloem side too (usually absent).")
+    # -- concentric layout --------------------------------------------------
+    core_width       : float = Field(default=0.05, ge=0.00001, title="Core Width",  description="Concentric only: tangential extent of the inner core (mm).")
+    core_height      : float = Field(default=0.05, ge=0.00001, title="Core Height", description="Concentric only: radial extent of the inner core (mm).")
+    # -- monocot 'face' xylem (xylem_layout = 'face') -----------------------
+    xylem_layout     : Literal["packed", "face"] = Field(default="packed", title="Xylem Layout", description="'packed' = many size-graded vessels (dicot / concentric); 'face' = the monocot mask — a few discrete metaxylem 'eyes' + protoxylem + optional lacuna.")
+    n_metaxylem      : int   = Field(default=2, ge=1, title="Number of Metaxylem", description="Face layout: number of large metaxylem vessels (the 'eyes').")
+    metaxylem_diameter    : float = Field(default=0.045, ge=0.00001, title="Metaxylem Diameter", description="Face layout: metaxylem vessel diameter (mm).")
+    metaxylem_diameter_sd : float = Field(default=0.004, ge=0.0,     title="Metaxylem Diameter SD", description="Face layout: SD of metaxylem diameter.")
+    metaxylem_gap    : float = Field(default=0.02, ge=0.0, title="Metaxylem Gap", description="Face layout: tangential spacing between the two metaxylem eyes (mm).")
+    n_protoxylem     : int   = Field(default=3, ge=0, title="Number of Protoxylem", description="Face layout: number of small protoxylem vessels toward the protoxylem pole.")
+    protoxylem_diameter    : float = Field(default=0.012, ge=0.00001, title="Protoxylem Diameter", description="Face layout: protoxylem vessel diameter (mm).")
+    protoxylem_diameter_sd : float = Field(default=0.002, ge=0.0,     title="Protoxylem Diameter SD", description="Face layout: SD of protoxylem diameter.")
+    lacuna           : bool  = Field(default=False, title="Protoxylem Lacuna", description="Face layout: carve an air cavity at the protoxylem pole (the 'mouth' of the mask), as forms when protoxylem tears during elongation.")
+    lacuna_width     : float = Field(default=0.03,  ge=0.00001, title="Lacuna Width",  description="Face layout: tangential extent of the protoxylem lacuna (mm).")
+    lacuna_height    : float = Field(default=0.025, ge=0.00001, title="Lacuna Height", description="Face layout: radial extent of the protoxylem lacuna (mm).")
+    # -- sclerenchyma sheath ------------------------------------------------
+    sheath           : Literal["none", "ring", "caps", "both"] = Field(default="none", title="Sclerenchyma Sheath", description="Fibre sheath around the bundle. 'ring' = full envelope ring; 'caps' = fibre caps at the two radial poles; 'both' = caps + thin ring; 'none' = no fibres, but a thin parenchyma bundle-sheath ring is still placed (every bundle gets a sheath).")
+    sheath_thickness : float = Field(default=0.012, ge=0.00001, title="Sheath Thickness", description="Radial/tangential depth of the bundle sheath ring / caps (mm).")
+    sclerenchyma_cell_diameter : float = Field(default=0.008, ge=0.00001, title="Sheath Cell Diameter", description="Diameter of the sclerenchyma (fibre) cells in the sheath.")
+    # -- ground parenchyma + phloem composition (cells that fill the bundle) -
+    prop_vessel      : float = Field(default=0.55, ge=0.0, le=1.0, title="Proportion Vessels", description="Fraction of the (packed) xylem zone occupied by vessels; the rest is xylem parenchyma packed around them.")
+    prop_sieve       : float = Field(default=0.45, ge=0.0, le=1.0, title="Proportion Sieve", description="Fraction of the phloem zone occupied by sieve elements + companion cells together; the rest is phloem parenchyma.")
+    parenchyma_diameter : float = Field(default=0.012, ge=0.00001, title="Parenchyma Diameter", description="Diameter of the ground parenchyma cells that fill the bundle around the conducting cells (and the non-fibre bundle sheath).")
+    parenchyma_width : float = Field(default=0.012, ge=0.00001, title="Parenchyma Width", description="Tangential width of the ground parenchyma cells.")
+    sieve_diameter_min : float = Field(default=0.006, ge=0.00001, title="Sieve Diameter (min)", description="Lower bound of the sieve-element diameter when packing the phloem.")
+    companion_diameter : float = Field(default=0.007, ge=0.00001, title="Companion Cell Diameter", description="Diameter of the companion cell placed beside each sieve element (sieve elements are far smaller than xylem vessels).")
+    # -- placement ----------------------------------------------------------
+    n_bundles        : int   = Field(default=8, ge=0, title="Number of Bundles", description="How many bundles: evenly spaced ring slots (dicot eustele) or scattered count (monocot atactostele).")
+
+
 # Monocotyledon-specific layers
 class SteleParams(BaseParams):
     name                     : str                        = "stele"
@@ -911,6 +992,62 @@ class OrganInputData(BaseModel):
         data.set_value("secondary_growth", "value", True)
 
         return data
+
+    @classmethod
+    def for_monocot_stem(cls) -> "OrganInputData":
+        """Monocot stem preset (atactostele).
+
+        Ground tissue (``pith``) with an epidermis + narrow cortex; the vascular
+        bundles are scattered *through* the ground tissue with no cambium.  The
+        scattered-bundle placement itself is built by ``MonocotStemAnatomy`` (a
+        scaffold at present — see that class).
+        """
+        return cls(params=[
+            PlantTypeParams(value=1, organ="stem"),
+            PithParams(),
+            RootXylemParams(),
+            RootPhloemParams(),
+            VascularBundleParams(
+                bundle_type="collateral", has_cambium=False,
+                xylem_layout="face", lacuna=True,
+                sheath="both", n_bundles=15,
+                width=0.09, height=0.13,
+            ),
+            SclerenchymaParams(),
+            InterCellularSpacesParams(tissue=["cortex"], smoothness=0.05),
+            AerenchymaParams(tissue="cortex", aerenchyma_proportion=0.0),
+            EpidermisParams(),
+            CortexParams(n_layers=2),
+        ])
+
+    @classmethod
+    def for_dicot_stem(cls) -> "OrganInputData":
+        """Dicot stem preset (eustele).
+
+        A central pith ringed by discrete collateral vascular bundles (xylem
+        inner / phloem outer / cambium between), then cortex + epidermis.  The
+        bundle-ring placement is built by ``DicotStemAnatomy`` (a scaffold at
+        present — see that class).
+        """
+        return cls(params=[
+            PlantTypeParams(value=2, organ="stem"),
+            PithParams(),
+            # Stem-bundle vessels are smaller than the root star-xylem defaults so
+            # several graded vessels fit in each bundle (big near the cambium).
+            DicotXylemParams(vessel_diameter=0.045, vessel_diameter_min=0.012,
+                             vessel_diameter_sd=0.004, gradient_inflection=0.5),
+            DicotPhloemParams(),
+            DicotCambiumParams(),
+            VascularBundleParams(
+                bundle_type="collateral", has_cambium=True,
+                xylem_layout="packed", sheath="none", n_bundles=8,
+                width=0.13, height=0.2, prop_vessel=0.7,
+            ),
+            InterCellularSpacesParams(tissue=["cortex"], smoothness=0.05),
+            AerenchymaParams(tissue="cortex", aerenchyma_proportion=0.0),
+            EpidermisParams(),
+            CortexParams(n_layers=3),
+        ])
 
     @classmethod
     def for_needle(cls) -> "OrganInputData":
