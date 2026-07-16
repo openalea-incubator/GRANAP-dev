@@ -205,7 +205,9 @@ class VascularBundleParams(BaseParams):
     #   .... phloem cluster (outer half).  Metaxylem is placed first (single
     #   vessels at the radial centre); the protoxylem bundle(s) + optional lacuna
     #   sit in the inner half; the phloem cluster sits in the outer half.
-    xylem_layout     : Literal["packed", "face"] = Field(default="packed", title="Xylem Layout", description="'packed' = many size-graded vessels (dicot / concentric); 'face' = the monocot mask — metaxylem at the radial middle, a protoxylem bundle (+ optional lacuna) toward the centre, and the phloem cluster toward the surface.")
+    xylem_layout     : Literal["packed", "files", "face"] = Field(default="packed", title="Xylem Layout", description="'packed' = many size-graded vessels in one open zone (concentric / generic); 'files' = the realistic dicot arrangement — thin radial parenchyma strips split the xylem into endarch radial files (small protoxylem inner, large metaxylem toward the cambium), vessels parenchyma-separated; 'face' = the monocot mask — metaxylem at the radial middle, a protoxylem bundle (+ optional lacuna) toward the centre, and the phloem cluster toward the surface.")
+    n_xylem_files    : int   = Field(default=3, ge=1, title="Number of Xylem Files", description="xylem_layout='files' only: number of radial vessel files the xylem is split into by thin parenchyma strips. 1 = a single open compartment (endarch gradient, no strips).")
+    xylem_file_jitter : float = Field(default=0.3, ge=0.0, title="Xylem File Jitter", description="xylem_layout='files' only: how much the radial file strips are perturbed in position and angle (0 = a rigid, evenly-spaced grid; ~0.3 = a light, natural irregularity).")
     n_metaxylem      : int   = Field(default=2, ge=1, title="Number of Metaxylem", description="Face layout: number of metaxylem vessels placed at the radial middle. Each is a single vessel (not a packed region); the canonical monocot bundle has 2.")
     metaxylem_diameter    : float = Field(default=0.04, ge=0.00001, title="Metaxylem Diameter", description="Metaxylem vessel diameter (mm). Keep it under the bundle size so there is room for the protoxylem, lacuna and phloem.")
     metaxylem_diameter_sd : float = Field(default=0.003, ge=0.0,     title="Metaxylem Diameter SD", description="SD of metaxylem diameter (per-vessel size jitter).")
@@ -226,6 +228,8 @@ class VascularBundleParams(BaseParams):
     sheath_thickness : float = Field(default=0.0055, ge=0.00001, title="Sheath Thickness", description="Radial/tangential depth of the bundle sheath ring / caps (mm).")
     sclerenchyma_cell_diameter : float = Field(default=0.005, ge=0.00001, title="Sheath Cell Diameter", description="Diameter (radial) of the sclerenchyma (fibre) cells in the sheath.")
     sclerenchyma_cell_width : float = Field(default=0.005, ge=0.00001, title="Sheath Cell Width", description="Tangential width of the sclerenchyma (fibre) cells in the sheath. Raise it (with the diameter) to use fewer, larger fibres.")
+    outer_sheath     : bool  = Field(default=True, title="Outer Bundle Sheath", description="Wrap the bundle in one extra file of 'bundle sheath' cells just outside the envelope, sized at the mean of the (inner) sheath cell and the surrounding ground-tissue cell — a transition layer between the bundle and the ground tissue. Set False to omit it.")
+    outer_sheath_clearance : float = Field(default=0.5, ge=0.0, title="Outer Sheath Clearance", description="How much further out (beyond the sheath ring) the removal mask clears the surrounding ground cells, in ground-cell diameters. Raise it if the neighbouring ground cells are cut too harshly against the sheath; 0 = mask stops at the sheath ring.")
     # -- ground parenchyma + phloem composition (cells that fill the bundle) -
     prop_vessel      : float = Field(default=0.5, ge=0.0, le=1.0, title="Proportion Vessels", description="Fraction of the (packed) xylem zone occupied by vessels; the rest is xylem parenchyma packed around them.")
     prop_sieve       : float = Field(default=0.5, ge=0.0, le=1.0, title="Proportion Sieve", description="Fraction of the phloem ellipse occupied by sieve elements + companion cells together; the rest is parenchyma.")
@@ -1064,7 +1068,7 @@ class OrganInputData(BaseModel):
             DicotCambiumParams(),
             VascularBundleParams(
                 bundle_type="collateral", has_cambium=True,
-                xylem_layout="packed", sheath="none", n_bundles=8,
+                xylem_layout="files", sheath="none", n_bundles=8,
                 width=0.13, height=0.2, prop_vessel=0.7,
             ),
             InterCellularSpacesParams(tissue=["cortex"], smoothness=0.05),

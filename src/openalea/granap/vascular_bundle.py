@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
@@ -90,6 +90,51 @@ def _local_envelope(width: float, height: float, shape: str,
         a_in = height * (1.0 - egg_waist)
         return GeometryProcessor.egg_polygon(0.0, 0.0, a_out, a_in, width / 2, 90.0)
     return GeometryProcessor.oriented_ellipse(0.0, 0.0, width, height, 90.0)
+
+
+def _sheath_cell_size(bp: dict) -> float:
+    """Representative cell diameter of the (inner) bundle sheath.
+
+    A fibre sheath uses the sclerenchyma cell size; a fibre-less sheath is the
+    thin parenchyma bundle-sheath ring, sized like the bundle parenchyma.  Mirrors
+    the sizes ``_sheath_zones`` peels off, so the outer sheath can be sized against
+    the sheath it wraps.
+    """
+    if bp.get("sheath", "none") == "none":
+        return float(bp.get("parenchyma_diameter", 0.012))
+    return float(bp.get("sclerenchyma_cell_diameter", 0.008))
+
+
+def outer_sheath_ring_diameter(bp: dict, ground_cell_size: Optional[float]) -> float:
+    """Cell diameter (== ring thickness) of the outer bundle sheath, or 0 if off.
+
+    The outer sheath is one extra file of cells wrapping the whole bundle, each
+    cell sized at the *mean* of the inner bundle-sheath cell and the surrounding
+    ground-tissue cell (``ground_cell_size``, supplied by the organ since the
+    bundle builder is organ-agnostic).  Returns 0 — i.e. no outer sheath, bundle
+    unchanged — when it is disabled (``outer_sheath=False``) or the organ passed
+    no ground cell size (e.g. the organ-agnostic bundle unit tests).
+    """
+    if not bp.get("outer_sheath", True):
+        return 0.0
+    if not ground_cell_size or ground_cell_size <= 0:
+        return 0.0
+    return 0.5 * (_sheath_cell_size(bp) + float(ground_cell_size))
+
+
+def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
+    """How far *outside* the envelope the removal mask reaches, or 0 if off.
+
+    Wider than the sheath seed ring (:func:`outer_sheath_ring_diameter`) by
+    ``outer_sheath_clearance`` ground-cell diameters: the sheath cells seed on the
+    ring, but the mask clears the ground seeds a bit further out so the surviving
+    ground cells sit clear of the sheath instead of being sliced hard against it.
+    """
+    ring = outer_sheath_ring_diameter(bp, ground_cell_size)
+    if ring <= 0.0:
+        return 0.0
+    clearance = float(bp.get("outer_sheath_clearance", 0.5)) * float(ground_cell_size)
+    return ring + max(clearance, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +340,101 @@ def _fill_xylem_packed(cells, rng, zone, cx, cy, xylem, bp, result) -> None:
         gradient_steepness=xylem.get("gradient_steepness", 3.0),
         gradient_asymmetry=xylem.get("gradient_asymmetry", 1.0),
     )
+    result.vessel_polygons.extend(vessels)
+    _fill_parenchyma(cells, zone, unary_union(vessels) if vessels else None,
+                     "parenchyma", cx, cy, p_diam, p_w)
+
+
+def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
+    """Thin radial parenchyma-separator strips that cut the xylem zone into
+    ``n_files`` tangential compartments (files), lightly jittered.
+
+    Each strip runs along the bundle's radial axis (``theta``, pith→cambium) at an
+    evenly-spaced tangential offset, overshooting the zone radially so it cuts all
+    the way across.  ``jitter`` (0 = a rigid grid) perturbs each strip's tangential
+    position and angle a little so the files don't read as mechanical rows.  Built
+    *before* the vessels — the medullar-ray idea — so the vessel packer fills the
+    compartments between them instead of one open blob.
+    """
+    if n_files <= 1:
+        return []
+    gx, gy = zone.centroid.x, zone.centroid.y
+    outer = np.array([np.cos(theta), np.sin(theta)])            # radial (pith→cambium)
+    tang = np.array([-np.sin(theta), np.cos(theta)])            # tangential
+    w = _radial_half(zone, gx, gy, tang)                        # tangential half-width
+    reach = _radial_half(zone, gx, gy, outer) + 2.0 * half_width
+    step = 2.0 * w / n_files
+    strips = []
+    for i in range(1, n_files):
+        t = -w + step * i
+        t += rng.uniform(-1.0, 1.0) * jitter * 0.5 * step       # nudge the position
+        dang = rng.uniform(-1.0, 1.0) * jitter * np.radians(12.0)  # tilt the file a touch
+        d = np.array([np.cos(theta + dang), np.sin(theta + dang)])
+        center = np.array([gx, gy]) + tang * t
+        strip = LineString([tuple(center - d * reach), tuple(center + d * reach)]).buffer(
+            half_width, cap_style=2)
+        piece = strip.intersection(zone)
+        if not piece.is_empty:
+            strips.append(piece)
+    return strips
+
+
+def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> None:
+    """Dicot xylem as endarch radial files (the medullar-ray idea, parenchyma-first).
+
+    Thin radial parenchyma strips are placed *before* the vessels and cut the xylem
+    zone into ``n_xylem_files`` tangential compartments.  Each compartment is packed
+    with size-graded vessels referenced to the organ centre and graded **endarch** —
+    small protoxylem at the inner (pith) tip, large metaxylem toward the cambium.
+    Parenchyma then fills the strips and the space around the vessels, so the
+    vessels sit in natural rows separated by parenchyma instead of one dense clump
+    of touching circles.  The files are lightly jittered (``xylem_file_jitter``).
+    """
+    zone = _largest(zone)
+    if zone is None:
+        return
+    p_diam = bp.get("parenchyma_diameter", 0.012)
+    p_w = bp.get("parenchyma_width", 0.012)
+    voronoi_grow = 0.25 * (p_diam + p_w)
+
+    n_files = max(int(bp.get("n_xylem_files", 3)), 1)
+    jitter = float(bp.get("xylem_file_jitter", 0.3))
+    strips = _xylem_file_strips(zone, theta, n_files, 0.6 * p_w, rng, jitter)
+    strip_union = unary_union(strips) if strips else None
+    compartments = zone.difference(strip_union) if strip_union is not None else zone
+    pieces = [g for g in (compartments.geoms if hasattr(compartments, "geoms") else [compartments])
+              if g.geom_type == "Polygon" and not g.is_empty]
+
+    # Endarch size gradient measured *along the radial axis* (pith→cambium).  The
+    # bundle's ``(cx, cy)`` is the bundle centre, not the organ centre, so grade
+    # against a proxy centre far down the −radial (pith-ward) direction: distance
+    # from it grows monotonically toward the cambium.  ``radial_range`` normalises
+    # the gradient over the xylem band so it actually bites (the band is thin
+    # relative to that distance), and ``direction="edge"`` puts the small
+    # protoxylem at the inner tip and the large metaxylem toward the cambium.
+    outer = np.array([np.cos(theta), np.sin(theta)])
+    gcenter = (cx - 100.0 * outer[0], cy - 100.0 * outer[1])
+    dc = np.hypot(*(np.asarray(zone.exterior.coords).T - np.array([[gcenter[0]], [gcenter[1]]])))
+    radial_range = (float(dc.min()), float(dc.max()))
+
+    vessels = []
+    for piece in pieces:
+        vs, _ = _pack_place(
+            cells, rng, piece, "xylem", cx, cy,
+            voronoi_grow=voronoi_grow, r_floor=p_diam * 0.4, n_border=25,
+            proportion=bp.get("prop_vessel", 0.55),
+            direction="edge",                       # endarch: large toward the cambium
+            gradient_center=gcenter,                # grade along the radial (pith→cambium) axis
+            gradient_radial_range=radial_range,     # …over the xylem band, so the gradient bites
+            diameter_max=xylem.get("vessel_diameter", 0.045),
+            diameter_min=xylem.get("vessel_diameter_min", 0.012),
+            diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+            gradient_function=xylem.get("gradient_function", "five_pl"),
+            gradient_inflection=xylem.get("gradient_inflection", 0.5),
+            gradient_steepness=xylem.get("gradient_steepness", 3.0),
+            gradient_asymmetry=xylem.get("gradient_asymmetry", 1.0),
+        )
+        vessels.extend(vs)
     result.vessel_polygons.extend(vessels)
     _fill_parenchyma(cells, zone, unary_union(vessels) if vessels else None,
                      "parenchyma", cx, cy, p_diam, p_w)
@@ -560,7 +700,8 @@ def _sheath_zones(working, bp):
 
 
 def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
-                 bp: dict, xylem: dict, phloem: dict, cambium: dict) -> BundleResult:
+                 bp: dict, xylem: dict, phloem: dict, cambium: dict,
+                 ground_cell_size: Optional[float] = None) -> BundleResult:
     """Build one vascular bundle at ``(cx, cy)`` oriented radially at ``theta`` (rad).
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
@@ -570,6 +711,14 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     bundle sheath — so no cell is tagged with a bare tissue name.  Cells are
     appended to ``cells`` (disjoint Voronoi-group ids).  Returns a
     :class:`BundleResult` (envelope for the mask, vessel + cavity + zone polygons).
+
+    ``ground_cell_size`` (the surrounding ground-tissue cell diameter, which only
+    the organ knows) turns on an *outer bundle sheath*: one extra file of
+    ``bundle sheath`` cells wrapping the whole bundle, sized at the mean of the
+    inner sheath cell and that ground cell (see :func:`outer_sheath_ring_diameter`).
+    It sits just outside the envelope, so the returned envelope — hence the removal
+    mask — grows to cover it.  Left ``None`` (the organ-agnostic default), no outer
+    sheath is added and the bundle is unchanged.
     """
     result = BundleResult()
     theta_deg = np.degrees(theta)
@@ -593,9 +742,18 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
         zones_local = partition_concentric(working, core_role, ring_role,
                                            bp.get("core_width", 0.05), bp.get("core_height", 0.05))
 
+    # Outer bundle sheath: a ring of cells just *outside* the envelope.  The
+    # sheath seeds live in the ``ring_diam`` annulus, but the removal mask reaches
+    # a bit further out (``mask_pad``) so the surrounding ground cells are cleared
+    # clear of the sheath instead of being sliced hard against it.
+    ring_diam = outer_sheath_ring_diameter(bp, ground_cell_size)
+    mask_pad = outer_sheath_mask_pad(bp, ground_cell_size)
+    ring_local = _largest(env_local.buffer(ring_diam).difference(env_local)) if ring_diam > 0 else None
+    outer_env_local = env_local.buffer(mask_pad) if mask_pad > 0 else env_local
+
     sheath_geoms = GeometryProcessor.place_local([r for _, r, _, _ in sheath_local], cx, cy, theta_deg)
     zone_geoms = GeometryProcessor.place_local([g for _, g in zones_local], cx, cy, theta_deg)
-    result.envelope = GeometryProcessor.place_local([env_local], cx, cy, theta_deg)[0]
+    result.envelope = GeometryProcessor.place_local([outer_env_local], cx, cy, theta_deg)[0]
 
     # Sheath first (fibres or a parenchyma bundle sheath).
     for (tag, _r, cd, cw), geom in zip(sheath_local, sheath_geoms):
@@ -616,8 +774,11 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
             continue
         result.zone_polygons.append((role, geom))
         if role == "xylem":
-            if bp.get("xylem_layout", "packed") == "face":
+            layout = bp.get("xylem_layout", "packed")
+            if layout == "face":
                 _fill_xylem_face(cells, rng, geom, cx, cy, theta, bp, phloem, result)
+            elif layout == "files":
+                _fill_xylem_files(cells, rng, geom, cx, cy, theta, xylem, bp, result)
             else:
                 _fill_xylem_packed(cells, rng, geom, cx, cy, xylem, bp, result)
         elif role == "phloem":
@@ -626,5 +787,12 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
         elif role == "cambium":
             _fill_cambium(cells, rng, geom, cx, cy, cambium)
 
+    # Finally, the outer bundle sheath wrapping everything (single file hugging the
+    # expanded envelope, like the non-fibre bundle sheath does inside it).
+    if ring_local is not None and not ring_local.is_empty:
+        ring_geom = GeometryProcessor.place_local([ring_local], cx, cy, theta_deg)[0]
+        if ring_geom is not None and not ring_geom.is_empty:
+            result.zone_polygons.append(("bundle sheath", ring_geom))
+            fill_along(cells, ring_geom, "bundle sheath", ring_diam, ring_diam, cx, cy)
 
     return result

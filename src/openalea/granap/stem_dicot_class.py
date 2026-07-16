@@ -61,7 +61,7 @@ class DicotStemAnatomy(StemAnatomy):
         recipe.special(
             "collateral bundle ring",
             lambda: self._build_bundle_ring(polygon),
-            produces=("xylem", "cambium", "phloem"),
+            produces=("xylem", "cambium", "phloem", "bundle sheath"),
         )
         return recipe
 
@@ -108,12 +108,15 @@ class DicotStemAnatomy(StemAnatomy):
         pair (slots 0 and 1) settles the whole ring.
         """
         gap = self._bundle_clearance(bp)
+        # Bundles ring the pith edge, so their outer sheath is sized against the
+        # pith-edge cell (r_norm = 1); include it in the clearance footprint.
+        ground = self._pith_cell_diameter_at(r_ring, r_ring)
         for n in range(n_req, 1, -1):
             env0 = self._placed_bundle_envelope(
-                cx0 + r_ring, cy0, 0.0, bp)
+                cx0 + r_ring, cy0, 0.0, bp, ground)
             theta1 = 2.0 * np.pi / n
             env1 = self._placed_bundle_envelope(
-                cx0 + r_ring * np.cos(theta1), cy0 + r_ring * np.sin(theta1), theta1, bp)
+                cx0 + r_ring * np.cos(theta1), cy0 + r_ring * np.sin(theta1), theta1, bp, ground)
             if not self._bundle_overlaps(env0, [env1], gap):
                 return n
         return 1
@@ -135,7 +138,10 @@ class DicotStemAnatomy(StemAnatomy):
         cambium = self._get_param("cambium")
         if not bp:
             return
+        cx0, cy0 = polygon.centroid.x, polygon.centroid.y
+        r_pith = np.sqrt(polygon.area / np.pi)
         for cx, cy, theta in self._bundle_ring_positions(polygon):
+            ground = self._pith_cell_diameter_at(np.hypot(cx - cx0, cy - cy0), r_pith)
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
-                               bp, xylem, phloem, cambium)
+                               bp, xylem, phloem, cambium, ground_cell_size=ground)
             self._register_bundle(res)

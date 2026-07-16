@@ -68,7 +68,7 @@ BANDS = [
         sheath="both", sheath_thickness=0.007,
         sclerenchyma_cell_diameter=0.006, sclerenchyma_cell_width=0.006,
         radius_min=0.0, radius_max=0.55, placement="random", n_bundles=5,
-        width=0.15, height=0.24, n_metaxylem=2, metaxylem_diameter=0.06,
+        width=0.15, height=0.24, n_metaxylem=2
     )},
     # mid — an evenly-spaced ring of medium bundles.
     {**BASE, **dict(
@@ -109,7 +109,7 @@ BANDS = [
         sheath="both", sheath_thickness=0.007,
         sclerenchyma_cell_diameter=0.006, sclerenchyma_cell_width=0.006,
         radius_min=1.0, radius_max=1.24, placement="even", angle=15.0, n_bundles=18,
-        width=0.08, height=0.12, n_metaxylem=1, metaxylem_diameter=0.035,
+        width=0.08, height=0.12,
         protoxylem_width=0.022, protoxylem_height=0.022, lacuna_width=0.018,
         phloem_width=0.035, phloem_height=0.028,
     )},

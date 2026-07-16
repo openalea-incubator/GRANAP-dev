@@ -214,6 +214,26 @@ class StemAnatomy(Organ):
                 radius += layer.cell_diameter
         return radius
 
+    def _pith_diameter_fn(self):
+        """Pith radial size gradient: ``r_norm`` (0 = centre .. 1 = pith edge) ->
+        ground-tissue cell diameter.  The single source for both the central pith
+        rings and the outer-sheath sizing against the surrounding ground cells."""
+        return rescale(
+            GRADIENT_FUNCTIONS[self.vascular_params["size_gradient_function"]],
+            lo=self.vascular_params["cell_diameter"],
+            hi=self.vascular_params["cell_diameter_center"],
+            c=self.vascular_params["size_gradient_inflection"],
+            b=self.vascular_params["size_gradient_steepness"],
+            m=self.vascular_params["size_gradient_asymmetry"],
+        )
+
+    def _pith_cell_diameter_at(self, r: float, r_pith: float) -> float:
+        """Ground-tissue (pith) cell diameter at radius ``r`` mm from the organ
+        centre, evaluated from the same gradient the central rings use — so a
+        bundle's outer sheath is sized against the ground cells it sits among."""
+        r_norm = float(np.clip(r / r_pith, 0.0, 1.0)) if r_pith > 0 else 1.0
+        return float(self._pith_diameter_fn()(r_norm))
+
     def _create_central_layers(self, current_polygon: Polygon,
                                params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         """Create pith parenchyma rings from the pith edge toward the centre.
@@ -223,14 +243,7 @@ class StemAnatomy(Organ):
         """
         central_layers = []
 
-        diameter_fn = rescale(
-            GRADIENT_FUNCTIONS[self.vascular_params["size_gradient_function"]],
-            lo=self.vascular_params["cell_diameter"],
-            hi=self.vascular_params["cell_diameter_center"],
-            c=self.vascular_params["size_gradient_inflection"],
-            b=self.vascular_params["size_gradient_steepness"],
-            m=self.vascular_params["size_gradient_asymmetry"],
-        )
+        diameter_fn = self._pith_diameter_fn()
 
         pith_radius = np.sqrt(current_polygon.area / np.pi)
         cx, cy = current_polygon.centroid.x, current_polygon.centroid.y
@@ -360,10 +373,13 @@ class StemAnatomy(Organ):
                              id_layer=id_layer, replace=False)
 
         elif pith_cells and cavity is not None:
-            # Hollow culm: clip pith cells out of the cavity so it stays a void.
+            # Hollow culm: clip cells out of the cavity so it stays a void.  Any
+            # type can spill in — pith cells bordering it, or a bundle's outer
+            # sheath cell whose Voronoi region balloons across the empty cavity —
+            # so clip by overlap, not by tissue type.
             kept = []
             for c in self.all_cells.cells:
-                if c.type == "pith" and c.polygon is not None and c.polygon.intersects(cavity):
+                if c.polygon is not None and c.polygon.intersects(cavity):
                     piece = self._largest_piece(c.polygon.difference(cavity))
                     if piece is None:
                         continue                    # cell was entirely inside the cavity
@@ -387,15 +403,22 @@ class StemAnatomy(Organ):
         """
         return float(bp.get("parenchyma_diameter", 0.012))
 
-    def _placed_bundle_envelope(self, cx: float, cy: float, theta: float, bp: dict) -> Polygon:
+    def _placed_bundle_envelope(self, cx: float, cy: float, theta: float, bp: dict,
+                                ground_cell_size: float = None) -> Polygon:
         """The bundle footprint placed at ``(cx, cy)`` oriented radially at ``theta``.
 
         Reproduces exactly what :func:`vascular_bundle.build_bundle` sets as
         ``res.envelope`` — but without seeding any cells — so a placement routine
         can test a *candidate* footprint for overlap before committing to it.
+        ``ground_cell_size`` (the local pith cell size) grows the footprint by the
+        outer bundle sheath, so overlap tests spend the same clearance the built
+        bundle will actually occupy.
         """
-        from openalea.granap.vascular_bundle import _local_envelope
+        from openalea.granap.vascular_bundle import _local_envelope, outer_sheath_mask_pad
         env_local = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"))
+        pad = outer_sheath_mask_pad(bp, ground_cell_size)
+        if pad > 0:
+            env_local = env_local.buffer(pad)
         return GeometryProcessor.place_local([env_local], cx, cy, np.degrees(theta))[0]
 
     def _bundle_overlaps(self, env: Polygon, others: List[Polygon], gap: float) -> bool:
