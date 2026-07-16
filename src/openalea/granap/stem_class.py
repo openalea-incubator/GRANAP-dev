@@ -19,15 +19,17 @@ Botanical model (canonical textbook):
   inner, phloem outer, cambium between) around a central pith, with cortex and
   epidermis outside (built by :class:`DicotStemAnatomy`).
 
-Scaffold status: the shared geometry and parameter plumbing are complete and
-``generate_cells()`` runs end-to-end (epidermis + cortex + pith ground tissue);
-the vascular-bundle placement in each subclass is still stubbed (see the
-``_vascular_recipe`` of each subclass).
+``generate_cells()`` runs end-to-end: the shared geometry here builds the
+epidermis + cortex + pith ground tissue, and each subclass places its vascular
+bundles (a scattered atactostele or an evenly-spaced eustele ring) via
+:func:`vascular_bundle.build_bundle`.  Bundle placement is constrained so no two
+bundle envelopes overlap (see ``_placed_bundle_envelope`` /
+``_bundle_overlaps`` and the per-subclass placement routines).
 """
 
 import warnings
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
@@ -371,6 +373,63 @@ class StemAnatomy(Organ):
 
         # (Protoxylem lacunae are seeded as ordinary 'air space' cells by the
         # bundle builder, so they need no post-Voronoi carving here.)
+
+    # ------------------------------------------------------------------
+    # Bundle placement geometry (shared by both plant types)
+    # ------------------------------------------------------------------
+
+    def _bundle_clearance(self, bp: dict) -> float:
+        """Minimum ground-tissue gap required between two bundle envelopes.
+
+        Bundles are separated by ground tissue in a real stem, so two envelopes
+        must never touch: we keep at least one parenchyma cell's worth of clear
+        space between them.
+        """
+        return float(bp.get("parenchyma_diameter", 0.012))
+
+    def _placed_bundle_envelope(self, cx: float, cy: float, theta: float, bp: dict) -> Polygon:
+        """The bundle footprint placed at ``(cx, cy)`` oriented radially at ``theta``.
+
+        Reproduces exactly what :func:`vascular_bundle.build_bundle` sets as
+        ``res.envelope`` — but without seeding any cells — so a placement routine
+        can test a *candidate* footprint for overlap before committing to it.
+        """
+        from openalea.granap.vascular_bundle import _local_envelope
+        env_local = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"))
+        return GeometryProcessor.place_local([env_local], cx, cy, np.degrees(theta))[0]
+
+    def _bundle_overlaps(self, env: Polygon, others: List[Polygon], gap: float) -> bool:
+        """True if ``env`` comes within ``gap`` of any already-placed envelope."""
+        if not others:
+            return False
+        probe = env.buffer(gap) if gap > 0 else env
+        return any(probe.intersects(o) for o in others)
+
+    def _bundle_specs(self) -> List[dict]:
+        """All ``vascular_bundle`` param specs, sorted by inner band radius.
+
+        A stem may carry more than one ``vascular_bundle`` entry, each owning a
+        radial band (``radius_min`` .. ``radius_max`` mm from the organ centre).
+        The monocot atactostele places each spec's ``n_bundles`` within its own
+        annulus, so bundle *kind* can vary with radius; with a single spec (the
+        default) that one kind fills the whole ground tissue.  ``_get_param``
+        still returns just the first entry — this is the multi-spec view.
+        """
+        return sorted(
+            (p for p in self.params if p["name"] == "vascular_bundle"),
+            key=lambda b: float(b.get("radius_min", 0.0)),
+        )
+
+    @staticmethod
+    def _spec_band(bp: dict, r_pith: float) -> Tuple[float, float]:
+        """Radial band ``(r_lo, r_hi)`` of a bundle spec, in mm.
+
+        ``radius_max <= 0`` means the band runs out to the pith edge; ``r_hi`` is
+        clamped to ``r_pith`` so a band never reaches past the ground tissue.
+        """
+        r_lo = float(bp.get("radius_min", 0.0))
+        r_hi = float(bp.get("radius_max", 0.0))
+        return r_lo, (min(r_hi, r_pith) if r_hi > 0.0 else r_pith)
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         return layers_polygons

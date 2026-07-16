@@ -16,9 +16,11 @@ Two partition families cover the four botanical types:
 * **concentric** (``concentric`` + ``amphivasal`` / ``amphicribral``): a core +
   a ring (one tissue surrounding the other).
 
-The monocot xylem "face" (``xylem_layout="face"``) is a bespoke fill *within* the
-xylem zone: a few discrete metaxylem "eyes" + protoxylem, with an optional
-protoxylem lacuna (a void).
+The monocot xylem "face" (``xylem_layout="face"``) is a bespoke fill over the
+whole bundle region: metaxylem vessel(s) at the radial middle, a protoxylem
+bundle (+ optional lacuna void) in the inner half, and the phloem cluster in the
+outer half — all positioned relative to the bundle centre.  Metaxylem and
+protoxylem are both tagged ``xylem`` (no distinction).
 
 Placement (how many bundles and where — a eustele ring vs a scattered
 atactostele) is the caller's job; this module builds one bundle at a time.
@@ -66,11 +68,27 @@ def _largest(geom):
     return max(pieces, key=lambda g: g.area) if pieces else None
 
 
-def _local_envelope(width: float, height: float, shape: str) -> Polygon:
-    """Envelope in the local frame: centred at the origin, radial axis = +y."""
+def _local_envelope(width: float, height: float, shape: str,
+                    focus_exponent: float = 4.0, egg_waist: float = 0.6) -> Polygon:
+    """Envelope in the local frame: centred at the origin, radial axis = +y.
+
+    ``ellipse`` / ``circle`` as before; ``focus_ellipse`` is a superellipse
+    (``focus_exponent`` tunes flank fullness at a fixed bounding box); ``egg`` is
+    a teardrop whose wider lobe is offset toward the outer (+y) pole by
+    ``egg_waist`` (the outer lobe's share of the radial extent)."""
     if shape == "circle":
         d = min(width, height)
         return Point(0, 0).buffer(d / 2, resolution=64)
+    if shape == "focus_ellipse":
+        # Superellipse: width along x (tangential), height along y (radial).
+        return GeometryProcessor.focus_ellipse_polygon(
+            0.0, 0.0, width / 2, height / 2, 0.0, exponent=focus_exponent)
+    if shape == "egg":
+        # Teardrop: the a_out lobe (outer share = egg_waist) points to +y (radial
+        # surface pole); b = semi-minor (tangential).
+        a_out = height * egg_waist
+        a_in = height * (1.0 - egg_waist)
+        return GeometryProcessor.egg_polygon(0.0, 0.0, a_out, a_in, width / 2, 90.0)
     return GeometryProcessor.oriented_ellipse(0.0, 0.0, width, height, 90.0)
 
 
@@ -206,32 +224,38 @@ def _pack_place(cells, rng, zone, tag, cx, cy, *, voronoi_grow, r_floor,
     return polys, centers
 
 
-def _place_companions(cells, rng, zone, sieve_centers, comp_d, voronoi_grow, cx, cy):
+def _place_companions(cells, rng, zone, sieve_centers, comp_d, comp_w, voronoi_grow, cx, cy):
     """One companion cell beside each sieve element (rejecting sieve overlaps).
 
     Mirrors the dicot-root secondary phloem: a companion is tried on random sides
     of its sieve and kept on the first free one, so every sieve element is paired.
+    Each companion is an oriented cell — radial extent ``comp_d`` x tangential
+    extent ``comp_w`` — aligned with the radial direction at its location.
     """
     zone = _largest(zone)
     if zone is None or not sieve_centers:
         return []
     sieve_union = unary_union([Point(c[0], c[1]).buffer(c[2]) for c in sieve_centers])
     comp_d = max(comp_d - voronoi_grow, comp_d * 0.5)
-    comp_r = comp_d / 2
+    comp_w = max(comp_w - voronoi_grow, comp_w * 0.5)
+    off = max(comp_d, comp_w) / 2      # centre offset from the sieve edge
     comps = []
     for pcx, pcy, r in sieve_centers:
         theta0 = rng.uniform(0.0, 2 * np.pi)
         for k in range(8):
             a = theta0 + 2 * np.pi * k / 8
-            ccx, ccy = pcx + (r + comp_r * 1.05) * np.cos(a), pcy + (r + comp_r * 1.05) * np.sin(a)
+            ccx, ccy = pcx + (r + off * 1.05) * np.cos(a), pcy + (r + off * 1.05) * np.sin(a)
             if not zone.contains(Point(ccx, ccy)):
                 continue
-            circle = Point(ccx, ccy).buffer(comp_r)
-            if circle.intersects(sieve_union) or any(circle.intersects(c) for c in comps):
+            # Radial axis at this cell = away from the organ centre (cx, cy).
+            ang = np.degrees(np.arctan2(ccy - cy, ccx - cx))
+            cell_poly = GeometryProcessor.oriented_ellipse(ccx, ccy, comp_w, comp_d, ang)
+            if cell_poly.intersects(sieve_union) or any(cell_poly.intersects(c) for c in comps):
                 continue
-            placed = _place_circle(cells, ccx, ccy, comp_r, "companion cell", (cx, cy), n_border=14)
+            placed = _place_region_cell(cells, cell_poly.intersection(zone),
+                                        "companion cell", (cx, cy), n_border=14)
             if placed is not None:
-                comps.append(circle)
+                comps.append(cell_poly)
             break
     return comps
 
@@ -277,108 +301,129 @@ def _fill_xylem_packed(cells, rng, zone, cx, cy, xylem, bp, result) -> None:
 
 
 def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> None:
-    """The monocot 'face' bundle over the whole bundle region.
+    """The monocot 'face' bundle, arranged about the bundle centre along +radial.
 
-    Stacked along the radial axis, inner->outer: protoxylem (each a small vessel
-    with an ``air space`` lacuna cell just below it) toward the centre, the
-    metaxylem "eyes" near the middle, then the phloem ellipse (sieve elements +
-    companion cells) toward the surface at a tunable ``phloem_relative_distance``
-    — then parenchyma around them all.  Endarch (stem) as described; exarch flips
-    the poles.
+    * **metaxylem** — ``n_metaxylem`` single vessels at the radial *middle*
+      (placed first), spread tangentially; each sized ``metaxylem_diameter`` (+-
+      ``_sd``, clipped to ``_diameter_min``) and tagged ``xylem``;
+    * **protoxylem** — ``n_protoxylem`` small bundle region(s) in the *inner*
+      (centre-facing) half at ``protoxylem_relative_distance``, each an ellipse
+      (``protoxylem_width`` x ``protoxylem_height``) packed with protoxylem
+      vessels, also tagged ``xylem``;
+    * an optional **lacuna** just inner of each protoxylem bundle (a void seeded
+      as one ``air space`` cell), kept with the protoxylem inside the inner half;
+    * the **phloem** cluster (sieve elements + one companion cell beside each) in
+      the *outer* (surface-facing) half at ``phloem_relative_distance``.
 
-    Positions are computed edge-to-edge (not fixed fractions) so the rings never
-    overlap or clip out of the bundle, and every vessel / lacuna is seeded a touch
-    undersized so the surrounding parenchyma's Voronoi growth brings it back to
-    size instead of ballooning.
+    All radial offsets are measured from the bundle centre, so the inner and
+    outer halves never collide.  Vessels are seeded a touch undersized so the
+    surrounding parenchyma's Voronoi growth brings them back to size.
     """
     zone = _largest(zone)
     if zone is None:
         return
     gx, gy = zone.centroid.x, zone.centroid.y
+    theta_deg = np.degrees(theta)
     outer = np.array([np.cos(theta), np.sin(theta)])       # radial, toward surface
     tang = np.array([-np.sin(theta), np.cos(theta)])
     h = _radial_half(zone, gx, gy, outer)                  # radial half-height of the bundle
+    # phloem_inward flips which pole faces the surface (keeps the banded convention).
+    if not bp.get("phloem_outward", True):
+        outer = -outer
 
-    pole = outer if bp.get("xylem_maturation", "endarch") == "endarch" else -outer
     p_diam = bp.get("parenchyma_diameter", 0.012)
     p_w = bp.get("parenchyma_width", 0.012)
     vgrow = 0.25 * (p_diam + p_w)                          # Voronoi over-grow to pre-shrink for
+    margin = 1.2 * p_diam
 
     def at(s, t):                                          # radial offset s, tangential offset t
-        return np.array([gx, gy]) + pole * s + tang * t
+        return np.array([gx, gy]) + outer * s + tang * t
 
     def seed(pcx, pcy, r_eff, tag, n_border):
         r_draw = max(r_eff - vgrow / 2.0, r_eff * 0.55)    # undersize so it doesn't balloon
         return _place_circle(cells, pcx, pcy, r_draw, tag, (cx, cy), n_border)
 
     placed_polys, occupied = [], []
-    dm = float(bp.get("metaxylem_diameter", 0.018))
-    r_m = dm / 2.0
-    dp = float(bp.get("protoxylem_diameter", 0.008))
-    r_p = dp / 2.0
-    add_lacuna = bp.get("lacuna", False)
-    lac_w = float(bp.get("lacuna_width", 0.014))
-    lac_h = float(bp.get("lacuna_height", 0.011)) if add_lacuna else 0.0
-    ph_h = float(bp.get("phloem_height", phloem.get("cluster_height", 0.02)))
-    gap = 0.8 * p_diam                                     # parenchyma gap between rings
-    margin = 1.6 * p_diam                                  # parenchyma margin off the bundle edge
 
-    # Stack the rows inner->outer from the inner edge: lacuna, protoxylem,
-    # metaxylem, then phloem.  Building edge-to-edge from -h guarantees a
-    # parenchyma margin at the inner pole so the lacuna can't touch the bundle
-    # edge and balloon.
-    s = -h + margin
-    s_lac = s + lac_h / 2.0
-    if add_lacuna:
-        s = s_lac + lac_h / 2.0 + gap
-    s_proto = s + r_p
-    s = s_proto + r_p + gap
-    s_meta = s + r_m
-    s = s_meta + r_m + gap
-    s_ph_near = s + ph_h / 2.0
-    s_ph_far = max(h - margin - ph_h / 2.0, s_ph_near)
-
-    # Protoxylem (+ its lacuna just below it), spread tangentially.
-    n_proto = int(bp.get("n_protoxylem", 1))
-    for k in range(n_proto):
-        t = (k - (n_proto - 1) / 2.0) * max(dp * 2.6, lac_w * 1.2)
-        d = float(np.clip(rng.normal(dp, bp.get("protoxylem_diameter_sd", 0.0015)), dp * 0.3, np.inf))
-        poly = _largest(Point(*at(s_proto, t)).buffer(d / 2, resolution=28).intersection(zone))
-        if poly is not None:
-            r_eff = np.sqrt(poly.area / np.pi)
-            placed = seed(poly.centroid.x, poly.centroid.y, r_eff, "protoxylem", 20)
-            if placed is not None:
-                placed_polys.append(placed)
-                occupied.append(placed)
-        if add_lacuna:
-            # Seed the lacuna as a round 'air space' cell through the same
-            # undersize path as the vessels (so it renders at size, not ballooned).
-            r_lac = lac_h / 2.0
-            lpoly = _largest(Point(*at(s_lac, t)).buffer(r_lac, resolution=28).intersection(zone))
-            if lpoly is not None:
-                r_eff = np.sqrt(lpoly.area / np.pi)
-                placed_lac = seed(lpoly.centroid.x, lpoly.centroid.y, r_eff, "air space", 18)
-                if placed_lac is not None:
-                    placed_polys.append(placed_lac)
-                    occupied.append(placed_lac)
-
-    # Metaxylem "eyes", spread tangentially.
+    # 1) Metaxylem — single vessel(s) at the radial middle, spread tangentially.
+    dm = float(bp.get("metaxylem_diameter", 0.04))
+    dm_sd = float(bp.get("metaxylem_diameter_sd", 0.003))
+    dm_min = float(bp.get("metaxylem_diameter_min", dm * 0.5))
     n_meta = int(bp.get("n_metaxylem", 2))
-    m_gap = float(bp.get("metaxylem_gap", 0.012))
+    m_gap = float(bp.get("metaxylem_gap", 0.04))
     for k in range(n_meta):
-        d = float(np.clip(rng.normal(dm, bp.get("metaxylem_diameter_sd", 0.003)), dm * 0.3, np.inf))
-        poly = _largest(Point(*at(s_meta, (k - (n_meta - 1) / 2.0) * (dm + m_gap)))
+        d = float(np.clip(rng.normal(dm, dm_sd), dm_min, np.inf))
+        poly = _largest(Point(*at(0.0, (k - (n_meta - 1) / 2.0) * (dm + m_gap)))
                         .buffer(d / 2, resolution=32).intersection(zone))
         if poly is None:
             continue
         r_eff = np.sqrt(poly.area / np.pi)
-        placed = seed(poly.centroid.x, poly.centroid.y, r_eff, "metaxylem", 24)
+        placed = seed(poly.centroid.x, poly.centroid.y, r_eff, "xylem", 24)
         if placed is not None:
             placed_polys.append(placed)
             occupied.append(placed)
 
-    # Phloem ellipse outer of the metaxylem, at phloem_relative_distance.
-    ell = _phloem_ellipse(zone, gx, gy, pole, theta, bp, phloem, s_ph_near, s_ph_far)
+    # 2) Protoxylem bundle(s) (+ optional inner lacuna) in the inner half.
+    px_w = float(bp.get("protoxylem_width", 0.03))
+    px_h = float(bp.get("protoxylem_height", 0.03))
+    px_rel = float(bp.get("protoxylem_relative_distance", 0.6))
+    n_proto = int(bp.get("n_protoxylem", 1))
+    add_lacuna = bool(bp.get("lacuna", False))
+    lac_w = float(bp.get("lacuna_width", 0.03))
+    lac_h = float(bp.get("lacuna_height", 0.02)) if add_lacuna else 0.0
+
+    # Keep the protoxylem region (and its inner lacuna) within the inner half
+    # [-h + margin, 0]: pull the centre in until region + lacuna fit.
+    # The lacuna sits flush against the protoxylem's inner edge (no gap), so the
+    # inner-half budget is exactly the region plus the lacuna.
+    inner_span = max(h - margin, px_h / 2.0)
+    lac_reach = lac_h if add_lacuna else 0.0
+    s_px_max = max(inner_span - px_h / 2.0 - lac_reach, px_h / 2.0)
+    s_px = min(px_rel * inner_span, s_px_max)
+    for k in range(n_proto):
+        t = (k - (n_proto - 1) / 2.0) * (px_w + margin)
+        pc = at(-s_px, t)
+        region = _largest(GeometryProcessor.oriented_ellipse(pc[0], pc[1], px_w, px_h, theta_deg)
+                          .intersection(zone))
+        if region is not None and not region.is_empty:
+            vessels, _ = _pack_place(
+                cells, rng, region, "xylem", cx, cy,
+                voronoi_grow=vgrow, r_floor=p_diam * 0.4, n_border=18,
+                proportion=bp.get("prop_vessel", 0.55), direction=None,
+                diameter_max=float(bp.get("protoxylem_diameter", 0.012)),
+                diameter_min=float(bp.get("protoxylem_diameter_min", 0.006)),
+                diameter_sd=float(bp.get("protoxylem_diameter_sd", 0.0015)),
+                gradient_function="normal",
+            )
+            if not vessels:
+                # Region too small for the packer to fit a vessel — a small
+                # protoxylem bundle is still a bundle: seed one vessel on its
+                # inscribed circle so it always renders.
+                ix, iy, ir = GeometryProcessor.get_inscribed_circle(region)
+                placed = seed(ix, iy, ir, "xylem", 18) if ir > 0 else None
+                if placed is not None:
+                    vessels = [placed]
+            placed_polys.extend(vessels)
+            occupied.extend(vessels)
+        if add_lacuna:
+            # Flush against the protoxylem region's inner edge.
+            lc = at(-(s_px + px_h / 2.0 + lac_h / 2.0), t)
+            lac = _largest(GeometryProcessor.oriented_ellipse(lc[0], lc[1], lac_w, lac_h, theta_deg)
+                           .intersection(zone))
+            placed_lac = (_place_region_cell(cells, lac, "air space", (cx, cy), n_border=18)
+                          if lac is not None and not lac.is_empty else None)
+            if placed_lac is not None:
+                occupied.append(placed_lac)
+
+    # 3) Phloem cluster in the outer half, at phloem_relative_distance.
+    ph_w = float(bp.get("phloem_width", phloem.get("cluster_width", 0.05)))
+    ph_h = float(bp.get("phloem_height", phloem.get("cluster_height", 0.04)))
+    ph_rel = float(bp.get("phloem_relative_distance", 0.5))
+    outer_span = max(h - margin, ph_h / 2.0)
+    s_ph = min(max(ph_rel * outer_span, ph_h / 2.0), outer_span - ph_h / 2.0)
+    pc = at(s_ph, 0.0)
+    ell = _largest(GeometryProcessor.oriented_ellipse(pc[0], pc[1], ph_w, ph_h, theta_deg)
+                   .intersection(zone))
     if ell is not None and not ell.is_empty:
         ph_occ = _place_phloem_cells(cells, rng, ell, cx, cy, phloem, bp)
         if ph_occ is not None:
@@ -408,10 +453,11 @@ def _place_phloem_cells(cells, rng, sieve_zone, cx, cy, phloem, bp):
     voronoi_grow = 0.25 * (p_diam + p_w)
     sieve_d = phloem.get("sieve_diameter", 0.012)
     sieve_min = bp.get("sieve_diameter_min", 0.006)
-    comp_d = bp.get("companion_diameter", 0.007)
+    comp_d = bp.get("companion_cell_diameter", 0.004)
+    comp_w = bp.get("companion_cell_width", 0.004)
     prop_sieve = bp.get("prop_sieve", 0.45)
     # Fraction to pack with sieves so sieve+companion together ~= prop_sieve.
-    proportion = prop_sieve * sieve_d ** 2 / (sieve_d ** 2 + comp_d * comp_d)
+    proportion = prop_sieve * sieve_d ** 2 / (sieve_d ** 2 + comp_d * comp_w)
     sieves, centers = _pack_place(
         cells, rng, sieve_zone, "sieve element", cx, cy,
         voronoi_grow=voronoi_grow, r_floor=min(sieve_d / 2, p_diam * 0.4), n_border=16,
@@ -419,7 +465,7 @@ def _place_phloem_cells(cells, rng, sieve_zone, cx, cy, phloem, bp):
         diameter_max=sieve_d, diameter_min=sieve_min,
         diameter_sd=phloem.get("sieve_diameter_sd", 0.001), gradient_function="normal",
     )
-    comps = _place_companions(cells, rng, sieve_zone, centers, comp_d, voronoi_grow, cx, cy)
+    comps = _place_companions(cells, rng, sieve_zone, centers, comp_d, comp_w, voronoi_grow, cx, cy)
     return unary_union(sieves + comps) if (sieves or comps) else None
 
 
@@ -527,7 +573,9 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     """
     result = BundleResult()
     theta_deg = np.degrees(theta)
-    env_local = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"))
+    env_local = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"),
+                                focus_exponent=bp.get("focus_exponent", 4.0),
+                                egg_waist=bp.get("egg_waist", 0.6))
 
     working, sheath_local = _sheath_zones(env_local, bp)
 

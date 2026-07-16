@@ -40,7 +40,7 @@ def _monocot(cavity_radius=0.0):
 
 
 SCENARIOS = [
-    ("dicot — collateral eustele",  _dicot()),
+    ("dicot — collateral",  _dicot()),
     ("dicot — bicollateral",        _dicot({"bundle_type": "bicollateral", "inner_phloem_fraction": 0.2})),
     ("dicot — amphivasal",          _dicot({"bundle_type": "concentric", "concentric_type": "amphivasal",
                                             "shape": "circle", "width": 0.16, "height": 0.16})),

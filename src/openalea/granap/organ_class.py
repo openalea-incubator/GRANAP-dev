@@ -844,6 +844,12 @@ class Organ(AbstractNetwork, ABC):
         air_union = unary_union([a.polygon for a in air_spaces if a.polygon is not None and a.id_layer != 0])
 
         for cell in tissue_cells:
+            # A degenerate cell (polygon fully consumed by an upstream removal
+            # mask, e.g. a bundle envelope) carries no geometry to carve — drop
+            # it, mirroring the None guard on the air spaces above.
+            if cell.polygon is None:
+                self.all_cells.remove_cells_by_ids([cell.id_cell])
+                continue
             carved = cell.polygon.difference(air_union)
             if not carved.is_empty and carved.area > 1E-6:
                 cell.polygon = carved

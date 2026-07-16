@@ -7,9 +7,9 @@ Renders the canonical stem anatomies GRANAP can build:
 * dicot **bicollateral** — phloem on both sides of the xylem;
 * dicot **concentric** — amphivasal (xylem rings a phloem core) and amphicribral
   (phloem rings a xylem core);
-* monocot atactostele — scattered **'face'** bundles (2 metaxylem "eyes" +
-  protoxylem + a lacuna) wrapped in a sclerenchyma sheath, on a solid pith and
-  on a hollow culm.
+* monocot atactostele — scattered **'face'** bundles (metaxylem at the middle,
+  a protoxylem bundle + a lacuna toward the centre, phloem toward the surface)
+  wrapped in a sclerenchyma sheath, on a solid pith and on a hollow culm.
 
 Run as a script to see them side by side.
 """
@@ -43,7 +43,7 @@ def _monocot(cavity_radius=0.0):
 
 
 SCENARIOS = [
-    ("dicot — collateral eustele",  _dicot()),
+    ("dicot — collateral",  _dicot()),
     ("dicot — bicollateral",        _dicot({"bundle_type": "bicollateral", "inner_phloem_fraction": 0.2})),
     ("dicot — amphivasal",          _dicot({"bundle_type": "concentric", "concentric_type": "amphivasal",
                                             "shape": "circle", "width": 0.16, "height": 0.16})),
@@ -62,7 +62,7 @@ def main(show=True):
         stem = StemAnatomy(data, seed=SEED)
         stem.generate_cells()
         n_v = sum(1 for c in stem.all_cells.cells
-                  if c.type in ("xylem", "metaxylem", "protoxylem", "phloem", "cambium"))
+                  if c.type in ("xylem", "phloem", "sieve element", "cambium"))
         print(f"  Time: {time.time() - t0:.2f}s   vascular cells: {n_v}")
         stem.plot_cells(show=False, ax=ax, title=label)
         # Keep a per-panel legend: geopandas colours the `tab20` categories from

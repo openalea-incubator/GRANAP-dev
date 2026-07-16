@@ -9,7 +9,7 @@ the arrangement that defines each bundle type:
     bicollateral  -> phloem on both radial sides of the xylem
     amphivasal    -> xylem rings a phloem core (xylem farther from centre)
     amphicribral  -> phloem rings a xylem core (phloem farther from centre)
-    face (monocot)-> metaxylem outer of protoxylem (endarch), + a lacuna void
+    face (monocot)-> metaxylem outer of protoxylem, + a lacuna void
 
 Two whole-organ smoke tests then confirm the dicot eustele and monocot
 atactostele presets generate, and that a hollow pith leaves the centre empty.
@@ -88,9 +88,9 @@ def test_amphicribral_phloem_rings_xylem():
 
 def test_face_metaxylem_outer_of_protoxylem_with_lacuna():
     cells, res = _build(bundle_type="collateral", has_cambium=False, xylem_layout="face",
-                        lacuna=True, xylem_maturation="endarch")
+                        lacuna=True)
     assert _mean_x(cells, "metaxylem") > _mean_x(cells, "protoxylem"), \
-        "endarch face: metaxylem sits outer of protoxylem"
+        "face bundle: metaxylem sits outer of protoxylem"
     # The lacuna is seeded as an ordinary 'air space' cell just below the protoxylem.
     assert any(c.type == "air space" for c in cells.cells), \
         "lacuna=True must place an air-space lacuna cell"

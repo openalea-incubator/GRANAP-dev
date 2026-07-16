@@ -7,13 +7,14 @@ then a cortex and epidermis outside.  Instantiate via ``StemAnatomy(input_data)`
 — the factory in :mod:`openalea.granap.stem_class` dispatches here when
 ``planttype == 2``.
 
-Scaffold status: parameter parsing, layer setup and the vascular *hook* are in
-place; the bundle-ring placement itself (``_build_bundle_ring``) is a documented
-stub, so ``generate_cells()`` currently renders the pith + cortex + epidermis
-without vascular cells.
+The bundles are placed on an evenly-spaced ring at the pith/cortex boundary
+(``_bundle_ring_positions``).  The requested ``n_bundles`` is clamped to the
+count that fits without adjacent bundle envelopes overlapping (a warning is
+issued when it has to be reduced), which keeps the ring symmetric.
 """
 
 import logging
+import warnings
 from typing import List, Tuple
 
 import numpy as np
@@ -49,8 +50,9 @@ class DicotStemAnatomy(StemAnatomy):
         the remove-mask + extend step runs later in ``Organ.generate_cells``.
         The build order is data, inspectable via ``recipe.describe()``.
 
-        SCAFFOLD: the steps below currently call a stub
-        (:meth:`_build_bundle_ring`) that places no cells yet.
+        The single ``collateral bundle ring`` step defers to
+        :meth:`_build_bundle_ring`, which builds one collateral bundle per ring
+        slot.
         """
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
         bp = self._get_param("vascular_bundle")
@@ -69,17 +71,52 @@ class DicotStemAnatomy(StemAnatomy):
         Bundles straddle the ring so their inner (xylem) half sits in the pith and
         their outer (phloem) half toward the cortex.  ``theta`` is each slot's
         polar angle (radial orientation).
+
+        The requested count is clamped to the number that actually fit around the
+        ring without their envelopes touching (a warning is issued if it had to be
+        reduced): reducing the count keeps the ring evenly spaced and symmetric,
+        which dropping individual slots would not.
         """
-        n = int(self._get_param("vascular_bundle").get("n_bundles", 0))
+        bp = self._get_param("vascular_bundle")
+        n = int(bp.get("n_bundles", 0))
         if n <= 0:
             return []
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y
         r_ring = np.sqrt(polygon.area / np.pi)     # outer pith radius
+
+        n_fit = self._max_ring_bundles(cx0, cy0, r_ring, bp, n)
+        if n_fit < n:
+            warnings.warn(
+                f"DicotStemAnatomy: {n} bundles overlap on the ring; placing "
+                f"{n_fit} evenly-spaced non-overlapping bundles instead "
+                f"(reduce vascular_bundle.width/height or n_bundles to fit more).",
+                stacklevel=2,
+            )
+            n = n_fit
+
         out = []
         for k in range(n):
             theta = 2.0 * np.pi * k / n
             out.append((cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta), theta))
         return out
+
+    def _max_ring_bundles(self, cx0: float, cy0: float, r_ring: float,
+                          bp: dict, n_req: int) -> int:
+        """Largest bundle count (<= ``n_req``) whose adjacent envelopes stay clear.
+
+        On an evenly-spaced ring every adjacent pair is congruent, so testing one
+        pair (slots 0 and 1) settles the whole ring.
+        """
+        gap = self._bundle_clearance(bp)
+        for n in range(n_req, 1, -1):
+            env0 = self._placed_bundle_envelope(
+                cx0 + r_ring, cy0, 0.0, bp)
+            theta1 = 2.0 * np.pi / n
+            env1 = self._placed_bundle_envelope(
+                cx0 + r_ring * np.cos(theta1), cy0 + r_ring * np.sin(theta1), theta1, bp)
+            if not self._bundle_overlaps(env0, [env1], gap):
+                return n
+        return 1
 
     def _build_bundle_ring(self, polygon: Polygon) -> None:
         """Build the eustele: one collateral bundle per ring slot.
