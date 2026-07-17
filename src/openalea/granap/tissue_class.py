@@ -136,13 +136,15 @@ def fill_along(
     cx: float,
     cy: float,
     xylem_union=None,
+    keep_union=None,
 ) -> None:
     """Place cell seeds along a geometry edge (Polygon exterior or line).
 
     Each resampled position along the edge becomes one Voronoi group, oriented
     by its local tangent (via ``CellGenerator.cell_border``).  Positions falling
-    inside ``xylem_union`` are skipped (but still consume an id_group, matching
-    the legacy behaviour).
+    inside ``xylem_union`` are skipped; if ``keep_union`` is given, positions
+    *outside* it are skipped too (so the seeds are confined to it).  A skipped
+    position still consumes an id_group, matching the legacy behaviour.
     """
     if isinstance(geometry, Polygon):
         line_segs = [geometry.exterior]
@@ -168,7 +170,9 @@ def fill_along(
         )
 
         for i, _coord in enumerate(cells_coords[1:]):
-            if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
+            pt = Point(_coord[0], _coord[1])
+            if (xylem_union and xylem_union.contains(pt)) or \
+               (keep_union is not None and not keep_union.contains(pt)):
                 next_id_group += 1
                 continue
             id_group = next_id_group

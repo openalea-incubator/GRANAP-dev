@@ -736,7 +736,8 @@ def _anchor_shift(geoms, anchor: float):
 def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
                  bp: dict, xylem: dict, phloem: dict, cambium: dict,
                  ground_cell_size: Optional[float] = None,
-                 anchor: float = 0.0) -> BundleResult:
+                 anchor: float = 0.0,
+                 fill_cambium: bool = True) -> BundleResult:
     """Build one vascular bundle at ``(cx, cy)`` oriented radially at ``theta`` (rad).
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
@@ -760,6 +761,12 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     :func:`bundle_cambium_anchor` puts the bundle's cambium — not its centre — on
     the placement point, so a ring of bundles shares one cambium contour (default
     0.0 keeps the envelope centred, as before).
+
+    ``fill_cambium`` False leaves the cambium band *unfilled* (the zone is still
+    partitioned and registered, so xylem and phloem stay separated by the gap): the
+    caller then lays the cambium down itself — e.g. the dicot stem draws the
+    fascicular and interfascicular cambium in one pass along a shared contour so
+    they share the same number of cell files.
     """
     result = BundleResult()
     theta_deg = np.degrees(theta)
@@ -829,7 +836,8 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
             _fill_phloem(cells, rng, geom, cx, cy, theta, phloem, bp, result,
                          cluster=(mode == "banded"))
         elif role == "cambium":
-            _fill_cambium(cells, rng, geom, cx, cy, cambium)
+            if fill_cambium:
+                _fill_cambium(cells, rng, geom, cx, cy, cambium)
 
     # Finally, the outer bundle sheath wrapping everything (single file hugging the
     # expanded envelope, like the non-fibre bundle sheath does inside it).

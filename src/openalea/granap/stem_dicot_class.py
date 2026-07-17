@@ -125,7 +125,10 @@ class DicotStemAnatomy(StemAnatomy):
         for i in range(n):
             px, py = pts[i]
             nx_pt, ny_pt = pts[(i + 1) % n]
-            px_pt, py_pt = pts[i - 1]
+            # (i - 1) % n, not i - 1: the resampled ring is closed (pts[n] == pts[0]),
+            # so a bare pts[-1] is pts[0] itself — the current point — which flattens
+            # the tangent for slot 0 and mis-orients that bundle.
+            px_pt, py_pt = pts[(i - 1) % n]
             tx, ty = nx_pt - px_pt, ny_pt - py_pt          # local tangent
             nx, ny = ty, -tx                                # rotate -90 -> a normal
             if nx * (px - cx) + ny * (py - cy) < 0:         # make it point outward
@@ -141,7 +144,7 @@ class DicotStemAnatomy(StemAnatomy):
         resampling re-spaces the slots, the whole slot set is recomputed at each
         candidate count so the ring stays evenly spaced.
         """
-        bp = self._get_param("vascular_bundle")
+        bp = self._bundle_params()
         n_req = int(bp.get("n_bundles", 0))
         if n_req <= 0:
             return []
@@ -171,21 +174,49 @@ class DicotStemAnatomy(StemAnatomy):
                 return slots
         return []
 
-    def _build_bundle_ring(self, polygon: Polygon) -> None:
-        """Build the eustele: one collateral bundle per contour slot, then — under
-        secondary growth — close the fascicular cambia into a continuous ring.
+    def _cambium_band_thickness(self, cambium: dict) -> float:
+        """Radial thickness of the cambium band = ``n_layers`` cell files."""
+        n = max(int(cambium.get("n_layers", 2)), 1)
+        return n * float(cambium.get("cell_diameter", 0.01))
 
-        Each bundle is placed on the cambium-ring contour anchored on its cambium
-        (``bundle_cambium_anchor``), so the fascicular cambia all sit on one line;
-        its envelope is registered in ``vascular_tissue_polygons`` so
-        ``generate_cells`` clears the pith/cortex seeds underneath it, and its own
-        cells were appended to ``self.vascular_cells`` by ``build_bundle``.
+    def _bundle_params(self) -> dict:
+        """Bundle params with the fascicular cambium gap sized to the ring.
 
-        Primary growth stops there — cambium is visible only inside each bundle.
-        With ``secondary_growth`` on, :meth:`_build_cambium_ring` fills the
-        interfascicular gaps along the contour, so the cambium reads as one ring.
+        The cambium — the fascicular strip *and* the secondary ring — is one band
+        of ``n_layers`` cell files laid on the ring contour.  For the fascicular
+        strip to hold the same ``n_layers`` as the interfascicular ring, the bundle
+        must reserve a gap at least that thick between xylem and phloem; so this
+        returns a *copy* of the ``vascular_bundle`` param with ``cambium_fraction``
+        raised to fit (banded open bundles only), leaving everything else untouched.
         """
-        bp = self._get_param("vascular_bundle")
+        bp = dict(self._get_param("vascular_bundle") or {})
+        if not bp:
+            return bp
+        if bp.get("has_cambium", True) and bp.get("bundle_type", "collateral") != "concentric":
+            cambium = self._get_param("cambium") or {}
+            t = self._cambium_band_thickness(cambium)
+            h = float(bp.get("height", 0.18)) or 0.18
+            bp["cambium_fraction"] = max(float(bp.get("cambium_fraction", 0.08)),
+                                         1.2 * t / h)
+        return bp
+
+    def _build_bundle_ring(self, polygon: Polygon) -> None:
+        """Build the eustele: bundles on a shared cambium contour, then the cambium.
+
+        The cambium *shape* is defined once — the ring contour
+        (:meth:`_cambium_ring_contour`) and its ``n_layers`` cell files — and each
+        bundle is placed on it, anchored on its cambium band
+        (``bundle_cambium_anchor``) so every fascicular strip sits on the contour.
+        Bundles are built *without* their cambium (``fill_cambium=False``); the
+        cambium is then laid down in one pass by :meth:`_build_cambium`, which
+        materialises either just the in-bundle arcs (primary growth) or the entire
+        ring (secondary growth).  Building it in one place is what makes the
+        fascicular and interfascicular cambium share the same number of layers.
+
+        Each bundle envelope is registered in ``vascular_tissue_polygons`` so
+        ``generate_cells`` clears the pith/cortex seeds underneath it.
+        """
+        bp = self._bundle_params()
         xylem = self._get_param("xylem")
         phloem = self._get_param("phloem")
         cambium = self._get_param("cambium")
@@ -197,36 +228,72 @@ class DicotStemAnatomy(StemAnatomy):
         contour = self._cambium_ring_contour(polygon)
         slots = self._ring_slots(polygon)
 
-        envelopes = []
+        conducting: List[Polygon] = []      # xylem / phloem zones — the ring avoids these
+        fascicular: List[Polygon] = []      # per-bundle cambium zones — the primary clip region
         for cx, cy, theta in slots:
             ground = self._pith_cell_diameter_at(np.hypot(cx - cx0, cy - cy0), r_pith)
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
                                bp, xylem, phloem, cambium,
-                               ground_cell_size=ground, anchor=anchor)
+                               ground_cell_size=ground, anchor=anchor,
+                               fill_cambium=False)
             self._register_bundle(res)
-            if res.envelope is not None and not res.envelope.is_empty:
-                envelopes.append(res.envelope)
+            for role, g in res.zone_polygons:
+                if g is None or g.is_empty:
+                    continue
+                if role in ("xylem", "phloem"):
+                    conducting.append(g)
+                elif role == "cambium":
+                    fascicular.append(g)
 
-        if self._secondary_growth():
-            self._build_cambium_ring(contour, envelopes, bp, cambium)
+        self._build_cambium(contour, fascicular, conducting, cambium,
+                            secondary=self._secondary_growth())
 
-    def _build_cambium_ring(self, contour: Polygon, envelopes: List[Polygon],
-                            bp: dict, cambium: dict) -> None:
-        """Close the vascular cambium into a continuous ring (secondary growth).
+    def _build_cambium(self, contour: Polygon, fascicular: List[Polygon],
+                       conducting: List[Polygon], cambium: dict,
+                       secondary: bool) -> None:
+        """Lay the vascular cambium as ``n_layers`` cell files along the contour.
 
-        The bundles already carry their fascicular cambium on the contour; here we
-        add the *interfascicular* cambium in the gaps between them, so the whole
-        contour reads as one meristematic ring.  ``n_layers`` concentric cambium
-        files are laid along the contour (offset in/out by a cell diameter each),
-        skipping the spans already occupied by a bundle.  The band region is
-        registered as ``cambium`` so the pith/cortex seeds beneath it are cleared
-        and the tissue view draws the full ring.
+        The cambium shape is fixed (the contour and its ``n_layers`` files); what
+        gets *materialised* depends on the growth stage:
+
+        * **primary** (``secondary`` False): only the arcs that fall **inside a
+          bundle** — the fascicular cambium strips (``keep_union`` = the bundle
+          cambium zones).  These zones are already registered per bundle.
+        * **secondary** (``secondary`` True): the **entire ring**.  The bundle
+          sheaths (and the parenchyma bundle-sheath file) lying on the band are
+          removed first, so the ring replaces them and runs unbroken through every
+          bundle; the whole band is then registered as ``cambium``.
+
+        Either way the files are blocked from the conducting tissues (xylem /
+        phloem), so the cambium never overwrites a vessel or sieve element.  Because
+        both stages use the *same* file loop, the fascicular and interfascicular
+        cambium always carry the same number of layers.
         """
         cx, cy = contour.centroid.x, contour.centroid.y
         n_layers = max(int(cambium.get("n_layers", 2)), 1)
         cell_d = float(cambium.get("cell_diameter", 0.01))
         cell_w = float(cambium.get("cell_width", cell_d))
-        skip = unary_union(envelopes) if envelopes else None
+        conducting_union = unary_union(conducting) if conducting else None
+
+        if secondary:
+            half = max(n_layers * cell_d / 2.0, cell_d / 2.0)
+            band = contour.buffer(half).difference(contour.buffer(-half))
+            if conducting_union is not None:
+                band = band.difference(conducting_union)
+            if band.is_empty:
+                return
+            # Remove the bundle sheaths on the band so the ring replaces them
+            # instead of overlapping surviving sheath cells.
+            self._clear_vascular_cells(band, ("bundle sheath", "parenchyma", "sclerenchyma"))
+            keep_union = None
+            register = band
+        else:
+            if not fascicular:
+                return
+            # Confine the cambium to the bundle cambium zones (buffered a touch so
+            # points on the strip edge are not dropped by the point-in test).
+            keep_union = unary_union(fascicular).buffer(0.25 * cell_d)
+            register = None      # the fascicular zones are registered per bundle
 
         for k in range(n_layers):
             off = (k - (n_layers - 1) / 2.0) * cell_d
@@ -234,14 +301,27 @@ class DicotStemAnatomy(StemAnatomy):
             if ring.is_empty:
                 continue
             fill_along(self.vascular_cells, ring.exterior, "cambium",
-                       cell_d, cell_w, cx, cy, xylem_union=skip)
+                       cell_d, cell_w, cx, cy,
+                       xylem_union=conducting_union, keep_union=keep_union)
 
-        # Register the whole annular band (minus the bundles) as cambium: it clears
-        # the ground seeds under the interfascicular arcs and completes the ring in
-        # the tissue view (the fascicular strips are registered by the bundles).
-        half = max(n_layers * cell_d / 2.0, cell_d / 2.0)
-        band = contour.buffer(half).difference(contour.buffer(-half))
-        if skip is not None:
-            band = band.difference(skip)
-        if not band.is_empty:
-            self.vascular_tissue_polygons.setdefault("cambium", []).append(band)
+        if register is not None and not register.is_empty:
+            self.vascular_tissue_polygons.setdefault("cambium", []).append(register)
+
+    def _clear_vascular_cells(self, region: Polygon, types: Tuple[str, ...]) -> None:
+        """Drop whole vascular-cell groups of ``types`` whose seed lies in ``region``.
+
+        Seed cells are grouped by ``id_group`` (one Voronoi cell per group); a group
+        is removed entirely if any of its seeds of a matching type falls inside
+        ``region``, so no half-cells are left behind.
+        """
+        if region is None or region.is_empty:
+            return
+        from shapely.geometry import Point
+        drop = {c.id_group for c in self.vascular_cells.cells
+                if c.type in types and region.contains(Point(c.x, c.y))}
+        if not drop:
+            return
+        self.vascular_cells.cells = [
+            c for c in self.vascular_cells.cells
+            if not (c.id_group in drop and c.type in types)
+        ]
