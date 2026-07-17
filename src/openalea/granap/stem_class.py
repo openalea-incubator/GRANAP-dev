@@ -404,7 +404,8 @@ class StemAnatomy(Organ):
         return float(bp.get("parenchyma_diameter", 0.012))
 
     def _placed_bundle_envelope(self, cx: float, cy: float, theta: float, bp: dict,
-                                ground_cell_size: float = None) -> Polygon:
+                                ground_cell_size: float = None,
+                                anchor: float = 0.0) -> Polygon:
         """The bundle footprint placed at ``(cx, cy)`` oriented radially at ``theta``.
 
         Reproduces exactly what :func:`vascular_bundle.build_bundle` sets as
@@ -412,13 +413,17 @@ class StemAnatomy(Organ):
         can test a *candidate* footprint for overlap before committing to it.
         ``ground_cell_size`` (the local pith cell size) grows the footprint by the
         outer bundle sheath, so overlap tests spend the same clearance the built
-        bundle will actually occupy.
+        bundle will actually occupy.  ``anchor`` mirrors ``build_bundle``'s cambium
+        anchoring so the tested footprint sits exactly where the built one will.
         """
+        from shapely.affinity import translate
         from openalea.granap.vascular_bundle import _local_envelope, outer_sheath_mask_pad
         env_local = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"))
         pad = outer_sheath_mask_pad(bp, ground_cell_size)
         if pad > 0:
             env_local = env_local.buffer(pad)
+        if anchor:
+            env_local = translate(env_local, 0.0, -anchor)
         return GeometryProcessor.place_local([env_local], cx, cy, np.degrees(theta))[0]
 
     def _bundle_overlaps(self, env: Polygon, others: List[Polygon], gap: float) -> bool:

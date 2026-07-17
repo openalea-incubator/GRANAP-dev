@@ -241,6 +241,15 @@ class VascularBundleParams(BaseParams):
     sieve_diameter_min : float = Field(default=0.006, ge=0.00001, title="Sieve Diameter (min)", description="Lower bound of the sieve-element diameter when packing the phloem.")
     companion_cell_diameter : float = Field(default=0.004, ge=0.00001, title="Companion Cell Diameter", description="Radial extent of the companion cell placed beside each sieve element (sieve elements are far smaller than xylem vessels).")
     companion_cell_width : float = Field(default=0.004, ge=0.00001, title="Companion Cell Width", description="Tangential extent of the companion cell placed beside each sieve element.")
+    # -- eustele ring shape (dicot / ring-monocot) --------------------------
+    # The ring bundles are placed along a drawn contour — the cambium ring. Each
+    # bundle is oriented along the contour's outward normal with its *cambium*
+    # sitting on the contour, so in secondary growth the fascicular cambia join
+    # into one continuous ring (see DicotStemAnatomy._build_cambium_ring).
+    ring_shape       : Literal["circle", "ellipse", "star"] = Field(default="circle", title="Cambium Ring Shape", description="Dicot eustele: outline the bundles (and the secondary cambium ring) follow. 'circle' = the pith/cortex boundary; 'ellipse' = flattened by ring_ellipse_ratio; 'star' = a lobed ring (ring_star_branches arms of depth ring_star_amplitude).")
+    ring_ellipse_ratio : float = Field(default=0.75, gt=0.0, le=1.0, title="Ring Ellipse Ratio", description="ring_shape='ellipse' only: height/width of the ring ellipse (1 = circle, <1 = flattened vertically).")
+    ring_star_branches : int   = Field(default=5, ge=2, title="Ring Star Branches", description="ring_shape='star' only: number of lobes (arms) of the star-shaped vascular ring.")
+    ring_star_amplitude : float = Field(default=0.12, ge=0.0, lt=0.9, title="Ring Star Amplitude", description="ring_shape='star' only: radial depth of the valleys as a fraction of the ring radius (0 = circle, 0.3 = deep lobes).")
     # -- placement ----------------------------------------------------------
     n_bundles        : int   = Field(default=8, ge=0, title="Number of Bundles", description="How many bundles: evenly spaced ring slots (dicot eustele) or scattered count (monocot atactostele).")
     # Radial band + spacing (monocot atactostele only). A stem may carry several
@@ -370,6 +379,7 @@ class DicotCambiumParams(BaseParams):
     name             : str   = "cambium"
     cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
     cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
+    n_layers         : int   = Field(default=2, ge=1, title="Cambium Layers", description="Stem: number of concentric cambium cell files. In the fascicular cambium strip and, under secondary growth, in the continuous cambium ring — a thicker meristematic zone reads as several cell layers.")
     # for primary growth
     visible_distance : float = Field(default=0.8,  ge=0.0, title="Primary Visible Distance", description="Maximum radius at which primary cambium is differentiated. Cambium matures first in the valleys between xylem arms. Increase toward the stele edge for a more mature (complete ring) cambium.")
     radius_valley_side : float = Field(default=0.11,  ge=0.00001, title="Primary Valley Radius",   description="Valley-side radius of the cambium ring from the stele centre at primary growth.")
@@ -1066,10 +1076,14 @@ class OrganInputData(BaseModel):
                              vessel_diameter_sd=0.004, gradient_inflection=0.5),
             DicotPhloemParams(),
             DicotCambiumParams(),
+            # Primary growth by default: fascicular cambium only. Flip
+            # secondary_growth.value True for the continuous cambium ring.
+            DicotSecondaryGrowthParams(value=False),
             VascularBundleParams(
                 bundle_type="collateral", has_cambium=True,
                 xylem_layout="files", sheath="none", n_bundles=8,
                 width=0.13, height=0.2, prop_vessel=0.7,
+                ring_shape="circle",
             ),
             InterCellularSpacesParams(tissue=["cortex"], smoothness=0.05),
             AerenchymaParams(tissue="cortex", aerenchyma_proportion=0.0),

@@ -18,11 +18,14 @@ import warnings
 from typing import List, Tuple
 
 import numpy as np
+from shapely.affinity import translate
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 
-from openalea.granap.tissue_class import TissueRecipe
+from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.tissue_class import TissueRecipe, fill_along
 from openalea.granap.stem_class import StemAnatomy
-from openalea.granap.vascular_bundle import build_bundle
+from openalea.granap.vascular_bundle import build_bundle, bundle_cambium_anchor
 
 log = logging.getLogger(__name__)
 
@@ -65,72 +68,122 @@ class DicotStemAnatomy(StemAnatomy):
         )
         return recipe
 
-    def _bundle_ring_positions(self, polygon: Polygon) -> List[Tuple[float, float, float]]:
-        """Evenly spaced ``(cx, cy, theta)`` slots on the pith/cortex boundary.
+    # ------------------------------------------------------------------
+    # Cambium-ring contour (the shape the bundles are placed on)
+    # ------------------------------------------------------------------
 
-        Bundles straddle the ring so their inner (xylem) half sits in the pith and
-        their outer (phloem) half toward the cortex.  ``theta`` is each slot's
-        polar angle (radial orientation).
+    def _secondary_growth(self) -> bool:
+        """True when secondary growth is requested (continuous cambium ring)."""
+        sg = self._get_param("secondary_growth")
+        return bool(sg.get("value", False)) if sg else False
 
-        The requested count is clamped to the number that actually fit around the
-        ring without their envelopes touching (a warning is issued if it had to be
-        reduced): reducing the count keeps the ring evenly spaced and symmetric,
-        which dropping individual slots would not.
+    def _cambium_ring_contour(self, polygon: Polygon) -> Polygon:
+        """The drawn contour the eustele bundles are placed on — the cambium ring.
+
+        A circle at the pith/cortex boundary by default; an ``ellipse`` (flattened
+        by ``ring_ellipse_ratio``) or a lobed ``star`` (``ring_star_branches`` arms
+        of depth ``ring_star_amplitude``) when requested.  Each bundle sits on this
+        contour with its cambium on the line, so under secondary growth the
+        fascicular cambia join into one continuous ring along it.
         """
         bp = self._get_param("vascular_bundle")
-        n = int(bp.get("n_bundles", 0))
+        cx, cy = polygon.centroid.x, polygon.centroid.y
+        r = np.sqrt(polygon.area / np.pi)
+        shape = bp.get("ring_shape", "circle")
+
+        if shape == "ellipse":
+            ratio = float(bp.get("ring_ellipse_ratio", 0.75))
+            return GeometryProcessor.ellipse_to_polygon(cx, cy, r, r * ratio, 0.0)
+        if shape == "star":
+            n = max(int(bp.get("ring_star_branches", 5)), 2)
+            amp = min(max(float(bp.get("ring_star_amplitude", 0.12)), 0.0), 0.9)
+            r_min = r * (1.0 - amp)
+            # Arms about half the inter-arm pitch wide at the base, tapering to a
+            # rounded tip; the exact widths only shape the lobes, not the count.
+            star = GeometryProcessor.star_polygon(
+                n_branches=n, r_min=r_min, r_max=r,
+                arc_base=0.5 * np.pi * r_min / n,
+                arc_top=0.35 * np.pi * r / n,
+            )
+            return translate(star, cx, cy)
+        return translate(GeometryProcessor.circle_polygon(r), cx, cy)
+
+    def _contour_slots(self, contour: Polygon, cx: float, cy: float,
+                       n: int) -> List[Tuple[float, float, float]]:
+        """``n`` evenly-spaced ``(px, py, theta)`` slots along ``contour``.
+
+        Points are sampled by arc length around the contour; ``theta`` is the
+        outward normal at each (from the local tangent of neighbouring samples),
+        so every bundle points away from the organ centre wherever it sits on a
+        circle, ellipse or star arm.
+        """
         if n <= 0:
             return []
-        cx0, cy0 = polygon.centroid.x, polygon.centroid.y
-        r_ring = np.sqrt(polygon.area / np.pi)     # outer pith radius
+        coords = np.asarray(contour.exterior.coords)
+        pts = GeometryProcessor.resample_coords(coords, target_n_points=n + 1)
+        slots = []
+        for i in range(n):
+            px, py = pts[i]
+            nx_pt, ny_pt = pts[(i + 1) % n]
+            px_pt, py_pt = pts[i - 1]
+            tx, ty = nx_pt - px_pt, ny_pt - py_pt          # local tangent
+            nx, ny = ty, -tx                                # rotate -90 -> a normal
+            if nx * (px - cx) + ny * (py - cy) < 0:         # make it point outward
+                nx, ny = -nx, -ny
+            slots.append((float(px), float(py), float(np.arctan2(ny, nx))))
+        return slots
 
-        n_fit = self._max_ring_bundles(cx0, cy0, r_ring, bp, n)
-        if n_fit < n:
-            warnings.warn(
-                f"DicotStemAnatomy: {n} bundles overlap on the ring; placing "
-                f"{n_fit} evenly-spaced non-overlapping bundles instead "
-                f"(reduce vascular_bundle.width/height or n_bundles to fit more).",
-                stacklevel=2,
-            )
-            n = n_fit
+    def _ring_slots(self, polygon: Polygon) -> List[Tuple[float, float, float]]:
+        """Bundle slots along the cambium-ring contour, clamped to non-overlap.
 
-        out = []
-        for k in range(n):
-            theta = 2.0 * np.pi * k / n
-            out.append((cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta), theta))
-        return out
-
-    def _max_ring_bundles(self, cx0: float, cy0: float, r_ring: float,
-                          bp: dict, n_req: int) -> int:
-        """Largest bundle count (<= ``n_req``) whose adjacent envelopes stay clear.
-
-        On an evenly-spaced ring every adjacent pair is congruent, so testing one
-        pair (slots 0 and 1) settles the whole ring.
+        The requested ``n_bundles`` is reduced until no two adjacent bundle
+        envelopes touch (a warning is issued when it must drop); because
+        resampling re-spaces the slots, the whole slot set is recomputed at each
+        candidate count so the ring stays evenly spaced.
         """
+        bp = self._get_param("vascular_bundle")
+        n_req = int(bp.get("n_bundles", 0))
+        if n_req <= 0:
+            return []
+        contour = self._cambium_ring_contour(polygon)
+        cx, cy = polygon.centroid.x, polygon.centroid.y
+        r_pith = np.sqrt(polygon.area / np.pi)
+        anchor = bundle_cambium_anchor(bp)
         gap = self._bundle_clearance(bp)
-        # Bundles ring the pith edge, so their outer sheath is sized against the
-        # pith-edge cell (r_norm = 1); include it in the clearance footprint.
-        ground = self._pith_cell_diameter_at(r_ring, r_ring)
-        for n in range(n_req, 1, -1):
-            env0 = self._placed_bundle_envelope(
-                cx0 + r_ring, cy0, 0.0, bp, ground)
-            theta1 = 2.0 * np.pi / n
-            env1 = self._placed_bundle_envelope(
-                cx0 + r_ring * np.cos(theta1), cy0 + r_ring * np.sin(theta1), theta1, bp, ground)
-            if not self._bundle_overlaps(env0, [env1], gap):
-                return n
-        return 1
+        ground = self._pith_cell_diameter_at(r_pith, r_pith)
+
+        for n in range(n_req, 0, -1):
+            slots = self._contour_slots(contour, cx, cy, n)
+            envs = [self._placed_bundle_envelope(px, py, th, bp, ground, anchor)
+                    for px, py, th in slots]
+            if n == 1 or all(
+                not self._bundle_overlaps(envs[i], [envs[(i + 1) % n]], gap)
+                for i in range(n)
+            ):
+                if n < n_req:
+                    warnings.warn(
+                        f"DicotStemAnatomy: {n_req} bundles overlap on the "
+                        f"{bp.get('ring_shape', 'circle')} ring; placing {n} "
+                        f"evenly-spaced non-overlapping bundles instead (reduce "
+                        f"vascular_bundle.width/height or n_bundles to fit more).",
+                        stacklevel=2,
+                    )
+                return slots
+        return []
 
     def _build_bundle_ring(self, polygon: Polygon) -> None:
-        """Build the eustele: one collateral bundle per ring slot.
+        """Build the eustele: one collateral bundle per contour slot, then — under
+        secondary growth — close the fascicular cambia into a continuous ring.
 
-        Each bundle's envelope is registered in ``vascular_tissue_polygons`` so
-        ``generate_cells`` clears the pith/cortex seeds underneath it; the bundle's
-        own cells were appended to ``self.vascular_cells`` by ``build_bundle``.
+        Each bundle is placed on the cambium-ring contour anchored on its cambium
+        (``bundle_cambium_anchor``), so the fascicular cambia all sit on one line;
+        its envelope is registered in ``vascular_tissue_polygons`` so
+        ``generate_cells`` clears the pith/cortex seeds underneath it, and its own
+        cells were appended to ``self.vascular_cells`` by ``build_bundle``.
 
-        (Secondary growth — an interfascicular cambium closing the ring into
-        continuous cylinders — is a later extension, mirroring the dicot-root
-        secondary path.)
+        Primary growth stops there — cambium is visible only inside each bundle.
+        With ``secondary_growth`` on, :meth:`_build_cambium_ring` fills the
+        interfascicular gaps along the contour, so the cambium reads as one ring.
         """
         bp = self._get_param("vascular_bundle")
         xylem = self._get_param("xylem")
@@ -140,8 +193,55 @@ class DicotStemAnatomy(StemAnatomy):
             return
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y
         r_pith = np.sqrt(polygon.area / np.pi)
-        for cx, cy, theta in self._bundle_ring_positions(polygon):
+        anchor = bundle_cambium_anchor(bp)
+        contour = self._cambium_ring_contour(polygon)
+        slots = self._ring_slots(polygon)
+
+        envelopes = []
+        for cx, cy, theta in slots:
             ground = self._pith_cell_diameter_at(np.hypot(cx - cx0, cy - cy0), r_pith)
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
-                               bp, xylem, phloem, cambium, ground_cell_size=ground)
+                               bp, xylem, phloem, cambium,
+                               ground_cell_size=ground, anchor=anchor)
             self._register_bundle(res)
+            if res.envelope is not None and not res.envelope.is_empty:
+                envelopes.append(res.envelope)
+
+        if self._secondary_growth():
+            self._build_cambium_ring(contour, envelopes, bp, cambium)
+
+    def _build_cambium_ring(self, contour: Polygon, envelopes: List[Polygon],
+                            bp: dict, cambium: dict) -> None:
+        """Close the vascular cambium into a continuous ring (secondary growth).
+
+        The bundles already carry their fascicular cambium on the contour; here we
+        add the *interfascicular* cambium in the gaps between them, so the whole
+        contour reads as one meristematic ring.  ``n_layers`` concentric cambium
+        files are laid along the contour (offset in/out by a cell diameter each),
+        skipping the spans already occupied by a bundle.  The band region is
+        registered as ``cambium`` so the pith/cortex seeds beneath it are cleared
+        and the tissue view draws the full ring.
+        """
+        cx, cy = contour.centroid.x, contour.centroid.y
+        n_layers = max(int(cambium.get("n_layers", 2)), 1)
+        cell_d = float(cambium.get("cell_diameter", 0.01))
+        cell_w = float(cambium.get("cell_width", cell_d))
+        skip = unary_union(envelopes) if envelopes else None
+
+        for k in range(n_layers):
+            off = (k - (n_layers - 1) / 2.0) * cell_d
+            ring = contour.buffer(off) if off else contour
+            if ring.is_empty:
+                continue
+            fill_along(self.vascular_cells, ring.exterior, "cambium",
+                       cell_d, cell_w, cx, cy, xylem_union=skip)
+
+        # Register the whole annular band (minus the bundles) as cambium: it clears
+        # the ground seeds under the interfascicular arcs and completes the ring in
+        # the tissue view (the fascicular strips are registered by the bundles).
+        half = max(n_layers * cell_d / 2.0, cell_d / 2.0)
+        band = contour.buffer(half).difference(contour.buffer(-half))
+        if skip is not None:
+            band = band.difference(skip)
+        if not band.is_empty:
+            self.vascular_tissue_polygons.setdefault("cambium", []).append(band)

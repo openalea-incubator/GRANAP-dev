@@ -2,12 +2,9 @@
 
 A vascular bundle is built as three things:
 
-1. an **envelope** — an oriented footprint at ``(cx, cy)`` with radial orientation
-   ``theta`` (local +y = radial, pointing toward the organ surface);
-2. an **internal partition** into tissue sub-zones — *the bundle type is the
-   topology of this partition*;
-3. a **per-zone fill** with the right cell type via the existing ``fill_*``
-   primitives.
+1. an **envelope** — an oriented footprint at ``(cx, cy)`` with radial orientation ``theta`` (local +y = radial, pointing toward the organ surface);
+2. an **internal partition** into tissue sub-zones — *the bundle type is the topology of this partition*;
+3. a **per-zone fill** with the right cell type via the existing ``fill_*`` primitives.
 
 Two partition families cover the four botanical types:
 
@@ -34,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
+from shapely.affinity import translate as _shapely_translate
 from shapely.geometry import LineString, Point, Polygon, box
 
 from openalea.granap.cell_class import Cell
@@ -699,9 +697,46 @@ def _sheath_zones(working, bp):
     return working, zones
 
 
+def bundle_cambium_anchor(bp: dict) -> float:
+    """Local +y (radial) offset of the (outer) cambium band's centre.
+
+    Placement curves (the eustele ring) put the *bundle centre* on the curve by
+    default; anchoring on this value instead puts the bundle's **cambium** on the
+    curve, so every fascicular cambium lines up into one continuous ring (the
+    contour that becomes the secondary-growth vascular cambium).  Returns 0.0 when
+    the bundle carries no cambium band — a concentric bundle, or ``has_cambium``
+    False — so an un-anchored bundle stays centred on the curve as before.
+    """
+    env = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"),
+                          focus_exponent=bp.get("focus_exponent", 4.0),
+                          egg_waist=bp.get("egg_waist", 0.6))
+    working, _ = _sheath_zones(env, bp)
+    mode, spec = bundle_layout(bp)
+    if mode != "banded":
+        return 0.0
+    cambia = [g for role, g in partition_banded(working, spec)
+              if role == "cambium" and g is not None and not g.is_empty]
+    if not cambia:
+        return 0.0
+    return max(g.centroid.y for g in cambia)      # the outermost cambium band
+
+
+def _anchor_shift(geoms, anchor: float):
+    """Translate local-frame geometries by ``-anchor`` along +y (radial).
+
+    Applied before :meth:`GeometryProcessor.place_local` so the local point
+    ``(0, anchor)`` — the cambium band centre — lands on the placement point.
+    """
+    if not anchor:
+        return geoms
+    return [(_shapely_translate(g, 0.0, -anchor) if (g is not None and not g.is_empty) else g)
+            for g in geoms]
+
+
 def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
                  bp: dict, xylem: dict, phloem: dict, cambium: dict,
-                 ground_cell_size: Optional[float] = None) -> BundleResult:
+                 ground_cell_size: Optional[float] = None,
+                 anchor: float = 0.0) -> BundleResult:
     """Build one vascular bundle at ``(cx, cy)`` oriented radially at ``theta`` (rad).
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
@@ -719,6 +754,12 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     It sits just outside the envelope, so the returned envelope — hence the removal
     mask — grows to cover it.  Left ``None`` (the organ-agnostic default), no outer
     sheath is added and the bundle is unchanged.
+
+    ``anchor`` (local +y, radial) shifts the whole bundle so that the local point
+    ``(0, anchor)`` lands on ``(cx, cy)`` instead of the envelope centre.  Passing
+    :func:`bundle_cambium_anchor` puts the bundle's cambium — not its centre — on
+    the placement point, so a ring of bundles shares one cambium contour (default
+    0.0 keeps the envelope centred, as before).
     """
     result = BundleResult()
     theta_deg = np.degrees(theta)
@@ -751,9 +792,12 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     ring_local = _largest(env_local.buffer(ring_diam).difference(env_local)) if ring_diam > 0 else None
     outer_env_local = env_local.buffer(mask_pad) if mask_pad > 0 else env_local
 
-    sheath_geoms = GeometryProcessor.place_local([r for _, r, _, _ in sheath_local], cx, cy, theta_deg)
-    zone_geoms = GeometryProcessor.place_local([g for _, g in zones_local], cx, cy, theta_deg)
-    result.envelope = GeometryProcessor.place_local([outer_env_local], cx, cy, theta_deg)[0]
+    sheath_geoms = GeometryProcessor.place_local(
+        _anchor_shift([r for _, r, _, _ in sheath_local], anchor), cx, cy, theta_deg)
+    zone_geoms = GeometryProcessor.place_local(
+        _anchor_shift([g for _, g in zones_local], anchor), cx, cy, theta_deg)
+    result.envelope = GeometryProcessor.place_local(
+        _anchor_shift([outer_env_local], anchor), cx, cy, theta_deg)[0]
 
     # Sheath first (fibres or a parenchyma bundle sheath).
     for (tag, _r, cd, cw), geom in zip(sheath_local, sheath_geoms):
@@ -790,7 +834,8 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     # Finally, the outer bundle sheath wrapping everything (single file hugging the
     # expanded envelope, like the non-fibre bundle sheath does inside it).
     if ring_local is not None and not ring_local.is_empty:
-        ring_geom = GeometryProcessor.place_local([ring_local], cx, cy, theta_deg)[0]
+        ring_geom = GeometryProcessor.place_local(
+            _anchor_shift([ring_local], anchor), cx, cy, theta_deg)[0]
         if ring_geom is not None and not ring_geom.is_empty:
             result.zone_polygons.append(("bundle sheath", ring_geom))
             fill_along(cells, ring_geom, "bundle sheath", ring_diam, ring_diam, cx, cy)
