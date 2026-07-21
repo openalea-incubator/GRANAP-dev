@@ -5,7 +5,7 @@ Cell generator module for creating cells using Voronoi tessellation.
 import numpy as np
 import shapely as sp
 from scipy.spatial import Voronoi
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -445,6 +445,7 @@ class CellGenerator:
     def _build_topology(
         polys: List,
         cell_ids: List[Any],
+        protect_ids: Optional[set] = None,
     ) -> Tuple[Dict[Any, List[tuple]], Dict[tuple, set], Dict[tuple, set], set]:
         """
         Build the shared vertex/edge topology for a collection of polygons.
@@ -462,6 +463,9 @@ class CellGenerator:
                        ``cell_ids``.
             cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
                        index, integer position, …).
+            protect_ids: Optional set of ``cell_ids`` whose vertex is forced into 
+                       ``junction_set``. Used for small inserted mid-wall air spaces 
+                       Left ``None`` for the ordinary cell/aerenchyma pipeline.
 
         Returns:
             ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set)``
@@ -591,6 +595,12 @@ class CellGenerator:
             if len(incident_pairs) > 1:
                 junction_set.add(vk)
 
+        # Force every vertex of a protected cell to be a junction.
+        if protect_ids:
+            for cid in protect_ids:
+                for vk in cell_vkeys.get(cid, ()):  # skip ids dropped in Phase 1
+                    junction_set.add(vk)
+
         return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
 
     @staticmethod
@@ -678,8 +688,15 @@ class CellGenerator:
         polys = [c.polygon for c in grouped_cells]
         cell_ids = list(range(len(grouped_cells)))
 
+        # Cells flagged ``protect_topology`` (the needle mesophyll air-space
+        # rhombi) keep every vertex as a junction. Off for everything else.
+        protect_ids = {
+            idx for idx, cell in enumerate(grouped_cells)
+            if getattr(cell, "protect_topology", False)
+        }
+
         cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
-            polys, cell_ids
+            polys, cell_ids, protect_ids=protect_ids or None
         )
 
         if not cell_vkeys:

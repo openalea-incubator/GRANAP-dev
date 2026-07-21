@@ -4,6 +4,11 @@ from openalea.granap.geometry_collection import GeometryProcessor
 
 class Cell:
 
+    #: When True, every vertex of this cell's polygon is forced to be a topology
+    #: junction (see ``CellGenerator._build_topology``). Used for needle mesophyll
+    #  air-space rhombi. Defaults to False for all other cells.
+    protect_topology: bool = False 
+
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
                 angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None):
@@ -72,6 +77,7 @@ class Cell:
                 "angle": self.angle,
                 "radius": self.radius,
                 "area": self.area,
+                "protect_topology": self.protect_topology,
                 }
     
     def smooth(self, smooth_factor: float = 0.01):

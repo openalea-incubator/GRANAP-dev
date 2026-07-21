@@ -79,7 +79,17 @@ class AnatomyWriter:
         polys    = list(valid_gdf["geometry"])
         cell_ids = list(valid_gdf.index)
 
-        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(polys, cell_ids)
+        # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
+        # keep each straight side a distinct wall and force their off-wall tips to
+        # junctions (see CellGenerator._build_topology's ``protect_ids``).
+        protect_ids = (
+            set(valid_gdf.index[valid_gdf["protect_topology"]])
+            if "protect_topology" in valid_gdf.columns else None
+        )
+
+        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
+            polys, cell_ids, protect_ids=protect_ids
+        )
 
         wall_registry = {}
         next_wall_id  = 0
@@ -651,13 +661,21 @@ class NetworkExporter:
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
 
+        # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
+        # keep each straight side a distinct wall and force their off-wall tips to
+        # junctions (see CellGenerator._build_topology's ``protect_ids``).
+        protect_ids = (
+            set(cells_gdf.index[cells_gdf["protect_topology"]])
+            if "protect_topology" in cells_gdf.columns else None
+        )
+
         def get_thickness(c_type: str) -> float:
             if isinstance(cell_wall_thickness, dict):
                 return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
             return float(cell_wall_thickness)
 
         cell_vkeys, _, edge_to_cells, junction_set = (
-            CellGenerator._build_topology(polys, cell_ids)
+            CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
         )
 
         if not cell_vkeys:

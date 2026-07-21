@@ -542,32 +542,11 @@ class Organ(AbstractNetwork, ABC):
         if not air_space_polys:
             return
 
+        # Carve the lacunae out of the tissue cells and insert them as air-space
+        # cells (shared post-fill placement).
+        from openalea.granap.special_tissues import seat_air_spaces
         air_union = GeometryProcessor.union_polygons(air_space_polys)
-
-        for cell in all_tissue_cells:
-            if cell.polygon is None:
-                continue
-            carved = cell.polygon.difference(air_union)
-            if not carved.is_empty and carved.area > 1E-6:
-                cell.polygon = carved
-            else:
-                cell.polygon = None
-
-        id_cell = len(self.all_cells.cells)
-        for air_space_polygon in air_space_polys:
-            id_cell += 1
-            self.all_cells.cells.append(Cell(
-                x=air_space_polygon.centroid.x,
-                y=air_space_polygon.centroid.y,
-                diameter=np.sqrt(air_space_polygon.area / np.pi) * 2,
-                id_cell=id_cell,
-                id_layer=0,
-                id_group=id_cell,
-                type="air space",
-                polygon=air_space_polygon,
-            ))
-
-        self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
+        seat_air_spaces(self.all_cells, all_tissue_cells, air_union, air_space_polys)
 
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         """Denominator for the per-quadrant aerenchyma target area. Override in subclasses."""
