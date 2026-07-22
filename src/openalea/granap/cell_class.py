@@ -4,14 +4,10 @@ from openalea.granap.geometry_collection import GeometryProcessor
 
 class Cell:
 
-    #: When True, every vertex of this cell's polygon is forced to be a topology
-    #: junction (see ``CellGenerator._build_topology``). Used for needle mesophyll
-    #  air-space rhombi. Defaults to False for all other cells.
-    protect_topology: bool = False 
-
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
-                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None):
+                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None,
+                protect_topology: bool = False):
 
         self.x = x
         self.y = y
@@ -27,6 +23,7 @@ class Cell:
         self.area = area if area != None else np.pi * (diameter/2)**2
         self.polygon = polygon if polygon != None else None
         self.axis = axis if axis != None else None
+        self.protect_topology = protect_topology
 
     @classmethod
     def radial(cls, type: str, x: float, y: float, diameter: float,

@@ -85,7 +85,7 @@ def seat_air_spaces(
     single lacuna cell is.
 
     When ``protect_topology`` is True the inserted lacunae are flagged so every
-    vertex is kept as a topology junction (see ``CellGenerator._build_topology``);
+    vertex is kept as part of a crooked wall (see ``CellGenerator._build_topology``);
     used for small mid-wall lacunae (the needle mesophyll rhombi) whose off-wall
     tips would otherwise let a neighbour be straightened across the notch.
     """

@@ -80,14 +80,14 @@ class AnatomyWriter:
         cell_ids = list(valid_gdf.index)
 
         # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
-        # keep each straight side a distinct wall and force their off-wall tips to
-        # junctions (see CellGenerator._build_topology's ``protect_ids``).
+        # keep their walls from collapsing into a single node.
+        # (see CellGenerator._build_topology's ``protect_ids``).
         protect_ids = (
             set(valid_gdf.index[valid_gdf["protect_topology"]])
             if "protect_topology" in valid_gdf.columns else None
         )
 
-        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
+        cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(
             polys, cell_ids, protect_ids=protect_ids
         )
 
@@ -101,7 +101,8 @@ class AnatomyWriter:
 
             if len(junc_positions) < 2:
                 # no junctions → single wall loop
-                wall_key = tuple(sorted(vkeys))
+                shape_signature = tuple(vk for vk in vkeys if vk in protected_shape_set)
+                wall_key = (tuple(sorted(vkeys)), shape_signature,)
                 if wall_key not in wall_registry:
                     wall_registry[wall_key] = {"id": next_wall_id, "points": list(vkeys) + [vkeys[0]]}
                     next_wall_id += 1
@@ -662,8 +663,8 @@ class NetworkExporter:
         cell_ids = list(cells_gdf.index)
 
         # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
-        # keep each straight side a distinct wall and force their off-wall tips to
-        # junctions (see CellGenerator._build_topology's ``protect_ids``).
+        # keep their walls from collapsing into a single node.
+        # (see CellGenerator._build_topology's ``protect_ids``).
         protect_ids = (
             set(cells_gdf.index[cells_gdf["protect_topology"]])
             if "protect_topology" in cells_gdf.columns else None
@@ -674,7 +675,7 @@ class NetworkExporter:
                 return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
             return float(cell_wall_thickness)
 
-        cell_vkeys, _, edge_to_cells, junction_set = (
+        cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
             CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
         )
 
@@ -735,7 +736,10 @@ class NetworkExporter:
 
                 junc_start = segment[0]
                 junc_end = segment[-1]
-                wall_key = tuple(sorted((junc_start, junc_end)))
+
+                shape_signature = tuple(vk for vk in segment[1:-1] if vk in protected_shape_set)
+
+                wall_key = (tuple(sorted((junc_start, junc_end))), shape_signature,)
 
                 if wall_key not in wall_registry:
                     length = sum(

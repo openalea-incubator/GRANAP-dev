@@ -623,10 +623,9 @@ class NeedleAnatomy(Organ):
 
         # Carve the lacunae out of the mesophyll cells and insert them as
         # air-space cells (shared post-fill placement). ``protect_topology`` keeps
-        # each rhombus's straight sides as distinct walls and forces its off-wall
-        # tips to junctions, so the neighbouring mesophyll cell keeps the matching
-        # notch instead of being straightened across it (see
-        # ``CellGenerator._build_topology``).
+        # each rhombus's straight sides as distinct walls, so the neighbouring mesophyll cell keeps the matching
+        # notch instead of being straightened across it (see ``CellGenerator._build_topology``).
+        
         seat_air_spaces(
             self.all_cells, mesophyll_cells, air_union, air_faces,
             protect_topology=True,
