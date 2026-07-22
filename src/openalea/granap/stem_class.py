@@ -159,7 +159,7 @@ class StemAnatomy(Organ):
         # vascular tissue (xylem / phloem / cambium) or aerenchyma.
         self.layers = [
             p for p in self.params
-            if "order" in p and p["name"] not in ("pith", "xylem", "phloem", "cambium", "aerenchyma")
+            if "order" in p and p["name"] not in ("parenchyma", "xylem", "phloem", "cambium", "aerenchyma")
         ]
         self.layers = sorted(self.layers, key=lambda x: float(x["order"]))
 
@@ -269,7 +269,7 @@ class StemAnatomy(Organ):
             space_increment = cell_diameter / 2
 
             central_layers.append(LayerPolygon(
-                name="pith",
+                name="parenchyma",
                 polygon=current_polygon,
                 cell_diameter=cell_diameter,
                 id_layer=i_layer + 1,
@@ -331,7 +331,7 @@ class StemAnatomy(Organ):
         aer = self.aerenchyma_params or {}
         tissue = aer.get("tissue")
         tissues = list(tissue) if isinstance(tissue, (list, tuple)) else [tissue]
-        return "pith" in tissues and float(aer.get("aerenchyma_proportion", 0) or 0) > 0.0
+        return "parenchyma" in tissues and float(aer.get("aerenchyma_proportion", 0) or 0) > 0.0
 
     @staticmethod
     def _largest_piece(geom):
@@ -357,7 +357,7 @@ class StemAnatomy(Organ):
         it becomes one ``air space`` cell (the tag the root/organ aerenchyma path
         uses too).
         """
-        pith_cells = [c for c in self.all_cells.get_cells_by_type("pith")
+        pith_cells = [c for c in self.all_cells.get_cells_by_type("parenchyma")
                       if c.polygon is not None and not c.polygon.is_empty]
         cavity = self.pith_cavity_polygon
         cavity = cavity if (cavity is not None and not cavity.is_empty) else None
@@ -368,7 +368,7 @@ class StemAnatomy(Organ):
             if cavity is not None:
                 region = region.difference(cavity)
             id_layer = pith_cells[0].id_layer
-            self.all_cells.cells = [c for c in self.all_cells.cells if c.type != "pith"]
+            self.all_cells.cells = [c for c in self.all_cells.cells if c.type != "parenchyma"]
             consider_as_cell(self.all_cells, region, "air space",
                              id_layer=id_layer, replace=False)
 
@@ -477,7 +477,7 @@ class StemAnatomy(Organ):
         out (``cavity_radius`` >= the pith radius, so no ``pith`` rings exist).
         """
         names = [l["name"] for l in layers_polygons]
-        idx = names.index("pith") if "pith" in names else len(layers_polygons) - 1
+        idx = names.index("parenchyma") if "parenchyma" in names else len(layers_polygons) - 1
         return layers_polygons[idx]["polygon"]
 
 

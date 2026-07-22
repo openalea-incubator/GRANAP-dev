@@ -405,7 +405,8 @@ class DicotSecondaryGrowthParams(BaseParams):
 
 class DicotSecondaryXylemParams(BaseParams):
     name                : str   = "secondary_xylem"
-    prop_stele          : float = Field(default=0.8,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide.")
+    prop_stele          : float = Field(default=0.8,  ge=0.0, le=1.0, title="Proportion of Stele",       description="Angular fraction of each valley between xylem peaks that is occupied by a vessel pizza-slice zone (0–1). 1.0 means slices tile the full circle; 0.5 means each slice is half as wide. In the dicot stem this is the angular *cap* each secondary-xylem sector flares up to (see flare_angle).")
+    flare_angle         : float = Field(default=30.0, ge=0.0, le=90.0, title="Secondary Xylem Flare Angle", description="Dicot stem only. Tilt (degrees, from the radial direction) of each secondary-xylem sector's side edges: the sector starts at the vascular-bundle width against the primary xylem and flares outward at this angle until it reaches the prop_stele angular cap. So adjacent sectors stay separate near the pith and only merge into a continuous cylinder further out (0 = straight radial sides that never widen).")
     cell_diameter       : float = Field(default=0.015,  ge=0.00001, title="Cell Diameter",                description="Diameter of axial parenchyma cells that fill the non-vessel area inside each pizza-slice zone.")
     cell_width          : float = Field(default=0.015,  ge=0.00001, title="Cell Width",                   description="Tangential width of axial parenchyma cells.")
     vessel_diameter     : float = Field(default=0.1,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
@@ -430,6 +431,13 @@ class DicotSecondaryXylemParams(BaseParams):
 
 class DicotSecondaryPhloemParams(BaseParams):
     name: str = "secondary_phloem"
+
+    # ── Primary phloem remnant (dicot stem) ───────────────────────────────────
+    keep_primary: bool = Field(default=False, title="Keep Primary Phloem",
+        description="Dicot stem only. If True, a thin primary-phloem remnant is placed "
+                    "just outside the secondary phloem band (one arm per bundle) — the "
+                    "displaced, usually crushed primary phloem. Off by default because "
+                    "secondary growth crushes it; turn on to render it explicitly.")
 
     # ── Zone geometry ─────────────────────────────────────────────────────────
     height: float = Field(default=0.15, ge=0.00001, title="Phloem Height",
@@ -501,7 +509,27 @@ class DicotSecondaryCambiumParams(BaseParams):
     radius_peak_side   : float = Field(default=0.40,  ge=0.00001, title="Secondary Peak Radius", description="Radius on the primary-xylem-peak side (the inner side of the rotated cambium star). Must exceed the primary cambium radius_peak_side so the secondary cambium encloses it.")
     arc_peak_side      : float = Field(default=0.20,  ge=0.00001, title="Arc Length at Peak",   description="Arc length at radius_peak_side (primary-xylem-peak side width of each arm).")
     arc_valley_side    : float = Field(default=0.10,  ge=0.00001, title="Arc Length at Valley",  description="Arc length at radius_valley_side (primary-xylem-valley side width of each arm).")
-    
+
+
+class StemSecondaryCambiumParams(BaseParams):
+    """Dicot *stem* secondary cambium — just a shape saying where the cambium is.
+
+    Unlike the root's star/focus_ellipse secondary cambium, the stem cambium reuses
+    the eustele ``ring_shape`` family (circle / ellipse / star): it is the primary
+    bundle-ring contour grown outward by ``growth`` mm.  The secondary xylem fills
+    the annulus between the primary bundle ring and this contour; the secondary
+    phloem sits just outside it.  The stem's outer radius grows to make room.
+    """
+    name             : str   = "secondary_cambium"
+    growth           : float = Field(default=0.35, ge=0.0, title="Secondary Xylem Thickness", description="Radial distance (mm) from the primary bundle ring out to the secondary cambium — i.e. the thickness of the secondary-xylem annulus the cambium has produced. The stem radius grows by this plus the phloem height.")
+    cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",   description="Diameter of secondary cambium cells.")
+    cell_width       : float = Field(default=0.02,  ge=0.00001, title="Cell Width",       description="Tangential width of secondary cambium cells.")
+    n_layers         : int   = Field(default=2,     ge=1,       title="Number of Layers", description="Number of concentric cambium cell files (the cambial zone).")
+    shape            : Literal["circle", "ellipse", "star"] = Field(default="circle", title="Cambium Ring Shape", description="Outline of the secondary cambium — same family as the eustele ring: 'circle', 'ellipse' (flattened by ring_ellipse_ratio) or 'star' (ring_star_branches lobes of depth ring_star_amplitude).")
+    ring_ellipse_ratio  : float = Field(default=0.75, gt=0.0, le=1.0, title="Ring Ellipse Ratio", description="shape='ellipse' only: height/width of the cambium ellipse.")
+    ring_star_branches  : int   = Field(default=5, ge=2, title="Ring Star Branches", description="shape='star' only: number of lobes.")
+    ring_star_amplitude : float = Field(default=0.12, ge=0.0, lt=0.9, title="Ring Star Amplitude", description="shape='star' only: valley depth as a fraction of the ring radius.")
+
 
 class DicotMedularRaysParams(BaseParams):
     name               : str   = "medullar_rays"
@@ -1077,8 +1105,32 @@ class OrganInputData(BaseModel):
             DicotPhloemParams(),
             DicotCambiumParams(),
             # Primary growth by default: fascicular cambium only. Flip
-            # secondary_growth.value True for the continuous cambium ring.
+            # secondary_growth.value True for the full secondary growth (a closed
+            # secondary cambium ring producing secondary xylem inward + secondary
+            # phloem outward, with parenchyma rays between the bundle positions).
             DicotSecondaryGrowthParams(value=False),
+            StemSecondaryCambiumParams(growth=0.35, shape="circle", n_layers=2),
+            # Stem secondary xylem/phloem reuse the root's param sets, tuned smaller
+            # for a stem (used only when secondary_growth.value is True).
+            DicotSecondaryXylemParams(
+                prop_stele=0.85, flare_angle=30.0, n_ring=3,
+                vessel_diameter=0.04, vessel_diameter_min=0.012,
+                vessel_diameter_sd=0.004, prop_vessel_ring=0.1,
+                cell_diameter=0.01, cell_width=0.01,
+                parenchyma_diameter=0.01, parenchyma_width=0.01,
+            ),
+            # Secondary-xylem medullar rays (radial parenchyma files cutting the
+            # xylem sectors); density can grow outward via n_medullar_rate.
+            DicotMedularRaysParams(
+                n_medullar=16, base_width=0.01, cell_diameter=0.01,
+                cell_width=0.01, allow_non_vascular=False,
+            ),
+            DicotSecondaryPhloemParams(
+                height=0.08, top_width=0.04, alive_distance=0.05,
+                sieve_diameter=0.014, sieve_diameter_min=0.008,
+                companion_diameter=0.006, companion_width=0.006,
+                parenchyma_diameter=0.01, parenchyma_width=0.01,
+            ),
             VascularBundleParams(
                 bundle_type="collateral", has_cambium=True,
                 xylem_layout="files", sheath="none", n_bundles=8,
