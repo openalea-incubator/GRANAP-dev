@@ -110,7 +110,7 @@ def _dry_run_vascular(organ: "Organ"):
     -------
     layers : list of layer-polygon dicts
     vascular_polys : list of Shapely polygons (xylem mask)
-    vascular_tissue_polys : dict {tissue_name: [Polygon, …]}
+    vascular_tissue_polys : dict {tissue_name: [Polygon, ...]}
     """
     layers = organ.generate_layer_polygons()
 
@@ -259,7 +259,7 @@ def plot_tissues(organ: "Organ",
             ax.fill(*geom.exterior.xy, color="steelblue", alpha=0.65)
             ax.plot(*geom.exterior.xy, color="navy", linewidth=0.7)
 
-    # Named tissue polygons (cambium → green, phloem → goldenrod, …)
+    # Named tissue polygons (cambium -> green, phloem -> goldenrod, ...)
     _tissue_colors = {
         "cambium": "limegreen", "phloem": "goldenrod",
         "xylem": "lightsteelblue",      # bundle xylem zone (vessels overlaid steel-blue)

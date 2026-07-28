@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 _STOMATA_SKIP_BORDER_PTS: int = 300
 
 # The mesophyll ring used for duct placement is the outer annulus whose inner
-# edge is 1.2× duct diameters from the mesophyll boundary.
+# edge is 1.2x duct diameters from the mesophyll boundary.
 _DUCT_RING_BUFFER_FACTOR: float = 1.2
 
 # The parenchyma-ring polygon is obtained by shrinking the fitted ellipse
@@ -121,7 +121,7 @@ class NeedleAnatomy(Organ):
         aligned with the endodermis layer (t=1).
 
         Layers from the outside down to the endodermis are gradually morphed.
-        Layers inward from the endodermis (transfusion, parenchyma …) are
+        Layers inward from the endodermis (transfusion, parenchyma ...) are
         fully changed to fit inside the ellipse.
         """
         if self.central_cylinder_params.get("shape") != "ellipse":
@@ -160,7 +160,7 @@ class NeedleAnatomy(Organ):
             # If PolygonInterpolator fails (degenerate geometry), skip reshape.
             return layers_polygons
 
-        n_to_morph = endo_idx + 1  # indices 0 … endo_idx inclusive
+        n_to_morph = endo_idx + 1  # indices 0 ... endo_idx inclusive
         
         for i in range(1, n_to_morph):          # skip index 0 (outside)
             t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1

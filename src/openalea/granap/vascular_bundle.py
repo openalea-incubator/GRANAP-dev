@@ -9,7 +9,7 @@ A vascular bundle is built as three things:
 Two partition families cover the four botanical types:
 
 * **banded** (``collateral`` / ``bicollateral``): parallel cuts perpendicular to
-  the radial axis → stacked bands (xylem / cambium / phloem, inner→outer).
+  the radial axis -> stacked bands (xylem / cambium / phloem, inner->outer).
 * **concentric** (``concentric`` + ``amphivasal`` / ``amphicribral``): a core +
   a ring (one tissue surrounding the other).
 
@@ -90,26 +90,15 @@ def _local_envelope(width: float, height: float, shape: str,
     return GeometryProcessor.oriented_ellipse(0.0, 0.0, width, height, 90.0)
 
 
-def _sheath_cell_size(bp: dict) -> float:
-    """Representative cell diameter of the (inner) bundle sheath.
-
-    A fibre sheath uses the sclerenchyma cell size; a fibre-less sheath is the
-    thin parenchyma bundle-sheath ring, sized like the bundle parenchyma.  Mirrors
-    the sizes ``_sheath_zones`` peels off, so the outer sheath can be sized against
-    the sheath it wraps.
-    """
-    if bp.get("sheath", "none") == "none":
-        return float(bp.get("parenchyma_diameter", 0.012))
-    return float(bp.get("sclerenchyma_cell_diameter", 0.008))
-
-
 def outer_sheath_ring_diameter(bp: dict, ground_cell_size: Optional[float]) -> float:
     """Cell diameter (== ring thickness) of the outer bundle sheath, or 0 if off.
 
     The outer sheath is one extra file of cells wrapping the whole bundle, each
-    cell sized at the *mean* of the inner bundle-sheath cell and the surrounding
-    ground-tissue cell (``ground_cell_size``, supplied by the organ since the
-    bundle builder is organ-agnostic).  Returns 0 — i.e. no outer sheath, bundle
+    cell sized *intermediate between the bundle's internal parenchyma and the
+    surrounding ground-tissue cell* (``ground_cell_size``, supplied by the organ
+    since the bundle builder is organ-agnostic) — their mean.  This keeps the sheath
+    a smooth size step from the fine bundle interior out to the coarser tissue it
+    sits in, instead of a chunky ring.  Returns 0 — i.e. no outer sheath, bundle
     unchanged — when it is disabled (``outer_sheath=False``) or the organ passed
     no ground cell size (e.g. the organ-agnostic bundle unit tests).
     """
@@ -117,7 +106,8 @@ def outer_sheath_ring_diameter(bp: dict, ground_cell_size: Optional[float]) -> f
         return 0.0
     if not ground_cell_size or ground_cell_size <= 0:
         return 0.0
-    return 0.5 * (_sheath_cell_size(bp) + float(ground_cell_size))
+    inner = float(bp.get("parenchyma_diameter", 0.012))
+    return 0.5 * (inner + float(ground_cell_size))
 
 
 def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
@@ -142,7 +132,7 @@ def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
 def bundle_layout(bp: dict):
     """Resolve bundle params into a partition spec.
 
-    Returns ``("banded", [(role, fraction), ...])`` inner→outer, or
+    Returns ``("banded", [(role, fraction), ...])`` inner->outer, or
     ``("concentric", (core_role, ring_role))``.
     """
     bt = bp.get("bundle_type", "collateral")
@@ -170,14 +160,14 @@ def bundle_layout(bp: dict):
         bands.append(("cambium", cf))
     bands.append(("phloem", pf))                          # outer phloem
 
-    # Local +y is radial-outward; inner→outer = bottom→top. Flip for phloem_inward.
+    # Local +y is radial-outward; inner->outer = bottom->top. Flip for phloem_inward.
     if not bp.get("phloem_outward", True):
         bands = list(reversed(bands))
     return "banded", bands
 
 
 def partition_banded(env: Polygon, bands) -> List[Tuple[str, Polygon]]:
-    """Cut ``env`` into horizontal strips (inner→outer along local +y)."""
+    """Cut ``env`` into horizontal strips (inner->outer along local +y)."""
     minx, miny, maxx, maxy = env.bounds
     span = (maxy - miny) or 1.0
     total = sum(f for _, f in bands) or 1.0
@@ -347,7 +337,7 @@ def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
     """Thin radial parenchyma-separator strips that cut the xylem zone into
     ``n_files`` tangential compartments (files), lightly jittered.
 
-    Each strip runs along the bundle's radial axis (``theta``, pith→cambium) at an
+    Each strip runs along the bundle's radial axis (``theta``, pith->cambium) at an
     evenly-spaced tangential offset, overshooting the zone radially so it cuts all
     the way across.  ``jitter`` (0 = a rigid grid) perturbs each strip's tangential
     position and angle a little so the files don't read as mechanical rows.  Built
@@ -357,7 +347,7 @@ def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
     if n_files <= 1:
         return []
     gx, gy = zone.centroid.x, zone.centroid.y
-    outer = np.array([np.cos(theta), np.sin(theta)])            # radial (pith→cambium)
+    outer = np.array([np.cos(theta), np.sin(theta)])            # radial (pith->cambium)
     tang = np.array([-np.sin(theta), np.cos(theta)])            # tangential
     w = _radial_half(zone, gx, gy, tang)                        # tangential half-width
     reach = _radial_half(zone, gx, gy, outer) + 2.0 * half_width
@@ -403,9 +393,9 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
     pieces = [g for g in (compartments.geoms if hasattr(compartments, "geoms") else [compartments])
               if g.geom_type == "Polygon" and not g.is_empty]
 
-    # Endarch size gradient measured *along the radial axis* (pith→cambium).  The
+    # Endarch size gradient measured *along the radial axis* (pith->cambium).  The
     # bundle's ``(cx, cy)`` is the bundle centre, not the organ centre, so grade
-    # against a proxy centre far down the −radial (pith-ward) direction: distance
+    # against a proxy centre far down the -radial (pith-ward) direction: distance
     # from it grows monotonically toward the cambium.  ``radial_range`` normalises
     # the gradient over the xylem band so it actually bites (the band is thin
     # relative to that distance), and ``direction="edge"`` puts the small
@@ -422,8 +412,8 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
             voronoi_grow=voronoi_grow, r_floor=p_diam * 0.4, n_border=25,
             proportion=bp.get("prop_vessel", 0.55),
             direction="edge",                       # endarch: large toward the cambium
-            gradient_center=gcenter,                # grade along the radial (pith→cambium) axis
-            gradient_radial_range=radial_range,     # …over the xylem band, so the gradient bites
+            gradient_center=gcenter,                # grade along the radial (pith->cambium) axis
+            gradient_radial_range=radial_range,     # ...over the xylem band, so the gradient bites
             diameter_max=xylem.get("vessel_diameter", 0.045),
             diameter_min=xylem.get("vessel_diameter_min", 0.012),
             diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
@@ -558,10 +548,17 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
     ph_h = float(bp.get("phloem_height", phloem.get("cluster_height", 0.04)))
     ph_rel = float(bp.get("phloem_relative_distance", 0.5))
     outer_span = max(h - margin, ph_h / 2.0)
+    # ``phloem_relative_distance`` (0..1) slides the cluster through the outer half,
+    # from just outside the bundle centre (0) to the envelope edge (1).
     s_ph = min(max(ph_rel * outer_span, ph_h / 2.0), outer_span - ph_h / 2.0)
     pc = at(s_ph, 0.0)
     ell = _largest(GeometryProcessor.oriented_ellipse(pc[0], pc[1], ph_w, ph_h, theta_deg)
                    .intersection(zone))
+    # The phloem is placed freely, but its cells must not land inside the xylem:
+    # carve the already-placed vessels / lacunae out of the cluster region so no
+    # sieve element or companion cell is ever seeded over a metaxylem/protoxylem.
+    if ell is not None and not ell.is_empty and occupied:
+        ell = _largest(ell.difference(unary_union(occupied)))
     if ell is not None and not ell.is_empty:
         ph_occ = _place_phloem_cells(cells, rng, ell, cx, cy, phloem, bp)
         if ph_occ is not None:
@@ -839,13 +836,18 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
             if fill_cambium:
                 _fill_cambium(cells, rng, geom, cx, cy, cambium)
 
-    # Finally, the outer bundle sheath wrapping everything (single file hugging the
-    # expanded envelope, like the non-fibre bundle sheath does inside it).
+    # Finally, the outer bundle sheath wrapping everything: a single file seeded along
+    # the ring's INNER boundary (the envelope edge) so the sheath cells hug the bundle
+    # and bound the parenchyma / fibre sheath just inside them.  Tracing the ring's
+    # outer edge instead leaves an unbounded band between the bundle and the sheath
+    # that every cell stretches across into radial spokes.
     if ring_local is not None and not ring_local.is_empty:
         ring_geom = GeometryProcessor.place_local(
             _anchor_shift([ring_local], anchor), cx, cy, theta_deg)[0]
         if ring_geom is not None and not ring_geom.is_empty:
             result.zone_polygons.append(("bundle sheath", ring_geom))
-            fill_along(cells, ring_geom, "bundle sheath", ring_diam, ring_diam, cx, cy)
+            hug = list(ring_geom.interiors) or [ring_geom]   # inner edge == envelope
+            for edge in hug:
+                fill_along(cells, edge, "bundle sheath", ring_diam, ring_diam, cx, cy)
 
     return result

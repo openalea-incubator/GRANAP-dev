@@ -281,7 +281,7 @@ class CellGenerator:
             return all_cells
 
         # --- build group metadata ----------------------------------------
-        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        groups: dict = {}  # id_group -> {id_layer, indices, poly}
         for idx, cell in enumerate(all_cells.cells):
             g = cell.id_group
             if g not in groups:
@@ -410,7 +410,7 @@ class CellGenerator:
         # Union the per-seed Voronoi polygons into one 'biological' cell per
         # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
         # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
-        # ~13s of pure overhead (see doc/performance_proposals.md ①). Plain
+        # ~13s of pure overhead (see doc/performance_proposals.md (1)). Plain
         # Python grouping + shapely ``unary_union`` (what dissolve calls
         # internally) is byte-identical: dissolve's default aggregation is
         # 'first' per group, so the representative cell is the first-seen one;
@@ -461,15 +461,15 @@ class CellGenerator:
                        skipped).  Index position must correspond to
                        ``cell_ids``.
             cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
-                       index, integer position, …).
+                       index, integer position, ...).
 
         Returns:
             ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set)``
 
-            * ``cell_vkeys``       – ``{cell_id: [snapped (x,y) tuples]}``
-            * ``vertex_to_cells``  – ``{(x,y): set(cell_ids)}``
-            * ``edge_to_cells``    – ``{edge_key: set(cell_ids)}``
-            * ``junction_set``     – set of ``(x,y)`` junction vertices
+            * ``cell_vkeys``       - ``{cell_id: [snapped (x,y) tuples]}``
+            * ``vertex_to_cells``  - ``{(x,y): set(cell_ids)}``
+            * ``edge_to_cells``    - ``{edge_key: set(cell_ids)}``
+            * ``junction_set``     - set of ``(x,y)`` junction vertices
         """
         n_dec = 6
 
@@ -521,7 +521,7 @@ class CellGenerator:
             else 1e-4
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate.  All ball
+        # Cluster nearby vertices -> canonical snapped coordinate.  All ball
         # queries are issued in one parallel C batch; the greedy single-pass
         # assignment below is byte-identical to querying point-by-point (each
         # seed's cluster is still exactly the points within snap_tol of it).
@@ -666,7 +666,7 @@ class CellGenerator:
         Simplify cell boundaries by retaining only junction vertices.
 
         Delegates topology computation to :meth:`_build_topology` (Phases
-        0–2: KD-tree snapping, vertex/edge maps, junction detection), then
+        0-2: KD-tree snapping, vertex/edge maps, junction detection), then
         rebuilds each polygon keeping only its junction vertices (Phase 3).
 
         Args:

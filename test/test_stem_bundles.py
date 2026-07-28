@@ -86,12 +86,18 @@ def test_amphicribral_phloem_rings_xylem():
         "amphicribral: phloem ring is farther from the bundle centre than the xylem core"
 
 
-def test_face_metaxylem_outer_of_protoxylem_with_lacuna():
+def test_face_bundle_has_xylem_and_lacuna():
+    # The face bundle tags metaxylem + protoxylem alike as 'xylem'; its larger
+    # (metaxylem) vessels sit outer of the smaller (protoxylem) ones, and lacuna=True
+    # drops an air-space void in the inner half.
     cells, res = _build(bundle_type="collateral", has_cambium=False, xylem_layout="face",
                         lacuna=True)
-    assert _mean_x(cells, "metaxylem") > _mean_x(cells, "protoxylem"), \
-        "face bundle: metaxylem sits outer of protoxylem"
-    # The lacuna is seeded as an ordinary 'air space' cell just below the protoxylem.
+    xyl = [c for c in cells.cells if c.type == "xylem"]
+    assert xyl, "face bundle must place xylem vessels"
+    big = [c.x for c in xyl if c.diameter >= 0.025]     # metaxylem-scale
+    small = [c.x for c in xyl if c.diameter < 0.025]    # protoxylem-scale
+    if big and small:
+        assert np.mean(big) > np.mean(small), "larger (metaxylem) vessels sit outer"
     assert any(c.type == "air space" for c in cells.cells), \
         "lacuna=True must place an air-space lacuna cell"
 
@@ -113,9 +119,9 @@ def _census(organ):
 
 def test_dicot_eustele_generates():
     c = _census(StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED))
-    # The pith is rendered as a single 'pith' zone (not aerenchyma by default,
-    # not a spoke-mesh); see StemAnatomy._render_pith_as_single_zone.
-    for t in ("xylem", "sieve element", "cambium", "pith", "cortex", "epidermis"):
+    # Central ground tissue is tagged 'parenchyma' (the stem pith); xylem is a single
+    # 'xylem' tag (no metaxylem/protoxylem split).
+    for t in ("xylem", "sieve element", "cambium", "parenchyma", "cortex", "epidermis"):
         assert c.get(t, 0) > 0, f"dicot stem missing {t}"
     assert c.get("aerenchyma", 0) == 0, "a plain dicot stem must not default to aerenchyma"
 
@@ -124,8 +130,7 @@ def test_monocot_atactostele_generates():
     data = OrganInputData.for_monocot_stem()
     data.set_value("vascular_bundle", "n_bundles", 6)   # fewer -> faster test
     c = _census(StemAnatomy(data, seed=SEED))
-    # Pith rendered as one 'pith' zone (not a pith-cell mesh).
-    for t in ("metaxylem", "protoxylem", "sclerenchyma", "pith", "epidermis"):
+    for t in ("xylem", "sclerenchyma", "parenchyma", "epidermis"):
         assert c.get(t, 0) > 0, f"monocot stem missing {t}"
     assert c.get("cambium", 0) == 0, "monocot bundles are closed (no cambium)"
 

@@ -111,9 +111,9 @@ class AbstractNetwork(ABC):
             Hydraulic conductivity value to assign.
         label : str
             Path type to target.  One of:
-                * ``"apoplastic"``   – wall-node ↔ junction edges
-                * ``"transmembrane"`` – cell ↔ wall-node edges
-                * ``"symplastic"``   – cell ↔ cell edges
+                * ``"apoplastic"``   - wall-node <-> junction edges
+                * ``"transmembrane"`` - cell <-> wall-node edges
+                * ``"symplastic"``   - cell <-> cell edges
         cell_type : str
             Tissue type filter.  Rules:
 
@@ -211,7 +211,7 @@ class AbstractNetwork(ABC):
                 self.graph.nodes[ci].get("cell_type", "") for ci in cell_indices
             ]
             if len(cell_types) == 1:
-                # Boundary wall – only one cell
+                # Boundary wall - only one cell
                 if self._types_match(cell_types[0], cell_types[0], type_a, type_b):
                     matching.add(wall_id)
             elif len(cell_types) >= 2:

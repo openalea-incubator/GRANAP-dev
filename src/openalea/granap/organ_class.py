@@ -831,7 +831,7 @@ class Organ(AbstractNetwork, ABC):
                     polygon=fused_polygon,
                 ))
 
-            self.all_cells.remove_cells_by_ids([c.id_cell for c in merge_pool])
+            self.all_cells.remove_cells(merge_pool)
             self.all_cells.cells.extend(fused_cells)
 
         self.all_cells.cells = CellGenerator.simplify_cells(self.all_cells.cells)
@@ -848,13 +848,13 @@ class Organ(AbstractNetwork, ABC):
             # mask, e.g. a bundle envelope) carries no geometry to carve — drop
             # it, mirroring the None guard on the air spaces above.
             if cell.polygon is None:
-                self.all_cells.remove_cells_by_ids([cell.id_cell])
+                self.all_cells.remove_cells([cell])
                 continue
             carved = cell.polygon.difference(air_union)
             if not carved.is_empty and carved.area > 1E-6:
                 cell.polygon = carved
             else:
-                self.all_cells.remove_cells_by_ids([cell.id_cell])
+                self.all_cells.remove_cells([cell])
 
 
     def plot_layers(self, show: bool = True, **kwargs) -> Optional[plt.Figure]:

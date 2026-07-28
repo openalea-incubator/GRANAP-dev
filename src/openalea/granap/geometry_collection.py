@@ -62,7 +62,7 @@ class GeometryProcessor:
     def oriented_ellipse(tx: float, ty: float, width: float, height: float,
                          angle_deg: float, resolution: int = 64) -> Polygon:
         """Axis-aligned unit disc scaled to ``width`` x ``height``, rotated so its
-        major (``height``) axis points along ``angle_deg`` (minus the 90° that maps
+        major (``height``) axis points along ``angle_deg`` (minus the 90 deg that maps
         the +y major axis to the radial direction), then translated to ``(tx, ty)``.
 
         The one source for every oriented vascular cluster ellipse (phloem
@@ -206,6 +206,74 @@ class GeometryProcessor:
         w, h = width / 2.0, height / 2.0
         return sp.Polygon([(-w, -h), (w, -h), (0.0, h)])
 
+    @staticmethod
+    def contour_polygon(shape: str, *, cx: float = 0.0, cy: float = 0.0,
+                        radius: float = 0.0, width: float = 0.0, height: float = 0.0,
+                        n_branches: int = 5,
+                        radius_peak_side: float = None, radius_valley_side: float = None,
+                        arc_peak_side: float = 0.05, arc_valley_side: float = 0.10,
+                        ellipse_ratio: float = 1.0,
+                        profile=None, exponent: float = 4.0,
+                        smooth: float = None) -> Polygon:
+        """One source of truth for an organ / tissue *contour* outline, at ``(cx, cy)``.
+
+        Every contour in the package — the organ ``base_shape``, the eustele /
+        cylinder ring, and the root / stem secondary cambium — comes from here, so
+        the ``circle`` / ``ellipse`` / ``star`` / ``focus_ellipse`` / ``square`` /
+        ``rectangle`` / ``triangle`` family is defined once.
+
+        Sizing: ``circle`` uses ``radius``; box / ``ellipse`` / ``focus_ellipse`` /
+        ``triangle`` use ``width`` / ``height`` (each falling back to ``2*radius``
+        when 0, and ``ellipse`` height further to ``2*radius*ellipse_ratio``).
+
+        ``star`` is the single peak/valley parameterisation used everywhere — an
+        :meth:`oriented_star_polygon` from absolute ``radius_peak_side`` /
+        ``radius_valley_side`` + arcs over ``n_branches`` arms.  When the valley
+        radius is the larger the star is rotated half a period automatically (arms
+        point to the valleys — the root secondary cambium's "peaks in the
+        primary-xylem valleys").
+
+        ``focus_ellipse`` prefers a measured ``profile`` (best-fit superellipse),
+        else ``width`` / ``height`` + ``exponent``.  ``smooth`` (0..1), when given,
+        Laplacian-smooths a star outline (used by the root cambium).
+        """
+        n = max(int(n_branches), 2)
+        if shape == "circle":
+            poly = GeometryProcessor.circle_polygon(radius)
+        elif shape == "ellipse":
+            w = width or 2.0 * radius
+            h = height or 2.0 * radius * ellipse_ratio
+            poly = GeometryProcessor.ellipse_to_polygon(0.0, 0.0, w / 2.0, h / 2.0, 0.0)
+        elif shape == "focus_ellipse":
+            if profile:
+                semi_major, semi_minor, exp = GeometryProcessor.fit_focus_ellipse(profile)
+                poly = GeometryProcessor.focus_ellipse_polygon(
+                    0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exp)
+            else:
+                w = width or 2.0 * radius
+                h = height or 2.0 * radius
+                poly = GeometryProcessor.focus_ellipse_polygon(
+                    0.0, 0.0, w / 2.0, h / 2.0, 0.0, exponent=exponent)
+        elif shape == "star":
+            rp = radius_peak_side if radius_peak_side is not None else radius
+            rv = radius_valley_side if radius_valley_side is not None else radius
+            poly = GeometryProcessor.oriented_star_polygon(
+                n_branches=n, radius_peak_side=rp, radius_valley_side=rv,
+                arc_peak_side=arc_peak_side, arc_valley_side=arc_valley_side)
+            if smooth is not None:
+                coords = GeometryProcessor.smoothing_polygon(
+                    np.column_stack(poly.exterior.xy), smooth_factor=smooth, iterations=5)
+                poly = sp.Polygon(coords).buffer(0)
+        elif shape == "square":
+            w = width or 2.0 * radius
+            poly = GeometryProcessor.rectangle_polygon(w, w)
+        elif shape == "rectangle":
+            poly = GeometryProcessor.rectangle_polygon(width or 2.0 * radius, height or 2.0 * radius)
+        elif shape == "triangle":
+            poly = GeometryProcessor.triangle_polygon(width or 2.0 * radius, height or 2.0 * radius)
+        else:                                                   # unknown -> circle
+            poly = GeometryProcessor.circle_polygon(radius)
+        return _shapely_translate(poly, cx, cy) if (cx or cy) else poly
 
     @staticmethod
     def resample_coords(coords: np.ndarray, target_n_points: int = 200,
@@ -380,7 +448,7 @@ class GeometryProcessor:
           (area grows toward ``4*rx*ry``, latus rectum increases);
         - ``exponent < 2``  -> pointier toward a diamond (latus rectum shrinks).
 
-        The curve keeps the axis endpoints (``±rx`` on the major axis, ``±ry`` on
+        The curve keeps the axis endpoints (``+/-rx`` on the major axis, ``+/-ry`` on
         the minor) fixed; only the fullness between them changes.  ``angle`` is in
         degrees, applied about the shape centre before translating to ``(cx, cy)``.
         """
@@ -678,7 +746,7 @@ class GeometryProcessor:
         Pole of inaccessibility (largest inscribed circle): ``(cx, cy, radius)``.
 
         Computed by GEOS via :func:`shapely.maximum_inscribed_circle` — a single
-        C call returning the centre→boundary segment.  This replaced a Python
+        C call returning the centre->boundary segment.  This replaced a Python
         grid search + scipy Nelder-Mead refinement that ran once per packed
         circle and dominated ``pack_circles``.  The result differs from the old
         approximation at the tolerance level, so it is a deliberate, golden-
@@ -728,8 +796,8 @@ class GeometryProcessor:
         Args:
             polygon:             Shapely polygon to fill.
             proportion:          Stop when filled_area / polygon_area >= proportion.
-            direction:           Size gradient: "center" (large→small outward),
-                                 "edge" (large→small inward), "middle" (large at mid-radius),
+            direction:           Size gradient: "center" (large->small outward),
+                                 "edge" (large->small inward), "middle" (large at mid-radius),
                                  None (no spatial gradient; size drawn randomly per circle).
             diameter_max:        Maximum circle diameter.
             diameter_min:        Minimum circle diameter.  Defaults to

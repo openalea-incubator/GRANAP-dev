@@ -47,16 +47,33 @@ from openalea.granap.special_tissues import consider_as_cell
 # Internal helper
 # ---------------------------------------------------------------------------
 
+def _input_params(input_data):
+    """The raw param-dict list from any accepted input form (or None)."""
+    if isinstance(input_data, OrganInputData):
+        return input_data.to_dict_list()
+    if isinstance(input_data, list):
+        return input_data
+    return None
+
+
 def _get_planttype(input_data) -> int:
     """Extract the planttype integer (1 = monocot, 2 = dicot) from raw input."""
-    if isinstance(input_data, OrganInputData):
-        params = input_data.to_dict_list()
-    elif isinstance(input_data, list):
-        params = input_data
-    else:
+    params = _input_params(input_data)
+    if params is None:
         return 1
     pt = next((p for p in params if p["name"] == "planttype"), {})
     return int(pt.get("value", 1))
+
+
+def _get_arrangement(input_data) -> str:
+    """Dicot stele arrangement: 'fascicular' (discrete bundle ring) or
+    'continuous' (a non-fascicular vascular cylinder), read from the
+    ``vascular_bundle`` spec.  Defaults to 'fascicular'."""
+    params = _input_params(input_data)
+    if params is None:
+        return "fascicular"
+    vb = next((p for p in params if p["name"] == "vascular_bundle"), {})
+    return str(vb.get("arrangement", "fascicular"))
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +105,16 @@ class StemAnatomy(Organ):
             from openalea.granap.stem_monocot_class import MonocotStemAnatomy
             from openalea.granap.stem_dicot_class import DicotStemAnatomy
             planttype = _get_planttype(input_data)
-            actual_cls = DicotStemAnatomy if planttype == 2 else MonocotStemAnatomy
+            if planttype == 2:
+                if _get_arrangement(input_data) == "continuous":
+                    from openalea.granap.stem_dicot_continuous_class import (
+                        ContinuousDicotStemAnatomy,
+                    )
+                    actual_cls = ContinuousDicotStemAnatomy
+                else:
+                    actual_cls = DicotStemAnatomy
+            else:
+                actual_cls = MonocotStemAnatomy
             return super().__new__(actual_cls)
         return super().__new__(cls)
 
@@ -184,26 +210,20 @@ class StemAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def _create_base_shape(self) -> Polygon:
-        radius = self._calculate_radius()
-        shape_params = self._get_param("base_shape")
-        kind = shape_params.get("shape", "circle")
-
-        if kind == "circle":
-            return GeometryProcessor.circle_polygon(radius)
-
-        # width/height define the bounding box; 0 (auto) falls back to the
-        # auto-computed diameter so the shape matches the default circle's size.
-        width = float(shape_params.get("width", 0.0)) or 2 * radius
-        height = float(shape_params.get("height", 0.0)) or 2 * radius
-
-        if kind == "ellipse":
-            return GeometryProcessor.ellipse_to_polygon(0.0, 0.0, width / 2, height / 2, 0.0)
-        if kind == "square":
-            return GeometryProcessor.rectangle_polygon(width, width)
-        if kind == "rectangle":
-            return GeometryProcessor.rectangle_polygon(width, height)
-        # Unknown / unsupported shape — fall back to circle.
-        return GeometryProcessor.circle_polygon(radius)
+        # Same shape family as the root (GeometryProcessor.contour_polygon):
+        # circle / ellipse / square / rectangle / triangle / star / focus_ellipse.
+        sp_ = self._get_param("base_shape")
+        return GeometryProcessor.contour_polygon(
+            sp_.get("shape", "circle"),
+            radius=self._calculate_radius(),
+            width=float(sp_.get("width", 0.0)), height=float(sp_.get("height", 0.0)),
+            n_branches=int(sp_.get("n_peaks", 5)),
+            radius_peak_side=float(sp_.get("radius_peak_side", 0.6)),
+            radius_valley_side=float(sp_.get("radius_valley_side", 0.4)),
+            arc_peak_side=float(sp_.get("arc_peak_side", 0.05)),
+            arc_valley_side=float(sp_.get("arc_valley_side", 0.10)),
+            profile=sp_.get("profile"), exponent=float(sp_.get("exponent", 4.0)),
+        )
 
     def _calculate_radius(self) -> float:
         radius = self.vascular_params["thickness"] / 2
@@ -449,15 +469,21 @@ class StemAnatomy(Organ):
         )
 
     @staticmethod
-    def _spec_band(bp: dict, r_pith: float) -> Tuple[float, float]:
+    def _spec_band(bp: dict, r_pith: float, r_section: float = None) -> Tuple[float, float]:
         """Radial band ``(r_lo, r_hi)`` of a bundle spec, in mm.
 
-        ``radius_max <= 0`` means the band runs out to the pith edge; ``r_hi`` is
-        clamped to ``r_pith`` so a band never reaches past the ground tissue.
+        ``radius_max <= 0`` means the band runs out to the pith edge (the default
+        ground tissue), so ``r_hi`` falls back to ``r_pith``.  An explicit
+        ``radius_max`` may reach *past* the pith into the cortex/rind — it is clamped
+        only to ``r_section`` (the whole cross-section out to the epidermis) so a band
+        can place bundles in any tissue.  ``r_section`` defaults to ``r_pith`` (the
+        historical pith-only behaviour) when the caller does not supply it.
         """
+        if r_section is None:
+            r_section = r_pith
         r_lo = float(bp.get("radius_min", 0.0))
         r_hi = float(bp.get("radius_max", 0.0))
-        return r_lo, (min(r_hi, r_pith) if r_hi > 0.0 else r_pith)
+        return r_lo, (min(r_hi, r_section) if r_hi > 0.0 else r_pith)
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         return layers_polygons
@@ -471,14 +497,51 @@ class StemAnatomy(Organ):
 
         For the dicot eustele the bundles form a ring at this region's periphery;
         for the monocot atactostele they scatter across it.  Both subclasses key
-        their placement off this polygon.
+        their placement off this (pith) polygon, which also fixes the ground-tissue
+        radius a full-span bundle band is capped to.
+
+        A bundle band may reach *past* the pith into the cortex/rind, though (a
+        ``vascular_bundle`` spec whose ``radius_max`` exceeds the pith radius) — for
+        that the whole cross-section (everything inside the epidermis) is stashed on
+        ``self._vascular_section_polygon`` for the placement code to test against.
 
         Falls back to the innermost layer polygon if the pith was fully hollowed
         out (``cavity_radius`` >= the pith radius, so no ``pith`` rings exist).
         """
         names = [l["name"] for l in layers_polygons]
+        section = [l["polygon"] for l in layers_polygons if l["name"] != "outside"]
+        self._vascular_section_polygon = unary_union(section) if section else None
+        # Radius -> local tissue cell size, so a bundle placed out in the cortex/rind
+        # is sized against the cells it actually sits among (not the pith gradient).
+        # (r_outer, cell_diameter) per real layer, sorted outward.
+        sizes = []
+        for l in layers_polygons:
+            if l["name"] == "outside" or l["polygon"] is None or l["polygon"].is_empty:
+                continue
+            xs, ys = l["polygon"].exterior.coords.xy
+            r_out = float(np.max(np.hypot(np.asarray(xs), np.asarray(ys))))
+            layer = self.get_layer(l["name"])
+            if layer is not None and layer.cell_diameter > 0:
+                sizes.append((r_out, float(layer.cell_diameter)))
+        self._vascular_layer_sizes = sorted(sizes)
         idx = names.index("parenchyma") if "parenchyma" in names else len(layers_polygons) - 1
         return layers_polygons[idx]["polygon"]
+
+    def _local_ground_cell_size(self, x: float, y: float, r_pith: float) -> float:
+        """Cell diameter of the tissue at ``(x, y)`` — the ground a bundle sits in.
+
+        Inside the pith (r <= ``r_pith``) this follows the pith gradient (as before);
+        past the pith it is the cell size of the layer (cortex, hypodermis, ...) whose
+        ring contains the point, so a peripheral bundle's sheath is sized against the
+        rind cells around it rather than the much larger pith cells.
+        """
+        r = float(np.hypot(x, y))
+        if r <= r_pith or not getattr(self, "_vascular_layer_sizes", None):
+            return self._pith_cell_diameter_at(r, r_pith)
+        for r_out, cd in self._vascular_layer_sizes:
+            if r <= r_out:
+                return cd
+        return self._vascular_layer_sizes[-1][1]
 
 
 # ---------------------------------------------------------------------------
@@ -496,4 +559,7 @@ def __getattr__(name):
     if name == "DicotStemAnatomy":
         from openalea.granap.stem_dicot_class import DicotStemAnatomy
         return DicotStemAnatomy
+    if name == "ContinuousDicotStemAnatomy":
+        from openalea.granap.stem_dicot_continuous_class import ContinuousDicotStemAnatomy
+        return ContinuousDicotStemAnatomy
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

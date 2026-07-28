@@ -121,7 +121,19 @@ class CellManager:
     def remove_cells_by_ids(self, ids: []):
         # filter cells
         self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
-    
+
+    def remove_cells(self, cells):
+        """Remove exactly these cell objects, matched by identity.
+
+        Unlike :meth:`remove_cells_by_ids`, this is safe when ``id_cell`` is not
+        unique across the list (e.g. air-space cells seeded with ``id_cell =
+        len(cells) + k`` can collide with a contiguous block of earlier layer-seed
+        ids): removing by value would then delete unrelated cells that happen to
+        share an id.  Matching on ``id(cell)`` deletes only the intended objects.
+        """
+        drop = {id(c) for c in cells}
+        self.cells = [cell for cell in self.cells if id(cell) not in drop]
+
     def get_last_id_group(self):
         return max((c.id_group for c in self.cells), default=0)
 

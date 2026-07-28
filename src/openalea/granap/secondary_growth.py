@@ -31,7 +31,7 @@ from openalea.granap.tissue_class import place_packed_group, fill_by_rings, fill
 
 def angular_wedge(cx: float, cy: float, theta_c: float, half_angle: float,
                   r_outer: float, n_arc: int = 50) -> Polygon:
-    """Pie-wedge polygon: apex at ``(cx, cy)`` spanning ``theta_c ± half_angle``
+    """Pie-wedge polygon: apex at ``(cx, cy)`` spanning ``theta_c +/- half_angle``
     out to ``r_outer``.  Intersect with an annulus to get a xylem sector."""
     arc = np.linspace(theta_c - half_angle, theta_c + half_angle, n_arc)
     return Polygon([(cx, cy)] + [
@@ -51,7 +51,7 @@ def flared_wedge(cx: float, cy: float, theta_c: float, r_inner: float,
     angular half-width capped at ``cap_half_angle`` (radians).  Secondary-xylem
     sectors therefore start at the vascular-bundle width against the primary xylem
     and only merge into a continuous ring once their capped edges meet further out
-    (a full ring at ``cap_half_angle`` = π / n_bundles).  ``flare_angle`` = 0 gives
+    (a full ring at ``cap_half_angle`` = pi / n_bundles).  ``flare_angle`` = 0 gives
     straight radial sides that never widen.
     """
     rs = np.linspace(r_inner, r_outer, max(int(n_arc), 2))
@@ -194,7 +194,7 @@ def build_annual_bands(secondary_contour: Polygon, primary_contour: Polygon,
                        n_ring: int):
     """Radial growth-ring bands of the secondary-xylem annulus, following the
     secondary-cambium contour buffered inward in equal steps.  Returns a list of
-    ``(band_polygon, r_inner, r_outer)`` inner→outer, or ``None`` when ``n_ring<=1``.
+    ``(band_polygon, r_inner, r_outer)`` inner->outer, or ``None`` when ``n_ring<=1``.
     """
     if n_ring <= 1:
         return None
@@ -228,7 +228,7 @@ def radial_strip(cx: float, cy: float, theta: float, width: float,
 
 
 def _bisect_circular(occupied: list) -> float:
-    """Midpoint of the widest gap around a circle of thetas in ``[0, 2π)``."""
+    """Midpoint of the widest gap around a circle of thetas in ``[0, 2pi)``."""
     m = len(occupied)
     if m == 0:
         return 0.0
@@ -290,6 +290,10 @@ def build_medullar_ray_polygons(rng, annular_zone, vessel_zones, primary_contour
     base_width = float(mr.get("base_width", 0.005))
     allow_non_vascular = bool(mr.get("allow_non_vascular", False))
     n_sectors = max(len(sector_thetas), 1)
+    # ``half`` may be a scalar (uniform sectors) or one value per sector (a mixed-kind
+    # eustele pattern, where each bundle owns a different angular share).
+    halves = (list(half) if isinstance(half, (list, tuple, np.ndarray))
+              else [half] * n_sectors)
 
     _, _, pc_r = GeometryProcessor._chebyshev_center(primary_contour)
     annulus = max(r_outer - pc_r, 0.0)
@@ -326,11 +330,11 @@ def build_medullar_ray_polygons(rng, annular_zone, vessel_zones, primary_contour
             n_r = rays_pp + (1 if pk < extra else 0)
             slice_initial = []
             for j in range(n_r):
-                offset = (2.0 * (j + 1) / (n_r + 1) - 1.0) * half
+                offset = (2.0 * (j + 1) / (n_r + 1) - 1.0) * halves[pk]
                 th = theta_zone + offset
                 slice_initial.append(th)
                 rays.append((th, 0.0))
-            slice_bounds.append([theta_zone - half, *sorted(slice_initial), theta_zone + half])
+            slice_bounds.append([theta_zone - halves[pk], *sorted(slice_initial), theta_zone + halves[pk]])
         for i, r_j in enumerate(
                 _new_ray_start_radii(rng, n_new, span_base, span, sd_mm, pc_r, r_outer)):
             bounds = slice_bounds[i % n_sectors]
@@ -452,9 +456,14 @@ def fill_ray_parenchyma_split(cells, rng, vessel_zones, annular_zone, cx, cy, sx
     """Ray parenchyma in the interfascicular gaps, filled as radial lanes that split
     (lane count doubles) as the arc widens outward — the root's ``_fill_ray_parenchyma``,
     keyed on the gap centres ``gap_thetas`` (midway between adjacent xylem sectors)
-    each spanning ``± gap_half``.  Returns the next id."""
+    each spanning ``+/- gap_half``.  ``gap_half`` is a scalar (uniform gaps) or one
+    value per gap (a mixed-kind pattern, where the between-group gaps differ from the
+    within-group ones).  Returns the next id."""
     valid = [z for z in vessel_zones if z is not None and not z.is_empty]
-    if annular_zone is None or annular_zone.is_empty or r_outer <= 0.0 or gap_half <= 0.0:
+    gap_halves = (list(gap_half) if isinstance(gap_half, (list, tuple, np.ndarray))
+                  else [gap_half] * len(gap_thetas))
+    if (annular_zone is None or annular_zone.is_empty or r_outer <= 0.0
+            or (max(gap_halves) if gap_halves else 0.0) <= 0.0):
         return start_id
     d_cell = float(sx["parenchyma_diameter"])
     w_cell = float(sx["parenchyma_width"])
@@ -471,9 +480,12 @@ def fill_ray_parenchyma_split(cells, rng, vessel_zones, annular_zone, cx, cy, sx
     border_cos, border_sin = np.cos(phi), np.sin(phi)
     next_id = start_id
 
-    for theta_c in gap_thetas:
-        theta_lo = theta_c - gap_half
-        theta_hi = theta_c + gap_half
+    for gi, theta_c in enumerate(gap_thetas):
+        gh = gap_halves[gi]
+        if gh <= 0.0:
+            continue
+        theta_lo = theta_c - gh
+        theta_hi = theta_c + gh
         r_start_k = max(r_start, d_cell)
         init_spacing = w_cell / r_start_k
         n_init = max(1, int(np.ceil((theta_hi - theta_lo) / init_spacing)))

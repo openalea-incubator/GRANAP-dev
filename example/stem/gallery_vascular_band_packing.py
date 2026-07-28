@@ -68,14 +68,14 @@ SCENARIOS = [
     ])),
     ("2 bands — inner random + outer even ring", _monocot_bands([
         dict(placement="random", radius_min=0.0, radius_max=0.42, n_bundles=6),
-        dict(placement="even",   radius_min=0.55, radius_max=0.85, n_bundles=11),
+        dict(placement="even",   radius=0.70, n_bundles=11),
     ])),
     ("3 bands — random centre + two interleaved even rings", _monocot_bands([
         dict(placement="random", radius_min=0.0, radius_max=0.40, n_bundles=5),
         # Two 'even' bands at nearly the same radius; the second is offset half a
         # step (180 / n_bundles = 20 deg) so its bundles sit between the first's.
-        dict(placement="even", radius_min=0.58, radius_max=0.74, n_bundles=9, shape="ellipse"),
-        dict(placement="even", radius_min=0.66, radius_max=0.82, n_bundles=9, angle=20.0, shape="egg"),
+        dict(placement="even", radius=0.66, n_bundles=9, shape="ellipse"),
+        dict(placement="even", radius=0.74, n_bundles=9, angle=20.0, shape="egg"),
     ])),
 ]
 

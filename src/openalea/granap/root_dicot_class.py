@@ -123,9 +123,12 @@ class DicotRootAnatomy(RootAnatomy):
                 "radius_valley_side": float(sec_cam.get("radius_valley_side", 0.45)),
                 "arc_peak_side":      float(sec_cam.get("arc_peak_side",      0.20)),
                 "arc_valley_side":    float(sec_cam.get("arc_valley_side",    0.10)),
+                "n_peaks":        int(sec_cam.get("n_peaks", 0)),
+                "ellipse_ratio":  float(sec_cam.get("ellipse_ratio", 0.75)),
                 "n_layers":       max(1, int(sec_cam.get("n_layers",  1))),
                 "shape":          str(sec_cam.get("shape", "star")),
                 "profile":        list(sec_cam.get("profile", []) or []),
+                "exponent":       float(sec_cam.get("exponent", 4.0)),
             }
 
             # Secondary phloem is built only when its param entry is present
@@ -361,7 +364,7 @@ class DicotRootAnatomy(RootAnatomy):
         """id_groups of ``cells`` whose seed (x, y) intersects ``zone``.
 
         Vectorised ``intersects_xy`` over the cells' coordinates — replaces a
-        per-cell ``zone.intersects(Point(c.x, c.y))`` (perf proposal ②).
+        per-cell ``zone.intersects(Point(c.x, c.y))`` (perf proposal (2)).
         """
         if not cells:
             return set()
@@ -394,38 +397,33 @@ class DicotRootAnatomy(RootAnatomy):
         sc = self.secondary_cambium_params
         p  = self.vascular_params
 
-        # 'focus_ellipse' contour: one smooth best-fit superellipse for a mature
-        # ring-shaped cambium.  Axes come from the measured profile (semi-minor =
-        # widest point, semi-major = tip) and a single exponent is least-squares
-        # fitted to the interior points.  Sized in absolute mm (major axis along
-        # +y) and clipped to the stele shape — no isotropic stele-radius clamp, so
-        # it stays elliptical instead of collapsing to the stele's inscribed circle.
-        if sc.get("shape", "star") == "focus_ellipse":
-            semi_major, semi_minor, exponent = GeometryProcessor.fit_focus_ellipse(sc["profile"])
-            contour = GeometryProcessor.focus_ellipse_polygon(
-                0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exponent,
-            )
-            return translate(contour, cx, cy).intersection(stele_polygon)
-
-        n_peaks = p["n_vascular_peak"]
-        # oriented_star_polygon orients the arm toward whichever side owns the
-        # larger radius. With the default radius_valley_side > radius_peak_side
-        # the arm points to the primary-xylem *valleys*, where the cambium
-        # produces secondary xylem and bulges outward (the star is offset half a
-        # period). For a diarch (n_peaks == 2) this makes the secondary cambium
-        # run perpendicular to the primary xylem.
-        raw_star = GeometryProcessor.oriented_star_polygon(
+        # All shapes come from the shared contour helper, then are clipped to the
+        # stele.  Sized in absolute mm (no isotropic stele-radius clamp, so an
+        # ellipse / focus_ellipse stays elongated instead of collapsing to the
+        # stele's inscribed circle).
+        #
+        # * 'star' — oriented_star_polygon orients the arm toward whichever side
+        #   owns the larger radius.  With the default radius_valley_side >
+        #   radius_peak_side the arm points to the primary-xylem *valleys*, where
+        #   the cambium produces secondary xylem and bulges outward (the star is
+        #   offset half a period); for a diarch (2 peaks) the secondary cambium
+        #   then runs perpendicular to the primary xylem.  Laplacian-smoothed.
+        # * 'focus_ellipse' — one smooth best-fit superellipse (axes from the
+        #   measured profile, exponent least-squares fitted) for a mature ring.
+        # * 'circle' / 'ellipse' — a plain ring sized by radius_valley_side.
+        shape = sc.get("shape", "star")
+        n_peaks = int(sc.get("n_peaks", 0)) or p["n_vascular_peak"]
+        contour = GeometryProcessor.contour_polygon(
+            shape, cx=cx, cy=cy,
+            radius=sc["radius_valley_side"], ellipse_ratio=sc.get("ellipse_ratio", 0.75),
             n_branches=n_peaks,
             radius_peak_side=sc["radius_peak_side"],
             radius_valley_side=sc["radius_valley_side"],
-            arc_peak_side=sc["arc_peak_side"],
-            arc_valley_side=sc["arc_valley_side"],
+            arc_peak_side=sc["arc_peak_side"], arc_valley_side=sc["arc_valley_side"],
+            profile=sc.get("profile"), exponent=sc.get("exponent", 4.0),
+            smooth=0.9 if shape == "star" else None,
         )
-        star_coords = GeometryProcessor.smoothing_polygon(
-            np.column_stack(raw_star.exterior.xy), smooth_factor=0.9, iterations=5,
-        )
-        star = Polygon(star_coords).buffer(0)
-        return translate(star, cx, cy).intersection(stele_polygon)
+        return contour.intersection(stele_polygon)
 
     @staticmethod
     def _radial_strip(cx: float, cy: float, theta: float, width: float, r_outer: float,
@@ -502,7 +500,7 @@ class DicotRootAnatomy(RootAnatomy):
         s0    = cam_ext.project(Point(px, py))
         inset = height * 0.3
 
-        # Curved base: sample the cambium exterior over ±base_arc_half_width of arc
+        # Curved base: sample the cambium exterior over +/-base_arc_half_width of arc
         # length around P, each point pushed radially inward by ``inset`` so the
         # base sits just inside the band's inner edge.
         base = []
@@ -523,14 +521,14 @@ class DicotRootAnatomy(RootAnatomy):
 
         A compartment is the angular sector between two consecutive rays inside a
         vessel zone — bounded by the parenchyma rays at the zone edges
-        (``theta_v ± half_width``) and by any medullar rays in between.  Each one
-        becomes its own tapering trapeze, so the phloem is split medullar↔medullar
-        and medullar↔parenchyma rather than spanning the whole zone as one block.
+        (``theta_v +/- half_width``) and by any medullar rays in between.  Each one
+        becomes its own tapering trapeze, so the phloem is split medullar<->medullar
+        and medullar<->parenchyma rather than spanning the whole zone as one block.
         """
         hw = self._secondary_vessel_half_width
         comps = []
         for theta_v in self._secondary_vessel_thetas:
-            # Medullar-ray offsets (signed, wrapped to ±pi) that fall in this zone.
+            # Medullar-ray offsets (signed, wrapped to +/-pi) that fall in this zone.
             offsets = []
             for m in self._secondary_medullar_thetas:
                 off = (m - theta_v + np.pi) % (2.0 * np.pi) - np.pi
@@ -565,7 +563,7 @@ class DicotRootAnatomy(RootAnatomy):
     @staticmethod
     def _angular_wedge(cx: float, cy: float, theta_center: float,
                        half_angle: float, r_outer: float, n_arc: int = 50) -> Polygon:
-        """Pie-wedge polygon: apex at ``(cx, cy)``, spanning ``theta_center ± half_angle``
+        """Pie-wedge polygon: apex at ``(cx, cy)``, spanning ``theta_center +/- half_angle``
         out to radius ``r_outer`` along ``n_arc`` arc points.
 
         The shared building block for the secondary-xylem vessel slices and the
@@ -578,7 +576,7 @@ class DicotRootAnatomy(RootAnatomy):
 
     @staticmethod
     def _bisect_circular(occupied: list) -> float:
-        """Midpoint of the widest gap around a circle of thetas in ``[0, 2π)``.
+        """Midpoint of the widest gap around a circle of thetas in ``[0, 2pi)``.
 
         ``occupied`` is a sorted list; returns the angle that splits the largest
         arc between consecutive rays (opposite the sole ray when there is one, and
@@ -1280,7 +1278,7 @@ class DicotRootAnatomy(RootAnatomy):
         (the cambium polygon buffered outward by ``height``).  With
         ``shape="trapeze"`` (default) one tapering trapeze sits in each
         *compartment* — the angular sector between two consecutive rays
-        (medullar↔medullar or medullar↔parenchyma) — with a wide base at the
+        (medullar<->medullar or medullar<->parenchyma) — with a wide base at the
         cambium narrowing to ``top_width`` at the band's outer edge.  With
         ``shape="band"`` the whole buffered-cambium band is used directly as a
         single continuous ring, skipping the per-compartment trapeze carving.

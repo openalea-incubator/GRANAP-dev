@@ -89,30 +89,41 @@ class MonocotStemAnatomy(StemAnatomy):
             return []
 
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y
-        R = np.sqrt(polygon.area / np.pi)
-        prepared = prep(polygon)
+        # ``polygon`` is the pith (ground) region; ``section`` is the whole
+        # cross-section out to the epidermis.  A band placed against ``section`` may
+        # reach any tissue (e.g. peripheral bundles just under the hypodermis); a
+        # full-span band still caps at the pith radius (see ``_spec_band``).
+        r_pith = np.sqrt(polygon.area / np.pi)
+        section = getattr(self, "_vascular_section_polygon", None) or polygon
+        r_sec = np.sqrt(section.area / np.pi)
+        prepared = prep(section)
 
         placed: List[Tuple[float, float, float, dict]] = []
         envelopes: List[Polygon] = []
         for bp in specs:
-            if bp.get("placement", "random") == "even":
-                self._place_even_bundles(bp, cx0, cy0, R, prepared, placed, envelopes)
+            mode = bp.get("placement", "random")
+            if mode == "even":
+                self._place_even_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes)
+            elif mode == "spaced":
+                self._place_spaced_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes)
             else:
-                self._place_random_bundles(bp, cx0, cy0, R, prepared, placed, envelopes)
+                self._place_random_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes)
         return placed
 
-    def _place_random_bundles(self, bp, cx0, cy0, R, prepared, placed, envelopes) -> None:
+    def _place_random_bundles(self, bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes) -> None:
         """Scatter one band's bundles by rejection sampling (no clumping/overlap).
 
         A full-span band (no ``radius_min``/``radius_max`` set) keeps the historical
-        peripheral-bias radial sampling so the default single-kind atactostele is
-        unchanged; an explicit sub-band samples area-uniform within its annulus.
-        A candidate is rejected unless it is inside the ground tissue, clear of the
-        medullary cavity, at least ``min_dist`` from every placed centre, and its
-        oriented envelope stays clear of every placed envelope (across all bands).
+        peripheral-bias radial sampling within the pith so the default single-kind
+        atactostele is unchanged; an explicit sub-band samples area-uniform within its
+        annulus (which may extend past the pith into the cortex/rind).  A candidate is
+        rejected unless it is inside the section, clear of the medullary cavity, at
+        least ``min_dist`` from every placed centre, and its oriented envelope stays
+        clear of every placed envelope (across all bands).
         """
         n = int(bp.get("n_bundles", 0))
-        r_lo, r_hi = self._spec_band(bp, R)
+        r_lo, r_hi = self._spec_band(bp, r_pith, r_sec)
+        R = r_pith
         full_span = (float(bp.get("radius_min", 0.0)) <= 0.0
                      and float(bp.get("radius_max", 0.0)) <= 0.0)
         # Cheap centre pre-filter (skips obvious clashes before the exact test);
@@ -146,7 +157,7 @@ class MonocotStemAnatomy(StemAnatomy):
             # Definitive non-overlap test: reject unless this bundle's actual
             # oriented envelope (grown by its outer sheath) stays clear of every
             # one already placed.
-            ground = self._pith_cell_diameter_at(np.hypot(x - cx0, y - cy0), R)
+            ground = self._local_ground_cell_size(x, y, R)
             env = self._placed_bundle_envelope(x, y, theta, bp, ground)
             if self._bundle_overlaps(env, envelopes, gap):
                 continue
@@ -159,18 +170,99 @@ class MonocotStemAnatomy(StemAnatomy):
                      "[%.3g, %.3g] mm (ground tissue too tight for the rest).",
                      n_here, n, r_lo, r_hi)
 
-    def _place_even_bundles(self, bp, cx0, cy0, R, prepared, placed, envelopes) -> None:
-        """Place one band's bundles equally spaced on a ring at the band midpoint.
+    def _place_spaced_bundles(self, bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes) -> None:
+        """Scatter one band's bundles by *best-candidate* sampling.
 
-        The ring holds ``n_bundles`` slots a full turn apart (circumference /
-        ``n_bundles``), rotated by the spec's ``angle`` phase (degrees) — set two
-        close-radius bands half a step apart to interleave them.  A slot is skipped
-        (with a log) if it falls outside the ground tissue or its envelope would
-        overlap a bundle already placed, so ``even`` never produces overlap either.
+        Like :meth:`_place_random_bundles`, every bundle stays inside the band, clear
+        of the medullary cavity and non-overlapping.  But instead of accepting the
+        first valid random dart, each bundle draws ``n_candidates`` candidates and
+        takes the one **farthest from every bundle already placed** (Mitchell's
+        best-candidate rule).  The band therefore fills into its emptiest spots and
+        ends up evenly spread — no clumps or big holes — while staying irregular (not
+        a ring/grid like ``even``).
         """
         n = int(bp.get("n_bundles", 0))
-        r_lo, r_hi = self._spec_band(bp, R)
-        r_ring = 0.5 * (r_lo + r_hi)             # band midpoint (full-span -> R/2)
+        r_lo, r_hi = self._spec_band(bp, r_pith, r_sec)
+        R = r_pith
+        full_span = (float(bp.get("radius_min", 0.0)) <= 0.0
+                     and float(bp.get("radius_max", 0.0)) <= 0.0)
+        gap = self._bundle_clearance(bp)
+        cavity_keepout = self.cavity_radius + 0.5 * bp.get("height", 0.13)
+        # Cheap centre pre-filter (same as 'random') so most darts are rejected before
+        # the costly envelope test; the envelope test below stays the definitive one.
+        min_dist = 0.8 * max(bp.get("width", 0.09), bp.get("height", 0.13))
+        # Candidates weighed per bundle; the roomiest placeable one is chosen.
+        k_cand = max(1, int(bp.get("n_candidates", 8)))
+
+        def _draw():
+            # Area-uniform over the disk / annulus (no peripheral bias): candidates
+            # cover the whole region evenly so best-candidate can fill the interior
+            # too, not just the rim.
+            u = self.rng.uniform()
+            lo2 = r_lo ** 2 if not full_span else 0.0
+            r = np.sqrt(u * (r_hi ** 2 - lo2) + lo2)
+            ang = self.rng.uniform(0.0, 2.0 * np.pi)
+            return r, ang
+
+        n_here = 0
+        for _ in range(n):
+            # Collect up to k_cand *placeable* candidates (passing every test,
+            # including the definitive oriented-envelope non-overlap), persisting
+            # through the same generous dart budget as 'random' so a bundle that can
+            # still fit is not skipped.  Each is scored by its openness = distance to
+            # the nearest already-placed bundle centre.
+            valid = []
+            for _c in range(n * 400):
+                if len(valid) >= k_cand:
+                    break
+                r, ang = _draw()
+                if r < r_lo or r >= r_hi:
+                    continue
+                x, y = cx0 + r * np.cos(ang), cy0 + r * np.sin(ang)
+                if np.hypot(x - cx0, y - cy0) < cavity_keepout:
+                    continue
+                if not prepared.contains(Point(x, y)):
+                    continue
+                # Cheap centre pre-filter (openness = distance to nearest placed
+                # centre); skip obvious clashes before the costly envelope build so
+                # 'spaced' stays comparable in speed to 'random'.
+                d = min((np.hypot(x - px, y - py) for px, py, *_ in placed), default=np.inf)
+                if placed and d < min_dist:
+                    continue
+                theta = np.arctan2(y - cy0, x - cx0)
+                ground = self._local_ground_cell_size(x, y, R)
+                env = self._placed_bundle_envelope(x, y, theta, bp, ground)
+                if self._bundle_overlaps(env, envelopes, gap):
+                    continue
+                valid.append((d, x, y, theta, env))
+            if not valid:
+                break
+            # Take the roomiest of the placeable candidates (best-candidate rule).
+            d, x, y, theta, env = max(valid, key=lambda t: t[0])
+            placed.append((x, y, theta, bp))
+            envelopes.append(env)
+            n_here += 1
+
+        if n_here < n:
+            log.info("MonocotStemAnatomy: placed %d/%d spaced bundles in band "
+                     "[%.3g, %.3g] mm (ground tissue too tight for the rest).",
+                     n_here, n, r_lo, r_hi)
+
+    def _place_even_bundles(self, bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes) -> None:
+        """Place one band's bundles equally spaced on a ring at a single radius.
+
+        The ring holds ``n_bundles`` slots a full turn apart (circumference /
+        ``n_bundles``), at the spec's ``radius`` (mm; 0 -> half the pith radius,
+        clamped to the section so the ring may sit in the cortex/rind), rotated by the
+        spec's ``angle`` phase (degrees) — set two same-radius bands half a step apart
+        to interleave them.  A slot is skipped (with a log) if it falls outside the
+        section or its envelope would overlap a bundle already placed, so ``even``
+        never produces overlap either.
+        """
+        n = int(bp.get("n_bundles", 0))
+        R = r_pith
+        r_ring = float(bp.get("radius", 0.0))
+        r_ring = min(r_ring, r_sec) if r_ring > 0.0 else 0.5 * r_pith
         gap = self._bundle_clearance(bp)
         angle0 = np.radians(float(bp.get("angle", 0.0)))
 
@@ -180,7 +272,7 @@ class MonocotStemAnatomy(StemAnatomy):
             x, y = cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta)
             if not prepared.contains(Point(x, y)):
                 continue
-            ground = self._pith_cell_diameter_at(r_ring, R)
+            ground = self._local_ground_cell_size(x, y, R)
             env = self._placed_bundle_envelope(x, y, theta, bp, ground)
             if self._bundle_overlaps(env, envelopes, gap):
                 continue
@@ -208,7 +300,7 @@ class MonocotStemAnatomy(StemAnatomy):
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y
         r_pith = np.sqrt(polygon.area / np.pi)
         for cx, cy, theta, bp in self._scattered_bundle_positions(polygon):
-            ground = self._pith_cell_diameter_at(np.hypot(cx - cx0, cy - cy0), r_pith)
+            ground = self._local_ground_cell_size(cx, cy, r_pith)
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
                                bp, xylem, phloem, cambium, ground_cell_size=ground)
             self._register_bundle(res)

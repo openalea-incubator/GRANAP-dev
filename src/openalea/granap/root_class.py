@@ -89,7 +89,7 @@ class RootAnatomy(Organ):
         super().__init__(seed=seed)
         if isinstance(input_data, OrganInputData):
             # Surface known cross-field footguns up front (secondary cambium not
-            # enclosing the primary, inner >= outer, …) as warnings rather than a
+            # enclosing the primary, inner >= outer, ...) as warnings rather than a
             # silently broken render.  Non-fatal: clipping still produces output.
             for issue in input_data.validate():
                 warnings.warn(f"[anatomy config] {issue}", stacklevel=2)
@@ -173,54 +173,22 @@ class RootAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def _create_base_shape(self) -> Polygon:
-        radius = self._calculate_root_radius()
-        shape_params = self._get_param("base_shape")
-        kind = shape_params.get("shape", "circle")
-
-        if kind == "circle":
-            return GeometryProcessor.circle_polygon(radius)
-
-        if kind == "star":
-            # Star outline uses the same parameters as the xylem star.
-            return GeometryProcessor.oriented_star_polygon(
-                n_branches=int(shape_params.get("n_peaks", 5)),
-                radius_peak_side=float(shape_params.get("radius_peak_side", 0.6)),
-                radius_valley_side=float(shape_params.get("radius_valley_side", 0.4)),
-                arc_peak_side=float(shape_params.get("arc_peak_side", 0.05)),
-                arc_valley_side=float(shape_params.get("arc_valley_side", 0.10)),
-            )
-
-        # width/height define the bounding box; 0 (auto) falls back to the
-        # auto-computed diameter so the shape matches the default circle's size.
-        width = float(shape_params.get("width", 0.0)) or 2 * radius
-        height = float(shape_params.get("height", 0.0)) or 2 * radius
-
-        if kind == "ellipse":
-            return GeometryProcessor.ellipse_to_polygon(0.0, 0.0, width / 2, height / 2, 0.0)
-        if kind == "focus_ellipse":
-            # Preferred: a measured contour ``profile`` (list of (major_pos,
-            # minor_width) mm points) best-fitted to a single superellipse — no
-            # exponent to hand-tune.  Major axis runs along +y (height).  Falls
-            # back to the width/height bounding box (+ optional exponent) when no
-            # profile is given.
-            profile = shape_params.get("profile")
-            if profile:
-                semi_major, semi_minor, exponent = GeometryProcessor.fit_focus_ellipse(profile)
-                return GeometryProcessor.focus_ellipse_polygon(
-                    0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exponent,
-                )
-            return GeometryProcessor.focus_ellipse_polygon(
-                0.0, 0.0, width / 2, height / 2, 0.0,
-                exponent=float(shape_params.get("exponent", 4.0)),
-            )
-        if kind == "square":
-            return GeometryProcessor.rectangle_polygon(width, width)
-        if kind == "rectangle":
-            return GeometryProcessor.rectangle_polygon(width, height)
-        if kind == "triangle":
-            return GeometryProcessor.triangle_polygon(width, height)
-        # Unknown shape — fall back to circle.
-        return GeometryProcessor.circle_polygon(radius)
+        # One shape family for every organ contour — see
+        # GeometryProcessor.contour_polygon.  The root star uses the xylem-star
+        # parameters (peak/valley radii + arcs); focus_ellipse prefers a measured
+        # profile, else width/height + exponent.
+        sp_ = self._get_param("base_shape")
+        return GeometryProcessor.contour_polygon(
+            sp_.get("shape", "circle"),
+            radius=self._calculate_root_radius(),
+            width=float(sp_.get("width", 0.0)), height=float(sp_.get("height", 0.0)),
+            n_branches=int(sp_.get("n_peaks", 5)),
+            radius_peak_side=float(sp_.get("radius_peak_side", 0.6)),
+            radius_valley_side=float(sp_.get("radius_valley_side", 0.4)),
+            arc_peak_side=float(sp_.get("arc_peak_side", 0.05)),
+            arc_valley_side=float(sp_.get("arc_valley_side", 0.10)),
+            profile=sp_.get("profile"), exponent=float(sp_.get("exponent", 4.0)),
+        )
 
     def _calculate_root_radius(self) -> float:
         radius = self.vascular_params["thickness"] / 2

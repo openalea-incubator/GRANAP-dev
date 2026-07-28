@@ -68,7 +68,7 @@ class AnatomyWriter:
 
         # Use the same GeoDataFrame (and same index) as NetworkExporter.export().
         # IMPORTANT: apply the IDENTICAL valid-geometry filter so that both paths
-        # call _build_topology with the exact same polygon set → same KD-tree
+        # call _build_topology with the exact same polygon set -> same KD-tree
         # snap_tol, same clusters, same canonical junction coordinates.
         cells_gdf = self.organ.generate_cells()
         valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
@@ -90,7 +90,7 @@ class AnatomyWriter:
             junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
 
             if len(junc_positions) < 2:
-                # no junctions → single wall loop
+                # no junctions -> single wall loop
                 wall_key = tuple(sorted(vkeys))
                 if wall_key not in wall_registry:
                     wall_registry[wall_key] = {"id": next_wall_id, "points": list(vkeys) + [vkeys[0]]}
@@ -647,7 +647,7 @@ class NetworkExporter:
         )
         cells_gdf = cells_gdf[valid_mask]
 
-        # Phases 0–2 — snapping, topology maps, junction detection
+        # Phases 0-2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
 
@@ -667,7 +667,7 @@ class NetworkExporter:
         # A "wall" = the polyline segment between two consecutive
         # junction vertices along one cell boundary.  Two cells that
         # share the same (juncA, juncB) segment share a wall.
-        wall_registry: Dict[tuple, dict] = {}  # wall_key → wall info
+        wall_registry: Dict[tuple, dict] = {}  # wall_key -> wall info
         next_wall_id = 0
 
         for row_idx, vkeys in cell_vkeys.items():
@@ -675,7 +675,7 @@ class NetworkExporter:
             junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
 
             if len(junc_positions) < 2:
-                # Fewer than 2 junctions → treat entire boundary as one wall
+                # Fewer than 2 junctions -> treat entire boundary as one wall
                 wall_key = tuple(sorted(vkeys))
                 if wall_key not in wall_registry:
                     length = sum(
@@ -825,7 +825,7 @@ class NetworkExporter:
             wall_length = wd["length"]
             wall_thickness = wd["wall_thickness"]
 
-            # Transmembrane: cell ↔ wall
+            # Transmembrane: cell <-> wall
             for cn in cell_nodes:
                 pos_cell = network.graph.nodes[cn]["position"]
                 pos_wall = wd["midpoint"]
@@ -851,7 +851,7 @@ class NetworkExporter:
                 lateral_distance = dist_wall_cell + dist_junc_wall_node
                 d_vec = np.array([pos_junc[0] - pos_wall[0], pos_junc[1] - pos_wall[1]])
                 
-                # Apoplastic: wall ↔ junction
+                # Apoplastic: wall <-> junction
                 network.graph.add_edge(
                         junc_id,
                         wall_id,
@@ -863,7 +863,7 @@ class NetworkExporter:
                         wall_thickness=wall_thickness,
                 )
             
-            # Symplastic: cell ↔ cell
+            # Symplastic: cell <-> cell
             if len(cell_nodes) == 2:
                 pos_a = network.graph.nodes[cell_nodes[0]]["position"]
                 pos_b = network.graph.nodes[cell_nodes[1]]["position"]
