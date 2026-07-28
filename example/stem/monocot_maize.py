@@ -2,9 +2,7 @@
 
 Maize stem anatomy — an *atactostele*: collateral 'face' bundles scattered through
 a large parenchymatous pith, wrapped in a graded rind.  Here the vasculature is
-**three radial bundle bands** (``vascular_bundle`` specs): the inner ``spaced`` band
-fills an annulus (``radius_min .. radius_max``), the two ``even`` rings sit at a
-single ``radius`` mm from the stem centre, pith -> rind:
+**three radial bundle bands**
 
 * **inner** (``placement="spaced"``) — larger bundles, *taller than wide*, spread
   through the inner pith; each with protoxylem + a tear lacuna;
@@ -14,17 +12,6 @@ single ``radius`` mm from the stem centre, pith -> rind:
 * **rind** (``placement="even"``) — small bundles, *wider than tall*, on the same
   peripheral ring **just under the hypodermis** (a ``radius`` that reaches past the
   pith into the rind), with **no protoxylem and no lacuna**.
-
-A bundle band may be placed in *any* tissue: an ``even`` ring whose ``radius`` (or a
-``random``/``spaced`` band whose ``radius_max``) exceeds the pith radius carries its
-bundles out into the cortex / rind (clamped only to the epidermis), so the small
-peripheral bundles sit embedded in the rind as they do in a real maize stem.
-
-The rind itself is a graded stack of cortex layers (inner -> outer-outer cortex),
-a hypodermis and the epidermis, with a sclerenchyma fibre ring.
-
-Configuration model: an organ is configured through its ``OrganInputData`` and then
-built once — all tuning is applied to ``data`` before building.
 """
 
 import os
@@ -63,6 +50,7 @@ BANDS = [
     # (best-candidate 'spaced' placement); protoxylem + tear lacuna.
     {**BASE, **dict(
         radius_min=0.0, radius_max=1.4, placement="spaced", n_bundles=20,
+        n_caps_layers_outward=1, n_caps_layers_inward=1,
         width=0.13, height=0.20, metaxylem_gap=0.015,
         metaxylem_diameter=0.045, metaxylem_diameter_sd=0.004, metaxylem_diameter_min=0.03,
         n_protoxylem=1, protoxylem_diameter=0.03, protoxylem_diameter_min=0.025,
@@ -77,6 +65,7 @@ BANDS = [
     # rind (a band may be placed in any tissue).
     {**BASE, **dict(
         radius=1.68, placement="even", angle=180.0 / 20, n_bundles=20,
+        n_caps_layers_outward=3, n_caps_layers_inward=2,
         width=0.20, height=0.13, metaxylem_gap=0.05,
         metaxylem_diameter=0.05, metaxylem_diameter_sd=0.004, metaxylem_diameter_min=0.03,
         n_protoxylem=1, protoxylem_diameter=0.03, protoxylem_diameter_min=0.025,
@@ -90,7 +79,8 @@ BANDS = [
     # phloem sits clear of the metaxylem eyes.
     {**BASE, **dict(
         radius=1.78, placement="even", angle=0.0, n_bundles=20,
-        width=0.11, height=0.09, 
+        n_caps_layers_outward=1, n_caps_layers_inward=2,
+        width=0.11, height=0.09,
         metaxylem_diameter=0.03, metaxylem_diameter_sd=0.002, metaxylem_diameter_min=0.013,
         metaxylem_gap=0.015, 
         n_protoxylem=0, lacuna=False,

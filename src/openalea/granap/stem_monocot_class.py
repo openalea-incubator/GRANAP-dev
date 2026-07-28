@@ -157,7 +157,7 @@ class MonocotStemAnatomy(StemAnatomy):
             # Definitive non-overlap test: reject unless this bundle's actual
             # oriented envelope (grown by its outer sheath) stays clear of every
             # one already placed.
-            ground = self._local_ground_cell_size(x, y, R)
+            ground = self._neighbour_ground_cell_size(x, y, bp, R)
             env = self._placed_bundle_envelope(x, y, theta, bp, ground)
             if self._bundle_overlaps(env, envelopes, gap):
                 continue
@@ -230,7 +230,7 @@ class MonocotStemAnatomy(StemAnatomy):
                 if placed and d < min_dist:
                     continue
                 theta = np.arctan2(y - cy0, x - cx0)
-                ground = self._local_ground_cell_size(x, y, R)
+                ground = self._neighbour_ground_cell_size(x, y, bp, R)
                 env = self._placed_bundle_envelope(x, y, theta, bp, ground)
                 if self._bundle_overlaps(env, envelopes, gap):
                     continue
@@ -272,7 +272,7 @@ class MonocotStemAnatomy(StemAnatomy):
             x, y = cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta)
             if not prepared.contains(Point(x, y)):
                 continue
-            ground = self._local_ground_cell_size(x, y, R)
+            ground = self._neighbour_ground_cell_size(x, y, bp, R)
             env = self._placed_bundle_envelope(x, y, theta, bp, ground)
             if self._bundle_overlaps(env, envelopes, gap):
                 continue
@@ -299,8 +299,12 @@ class MonocotStemAnatomy(StemAnatomy):
         cambium = self._get_param("cambium")
         cx0, cy0 = polygon.centroid.x, polygon.centroid.y
         r_pith = np.sqrt(polygon.area / np.pi)
+        # The sheath reads the tissue cell size at each of its own cells' positions,
+        # and is clipped to the organ outline so it never leaves the stem.
+        tissue_fn = lambda x, y: self._local_ground_cell_size(x, y, r_pith)
+        outline = self.generate_base_shape()
         for cx, cy, theta, bp in self._scattered_bundle_positions(polygon):
-            ground = self._local_ground_cell_size(cx, cy, r_pith)
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
-                               bp, xylem, phloem, cambium, ground_cell_size=ground)
+                               bp, xylem, phloem, cambium,
+                               ground_cell_size=tissue_fn, sheath_outline=outline)
             self._register_bundle(res)

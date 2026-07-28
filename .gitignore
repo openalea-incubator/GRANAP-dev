@@ -2,3 +2,4 @@
 *.egg-info
 *.vscode
 *.geo
+IMPLEMENTATION_GUIDE.md

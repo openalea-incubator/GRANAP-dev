@@ -543,6 +543,26 @@ class StemAnatomy(Organ):
                 return cd
         return self._vascular_layer_sizes[-1][1]
 
+    def _neighbour_ground_cell_size(self, cx: float, cy: float, bp: dict,
+                                    r_pith: float, k: int = 12) -> float:
+        """Representative ground-cell size of the bundle's *neighbours*.
+
+        Samples :meth:`_local_ground_cell_size` at ``k`` points just outside the
+        bundle footprint (a ring of radius ~half its larger dimension) and returns
+        the median.  Sizing the outer sheath and the removal mask from the
+        neighbouring cells — not only the tissue the bundle *centre* falls in —
+        keeps a bundle that straddles two tissues from reserving the coarse-tissue
+        clearance everywhere: a small bundle in fine tissue no longer clears the
+        space a coarse-celled centre would demand, so it stops crowding out its
+        smaller neighbours.
+        """
+        w, h = float(bp.get("width", 0.12)), float(bp.get("height", 0.18))
+        rr = 0.5 * max(w, h) + 0.5 * float(bp.get("sclerenchyma_cell_diameter", 0.008))
+        sizes = [self._local_ground_cell_size(cx + rr * np.cos(a), cy + rr * np.sin(a), r_pith)
+                 for a in np.linspace(0.0, 2.0 * np.pi, k, endpoint=False)]
+        sizes = [s for s in sizes if s and s > 0]
+        return float(np.median(sizes)) if sizes else self._local_ground_cell_size(cx, cy, r_pith)
+
 
 # ---------------------------------------------------------------------------
 # Backward-compatible re-exports

@@ -487,7 +487,8 @@ class DicotStemAnatomy(StemAnatomy):
                                slot_bp, xylem, phloem, cambium,
                                ground_cell_size=ground,
                                anchor=bundle_cambium_anchor(slot_bp),
-                               fill_cambium=False)
+                               fill_cambium=False,
+                               sheath_outline=self.generate_base_shape())
             self._register_bundle(res)
             cambia_here: List[Polygon] = []
             for role, g in res.zone_polygons:

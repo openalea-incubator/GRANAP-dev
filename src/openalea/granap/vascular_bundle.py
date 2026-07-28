@@ -33,6 +33,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from shapely.affinity import translate as _shapely_translate
 from shapely.geometry import LineString, Point, Polygon, box
+from shapely.prepared import prep
 
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
@@ -90,39 +91,146 @@ def _local_envelope(width: float, height: float, shape: str,
     return GeometryProcessor.oriented_ellipse(0.0, 0.0, width, height, 90.0)
 
 
-def outer_sheath_ring_diameter(bp: dict, ground_cell_size: Optional[float]) -> float:
-    """Cell diameter (== ring thickness) of the outer bundle sheath, or 0 if off.
-
-    The outer sheath is one extra file of cells wrapping the whole bundle, each
-    cell sized *intermediate between the bundle's internal parenchyma and the
-    surrounding ground-tissue cell* (``ground_cell_size``, supplied by the organ
-    since the bundle builder is organ-agnostic) — their mean.  This keeps the sheath
-    a smooth size step from the fine bundle interior out to the coarser tissue it
-    sits in, instead of a chunky ring.  Returns 0 — i.e. no outer sheath, bundle
-    unchanged — when it is disabled (``outer_sheath=False``) or the organ passed
-    no ground cell size (e.g. the organ-agnostic bundle unit tests).
-    """
-    if not bp.get("outer_sheath", True):
-        return 0.0
-    if not ground_cell_size or ground_cell_size <= 0:
-        return 0.0
-    inner = float(bp.get("parenchyma_diameter", 0.012))
-    return 0.5 * (inner + float(ground_cell_size))
+def _tissue_size_fn(ground_cell_size):
+    """Normalise ``ground_cell_size`` (scalar, callable ``f(x,y)``, or None) into a
+    ``f(x, y) -> size or None`` used to read the local tissue cell size."""
+    if ground_cell_size is None:
+        return None
+    if callable(ground_cell_size):
+        def _f(x, y):
+            try:
+                v = float(ground_cell_size(x, y))
+            except Exception:
+                return None
+            return v if v > 0 else None
+        return _f
+    val = float(ground_cell_size)
+    return (lambda x, y: val) if val > 0 else None
 
 
 def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
-    """How far *outside* the envelope the removal mask reaches, or 0 if off.
+    """Conservative outward reservation for a *candidate* bundle placement.
 
-    Wider than the sheath seed ring (:func:`outer_sheath_ring_diameter`) by
-    ``outer_sheath_clearance`` ground-cell diameters: the sheath cells seed on the
-    ring, but the mask clears the ground seeds a bit further out so the surviving
-    ground cells sit clear of the sheath instead of being sliced hard against it.
+    The real outer bundle sheath is grown cell by cell against the local tissue
+    (see :func:`_grow_bundle_sheath`) and its exact reach isn't known until the
+    bundle is built, so placement/overlap tests reserve a fixed, modest pad —
+    about one local tissue cell — around the footprint.  This keeps bundles a
+    tissue-cell apart without the old mean-sized ring's over-reservation.  ``0``
+    when the outer sheath is off.  ``ground_cell_size`` may be a scalar (a callable
+    is treated as off here — placement passes the local scalar explicitly).
     """
-    ring = outer_sheath_ring_diameter(bp, ground_cell_size)
-    if ring <= 0.0:
+    if not bp.get("outer_sheath", True):
         return 0.0
-    clearance = float(bp.get("outer_sheath_clearance", 0.5)) * float(ground_cell_size)
-    return ring + max(clearance, 0.0)
+    if not ground_cell_size or callable(ground_cell_size) or float(ground_cell_size) <= 0:
+        return 0.0
+    return float(ground_cell_size)
+
+
+#: A bundle-sheath cell is inserted only where the bundle cell and the tissue cell
+#: differ by more than this size ratio; below it the neighbours already match.
+_SHEATH_MIN_RATIO = 4.0
+
+
+def _place_ring(cells: CellManager, pcx: float, pcy: float, r_draw: float,
+                tag: str, angle_center, n_border: int = 12) -> None:
+    """Seed one round cell as a ring of ``n_border`` (>= 8) border points — one
+    Voronoi group.  Analytic (no shapely buffering), so it is cheap for the many
+    small cells of a bundle sheath while still reading as a circle."""
+    if r_draw <= 0:
+        return
+    br = r_draw * 0.85
+    gid = cells.next_group_id()
+    for a in np.linspace(0.0, 2.0 * np.pi, max(8, n_border), endpoint=False):
+        cells.add_cell(Cell.radial(
+            tag, pcx + br * np.cos(a), pcy + br * np.sin(a), r_draw * 2.0, gid, angle_center))
+
+
+def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
+                        ground_cell_size, outline, cx: float, cy: float,
+                        env=None) -> Polygon:
+    """Place a single outer bundle-sheath ring and return the removal mask
+    (footprint ∪ placed sheath cells, clipped to ``outline``).
+
+    One cell thick, sized *per position* to smooth the size jump between the bundle
+    and the tissue it sits in.  For each position around the footprint, ``x`` is the
+    bundle's outer cell there — the fibre ``sclerenchyma_cell_diameter`` where the
+    boundary point sits on a fibre cap (outside the envelope ``env``), else the
+    ``parenchyma_diameter`` — and ``y`` is the tissue cell size at that cell's own
+    location (``ground_cell_size(x, y)``):
+
+    * if ``max(x, y) / min(x, y) <= _SHEATH_MIN_RATIO`` the neighbours already match
+      — place nothing there;
+    * otherwise place one cell of size ``sqrt(x * y)`` — the *geometric* mean, so the
+      size ratio to each neighbour is the same ``sqrt(y / x)`` (a balanced step,
+      unlike the arithmetic mean which skews toward the coarser cell).
+
+    Sizing ``x`` from the fibres at a cap keeps the sheath cell small and tight
+    against them, so the edge fibres have a neighbour to bound their Voronoi region
+    instead of stretching across an empty band into the (coarser) parenchyma-sized
+    sheath.  Cells are spaced ~their own size tangentially, so a coarse-tissue side
+    carries a few large sheath cells and a fine side many small ones — the ring is
+    asymmetric.  Positions outside ``outline`` (the organ's last layer polygon) are
+    skipped, so the sheath never leaves the stem.
+    """
+    tissue = _tissue_size_fn(ground_cell_size)
+    if tissue is None:
+        return foot
+    parench = float(bp.get("parenchyma_diameter", 0.012))    # bundle interior cell
+    fibre = float(bp.get("sclerenchyma_cell_diameter", 0.008))
+    # A cap sticks out past the envelope, so a boundary point outside ``env`` sits on
+    # fibres; size the sheath from the fibre there, else from the parenchyma.
+    in_env = prep(env).contains if env is not None else (lambda p: True)
+    inside = prep(outline).contains if outline is not None else (lambda p: True)
+
+    # Sample the footprint boundary finely (so tangential spacing can follow the
+    # per-cell size) with outward normals.
+    ring = foot.exterior
+    n = max(8, int(np.ceil(ring.length / max(0.4 * parench, 1e-4))))
+    coords = GeometryProcessor.resample_coords(np.array(ring.coords), target_n_points=n)
+    pts = coords[:-1] if np.allclose(coords[0], coords[-1]) else coords
+    cen = np.array([foot.centroid.x, foot.centroid.y])
+    m = len(pts)
+
+    placed = []                                             # (px, py, size)
+    last, last_s = None, 0.0
+    for i in range(m):
+        b = pts[i]
+        t = pts[(i + 1) % m] - pts[i - 1]
+        nrm = np.array([t[1], -t[0]])
+        if np.dot(nrm, b - cen) < 0:
+            nrm = -nrm
+        nrm = nrm / (np.hypot(*nrm) or 1.0)
+
+        # bundle-side neighbour: fibre on a cap (boundary point outside the
+        # envelope), else the interior parenchyma.
+        x = fibre if not in_env(Point(b)) else parench
+        probe = b + nrm * (0.6 * x)                         # just outside the footprint
+        if not inside(Point(probe)):
+            continue
+        y = tissue(probe[0], probe[1])
+        if y is None or min(x, y) <= 0:
+            continue
+        if max(x, y) / min(x, y) <= _SHEATH_MIN_RATIO:      # neighbours already match
+            continue
+        s = float(np.sqrt(x * y))                           # geometric mean
+        c = b + nrm * (0.5 * s)
+        if not inside(Point(c)):
+            continue
+        # Space cells by the mean of adjacent diameters, so cell_width tracks
+        # cell_diameter and the spacing follows the local tissue — coarser on a
+        # big-cell side, tighter on a fine side (a gradient or a tissue boundary).
+        if last is not None and np.hypot(c[0] - last[0], c[1] - last[1]) < 0.5 * (s + last_s):
+            continue
+        placed.append((c[0], c[1], s))
+        last, last_s = c, s
+
+    for px, py, s in placed:
+        _place_ring(cells, px, py, s * 0.5, "bundle sheath", (cx, cy))
+
+    mask = unary_union([foot] + [Point(px, py).buffer(s * 0.6) for px, py, s in placed])
+    if outline is not None:
+        mask = mask.intersection(outline)
+    return _largest(mask) or foot
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +802,55 @@ def _sheath_zones(working, bp):
     return working, zones
 
 
+def _outward_caps(env_local: Polygon, bp: dict):
+    """Asymmetric sclerenchyma fibre caps at the radial pole(s), outside the envelope.
+
+    A cap is ``n_layers`` concentric fibre **files** hugging one pole.  File ``i``
+    (``i = 0 .. n-1``) is the pole-side arc of the envelope buffered outward by
+    ``i × sclerenchyma_cell_diameter``: file 0 sits *on* the envelope edge (so the
+    fibres abut the bundle's own tissue — no gap), and each further file stacks one
+    cell outward.  The outward pole is the ``+y`` (surface-facing) hemisphere, the
+    inward pole the ``−y`` (centre-facing) hemisphere (``env_local`` is centred at
+    the origin, radial axis +y).  Tracing files (rather than ring-filling a tapering
+    crescent) keeps every fibre bounded by its neighbours, so cells stay round and no
+    gaps open — and a single-layer cap still renders one clean file.
+
+    ``n_caps_layers_outward`` / ``n_caps_layers_inward`` set the per-pole layer count;
+    independent counts give the asymmetry.  Both default 0 → no caps.  Returns
+    ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter, cell_width)``
+    (innermost first) that the fibres are seeded along, and ``region`` the clean
+    contour-following cap polygon(s) — envelope buffered outward by ``n × scl`` at
+    each pole — so the caller can unify it with the envelope for the bundle-sheath
+    wrap / removal mask.  ``region`` is ``None`` when there are no caps.
+    """
+    scl = bp.get("sclerenchyma_cell_diameter", 0.008)
+    scl_w = bp.get("sclerenchyma_cell_width", scl)
+    minx, miny, maxx, maxy = env_local.bounds
+    n_out = int(bp.get("n_caps_layers_outward", 0))
+    n_in = int(bp.get("n_caps_layers_inward", 0))
+    span = max(maxx - minx, maxy - miny) + (max(n_out, n_in) + 1) * scl + 1.0
+
+    files, regions = [], []
+    # (layer count, hemisphere the pole occupies) — +y outward, −y inward.
+    poles = []
+    if n_out > 0:
+        poles.append((n_out, box(minx - span, 0.0, maxx + span, maxy + span)))
+    if n_in > 0:
+        poles.append((n_in, box(minx - span, miny - span, maxx + span, 0.0)))
+    for n, hemisphere in poles:
+        # clean cap region: the pole-side band of the envelope grown out by n cells.
+        band = _largest(env_local.buffer(n * scl).difference(env_local).intersection(hemisphere))
+        if band is not None and not band.is_empty:
+            regions.append(band)
+        # one fibre file per layer: concentric pole arcs, file 0 on the envelope edge.
+        for i in range(n):
+            arc = env_local.buffer(i * scl).exterior.intersection(hemisphere)
+            if arc is not None and not arc.is_empty:
+                files.append((arc, scl, scl_w))
+    region = unary_union(regions) if regions else None
+    return files, region
+
+
 def bundle_cambium_anchor(bp: dict) -> float:
     """Local +y (radial) offset of the (outer) cambium band's centre.
 
@@ -732,9 +889,10 @@ def _anchor_shift(geoms, anchor: float):
 
 def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
                  bp: dict, xylem: dict, phloem: dict, cambium: dict,
-                 ground_cell_size: Optional[float] = None,
+                 ground_cell_size=None,
                  anchor: float = 0.0,
-                 fill_cambium: bool = True) -> BundleResult:
+                 fill_cambium: bool = True,
+                 sheath_outline=None) -> BundleResult:
     """Build one vascular bundle at ``(cx, cy)`` oriented radially at ``theta`` (rad).
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
@@ -773,6 +931,15 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
 
     working, sheath_local = _sheath_zones(env_local, bp)
 
+    # Asymmetric fibre caps extend the bundle *outside* the envelope as concentric
+    # files (seeded further below).  They grow the footprint that drives the outer
+    # bundle-sheath wrap and the ground-removal mask so the surrounding ground is
+    # cleared for them and the wrap bounds their outermost file.  No caps ->
+    # footprint is the bare envelope, so a bundle without caps is byte-identical.
+    cap_files_local, cap_region_local = _outward_caps(env_local, bp)
+    footprint_local = (_largest(unary_union([env_local, cap_region_local])) or env_local
+                       if cap_region_local is not None else env_local)
+
     mode, spec = bundle_layout(bp)
     is_face = mode == "banded" and bp.get("xylem_layout", "packed") == "face"
     if is_face:
@@ -787,21 +954,17 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
         zones_local = partition_concentric(working, core_role, ring_role,
                                            bp.get("core_width", 0.05), bp.get("core_height", 0.05))
 
-    # Outer bundle sheath: a ring of cells just *outside* the envelope.  The
-    # sheath seeds live in the ``ring_diam`` annulus, but the removal mask reaches
-    # a bit further out (``mask_pad``) so the surrounding ground cells are cleared
-    # clear of the sheath instead of being sliced hard against it.
-    ring_diam = outer_sheath_ring_diameter(bp, ground_cell_size)
-    mask_pad = outer_sheath_mask_pad(bp, ground_cell_size)
-    ring_local = _largest(env_local.buffer(ring_diam).difference(env_local)) if ring_diam > 0 else None
-    outer_env_local = env_local.buffer(mask_pad) if mask_pad > 0 else env_local
+    # Footprint (envelope + fibre caps) and the bare envelope in the world frame —
+    # the outer bundle sheath is grown against the local tissue from the footprint at
+    # the end of the build; the envelope tells it which boundary points sit on caps.
+    foot_world, env_world = GeometryProcessor.place_local(
+        _anchor_shift([footprint_local, env_local], anchor), cx, cy, theta_deg)
 
     sheath_geoms = GeometryProcessor.place_local(
         _anchor_shift([r for _, r, _, _ in sheath_local], anchor), cx, cy, theta_deg)
     zone_geoms = GeometryProcessor.place_local(
         _anchor_shift([g for _, g in zones_local], anchor), cx, cy, theta_deg)
-    result.envelope = GeometryProcessor.place_local(
-        _anchor_shift([outer_env_local], anchor), cx, cy, theta_deg)[0]
+    result.envelope = foot_world           # provisional; grown into the mask below
 
     # Sheath first (fibres or a parenchyma bundle sheath).
     for (tag, _r, cd, cw), geom in zip(sheath_local, sheath_geoms):
@@ -836,18 +999,27 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
             if fill_cambium:
                 _fill_cambium(cells, rng, geom, cx, cy, cambium)
 
-    # Finally, the outer bundle sheath wrapping everything: a single file seeded along
-    # the ring's INNER boundary (the envelope edge) so the sheath cells hug the bundle
-    # and bound the parenchyma / fibre sheath just inside them.  Tracing the ring's
-    # outer edge instead leaves an unbounded band between the bundle and the sheath
-    # that every cell stretches across into radial spokes.
-    if ring_local is not None and not ring_local.is_empty:
-        ring_geom = GeometryProcessor.place_local(
-            _anchor_shift([ring_local], anchor), cx, cy, theta_deg)[0]
-        if ring_geom is not None and not ring_geom.is_empty:
-            result.zone_polygons.append(("bundle sheath", ring_geom))
-            hug = list(ring_geom.interiors) or [ring_geom]   # inner edge == envelope
-            for edge in hug:
-                fill_along(cells, edge, "bundle sheath", ring_diam, ring_diam, cx, cy)
+    # Asymmetric fibre caps: one traced file of sclerenchyma per layer, hugging the
+    # pole contour from the envelope edge outward.  Seeded before the outer sheath so
+    # the wrap (highest id_group) bounds the outermost file.  The clean cap region
+    # (already folded into footprint_local) is registered once for the tissue view.
+    if cap_files_local:
+        cap_geoms = GeometryProcessor.place_local(
+            _anchor_shift([ln for ln, _, _ in cap_files_local], anchor), cx, cy, theta_deg)
+        for (_ln, cd, cw), gline in zip(cap_files_local, cap_geoms):
+            if gline is None or gline.is_empty:
+                continue
+            fill_along(cells, gline, "sclerenchyma", cd, cw, cx, cy)
+    if cap_region_local is not None and not cap_region_local.is_empty:
+        placed = GeometryProcessor.place_local(
+            _anchor_shift([cap_region_local], anchor), cx, cy, theta_deg)[0]
+        if placed is not None and not placed.is_empty:
+            result.zone_polygons.append(("sclerenchyma", placed))
+
+    # Finally, grow the outer bundle sheath cell by cell against the local tissue
+    # (each cell sized from its own neighbours), clipped to the organ outline so it
+    # never leaves the stem.  Sets the removal mask (result.envelope).
+    result.envelope = _grow_bundle_sheath(
+        cells, foot_world, bp, ground_cell_size, sheath_outline, cx, cy, env=env_world)
 
     return result

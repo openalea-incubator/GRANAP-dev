@@ -107,6 +107,41 @@ def test_sheath_produces_sclerenchyma():
     assert any(c.type == "sclerenchyma" for c in cells.cells), "sheath must place sclerenchyma cells"
 
 
+# -- asymmetric fibre caps (n_caps_layers_outward / _inward) -----------------
+# The caps extend the bundle *outside* the envelope; outer = +x at theta=0.
+
+def test_no_caps_place_no_fibres():
+    cells, _ = _build(sheath="none", n_caps_layers_outward=0, n_caps_layers_inward=0)
+    assert not [c for c in cells.cells if c.type == "sclerenchyma"], \
+        "sheath 'none' + no caps must place no sclerenchyma fibres"
+
+
+def test_outward_cap_fibres_sit_outer():
+    cells, res = _build(sheath="none", n_caps_layers_outward=3, n_caps_layers_inward=0)
+    fib = [c for c in cells.cells if c.type == "sclerenchyma"]
+    assert fib, "an outward cap must place sclerenchyma fibres"
+    assert _mean_x(cells, "sclerenchyma") > CX, "outward-pole cap fibres sit outer of the bundle centre (+x)"
+    assert res.envelope.bounds[2] > CX, "the cap extends the envelope (mask) outward"
+
+
+def test_inward_cap_fibres_sit_inner():
+    cells, _ = _build(sheath="none", n_caps_layers_outward=0, n_caps_layers_inward=3)
+    fib = [c for c in cells.cells if c.type == "sclerenchyma"]
+    assert fib, "an inward cap must place sclerenchyma fibres"
+    assert _mean_x(cells, "sclerenchyma") < CX, "inward-pole cap fibres sit inner of the bundle centre (-x)"
+
+
+def test_caps_are_asymmetric_and_scale_with_count():
+    # 4 outward vs 2 inward layers: both poles seed fibres, and the footprint
+    # (removal mask) extends farther out than in — depth scales with the count.
+    cells, res = _build(sheath="none", n_caps_layers_outward=4, n_caps_layers_inward=2)
+    fib = [c for c in cells.cells if c.type == "sclerenchyma"]
+    assert any(c.x > CX for c in fib) and any(c.x < CX for c in fib), "both poles must be capped"
+    x0, _, x1, _ = res.envelope.bounds
+    assert (x1 - CX) > (CX - x0), \
+        "the 4-layer outward cap must extend the bundle farther than the 2-layer inward cap"
+
+
 # -- whole-organ smoke -------------------------------------------------------
 
 def _census(organ):
