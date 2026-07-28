@@ -665,6 +665,7 @@ class NetworkExporter:
                            ]  
         )
 
+
         # Phases 0–2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
@@ -843,6 +844,8 @@ class NetworkExporter:
                 area=area,
             )
 
+        air_nodes = { cell_row_to_node[row_idx] for row_idx in protected_air_cells}   
+
         # Phase 6 — add edges
         network._wall_to_cells = {
             wd["id"]: [cell_row_to_node[r] for r in wd["cells"]]
@@ -859,20 +862,42 @@ class NetworkExporter:
             for cn in cell_nodes:
                 pos_cell = network.graph.nodes[cn]["position"]
                 pos_wall = wd["midpoint"]
+
                 dist_wall_cell = np.hypot(
                     pos_wall[0] - pos_cell[0],
                     pos_wall[1] - pos_cell[1],
                 )
-                d_vec = np.array([pos_wall[0] - pos_cell[0], pos_wall[1] - pos_cell[1]])
-                network.graph.add_edge(
-                    cn, wall_id,
-                    path="membrane",
-                    length=wall_length,
-                    dist=dist_wall_cell,
-                    d_vec=d_vec,
-                    wall_thickness=wall_thickness,
-                )
-            
+                d_vec = np.array([
+                    pos_wall[0] - pos_cell[0],
+                    pos_wall[1] - pos_cell[1],
+                ])
+
+                # Identify edges connecting to protected air spaces.
+
+                if (
+                    cn in air_nodes
+                    and bool(wd.get("shape_signature"))
+                ):
+                    network.graph.add_edge(
+                        cn,
+                        wall_id,
+                        path="wall_air",
+                        length=wall_length,
+                        dist=dist_wall_cell,
+                        d_vec=d_vec,
+                        wall_thickness=wall_thickness,
+                    )
+                else:
+                    network.graph.add_edge(
+                        cn,
+                        wall_id,
+                        path="membrane",
+                        length=wall_length,
+                        dist=dist_wall_cell,
+                        d_vec=d_vec,
+                        wall_thickness=wall_thickness,
+                    )
+
             # each junction connected to the wall node
             for junc in ["junc_start", "junc_end"]:
                 junc_id = network.n_walls + junction_vk_to_id[wd[junc]]
@@ -963,19 +988,7 @@ class NetworkExporter:
         }
 
         # ------------------------------------------------------------------
-        # Step 2 — protected air-space graph nodes
-        #
-        # `protected_air_cells` contains dataframe row indices.
-        # Convert them to graph node ids using cell_row_to_node.
-        # ------------------------------------------------------------------
-
-        air_nodes = {
-            cell_row_to_node[row_idx]
-            for row_idx in protected_air_cells
-        }
-
-        # ------------------------------------------------------------------
-        # Step 3 — map each air space to its adjacent NEW junctions
+        # Step 2 — map each air space to its adjacent NEW junctions
         # ------------------------------------------------------------------
 
         air_to_new_junctions = {}
@@ -999,7 +1012,7 @@ class NetworkExporter:
             air_to_new_junctions[air_node] = attached_new_junctions
 
         # ------------------------------------------------------------------
-        # Step 4 — construct air_link edges
+        # Step 3 — construct air_link edges
         # ------------------------------------------------------------------
 
         for air_a in air_nodes:
