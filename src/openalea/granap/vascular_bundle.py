@@ -27,6 +27,7 @@ cavity is a polygon with **no cells**; the whole bundle **envelope** is returned
 for the removal mask, so a lacuna inside it is already cleared of ground seeds.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -108,6 +109,37 @@ def _tissue_size_fn(ground_cell_size):
     return (lambda x, y: val) if val > 0 else None
 
 
+def _tissue_name_fn(ground_tissue_name):
+    """Normalise ``ground_tissue_name`` (callable ``f(x, y) -> name`` or None) into a
+    ``f(x, y) -> name or None`` used to name an outer-sheath cell after the tissue it
+    sits in.  Anything that isn't callable turns the naming off (the cells keep the
+    generic ``bundle sheath`` tag)."""
+    if ground_tissue_name is None or not callable(ground_tissue_name):
+        return None
+
+    def _f(x, y):
+        try:
+            name = ground_tissue_name(x, y)
+        except Exception:
+            return None
+        return name or None
+    return _f
+
+
+def _majority_tissue_name(name_fn, px: float, py: float, r: float) -> Optional[str]:
+    """Tissue name occupying most of a sheath cell centred at ``(px, py)`` of radius
+    ``r``.  The cell is a small disk that can straddle a tissue boundary, so the name
+    is voted over its centre plus a ring of samples inside it (the majority wins;
+    ties break toward the nearer/earlier sample)."""
+    names = [name_fn(px, py)]
+    for a in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False):
+        names.append(name_fn(px + r * np.cos(a), py + r * np.sin(a)))
+    names = [n for n in names if n]
+    if not names:
+        return None
+    return Counter(names).most_common(1)[0][0]
+
+
 def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
     """Conservative outward reservation for a *candidate* bundle placement.
 
@@ -147,7 +179,7 @@ def _place_ring(cells: CellManager, pcx: float, pcy: float, r_draw: float,
 
 def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
                         ground_cell_size, outline, cx: float, cy: float,
-                        env=None) -> Polygon:
+                        env=None, ground_tissue_name=None) -> Polygon:
     """Place a single outer bundle-sheath ring and return the removal mask
     (footprint ∪ placed sheath cells, clipped to ``outline``).
 
@@ -171,10 +203,17 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     carries a few large sheath cells and a fine side many small ones — the ring is
     asymmetric.  Positions outside ``outline`` (the organ's last layer polygon) are
     skipped, so the sheath never leaves the stem.
+
+    Each placed cell is *named after the tissue it is fitted into* rather than a
+    generic ``bundle sheath``: ``ground_tissue_name(x, y)`` (when the organ supplies
+    it) is voted over the cell's footprint and the majority tissue wins (see
+    :func:`_majority_tissue_name`).  With no name function the cells keep the
+    ``bundle sheath`` tag.
     """
     tissue = _tissue_size_fn(ground_cell_size)
     if tissue is None:
         return foot
+    name_fn = _tissue_name_fn(ground_tissue_name)
     parench = float(bp.get("parenchyma_diameter", 0.012))    # bundle interior cell
     fibre = float(bp.get("sclerenchyma_cell_diameter", 0.008))
     # A cap sticks out past the envelope, so a boundary point outside ``env`` sits on
@@ -182,18 +221,32 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     in_env = prep(env).contains if env is not None else (lambda p: True)
     inside = prep(outline).contains if outline is not None else (lambda p: True)
 
-    # Sample the footprint boundary finely (so tangential spacing can follow the
-    # per-cell size) with outward normals.
+    # Sample the footprint boundary very finely with outward normals, then *march*
+    # along it placing cells.  The resolution is tied to the smallest cell that can
+    # appear (a fibre), not the coarser parenchyma: a grid tied to the coarse cell
+    # cannot reach the tight spacing a fine-tissue side needs, so the spacing floors
+    # out and reads as uniform everywhere — the very thing to avoid here.
     ring = foot.exterior
-    n = max(8, int(np.ceil(ring.length / max(0.4 * parench, 1e-4))))
+    step_ref = max(0.25 * min(parench, fibre), 1e-4)
+    n = max(16, int(np.ceil(ring.length / step_ref)))
     coords = GeometryProcessor.resample_coords(np.array(ring.coords), target_n_points=n)
     pts = coords[:-1] if np.allclose(coords[0], coords[-1]) else coords
     cen = np.array([foot.centroid.x, foot.centroid.y])
     m = len(pts)
 
+    # Walk the boundary accumulating *arc length* since the last placed cell and drop
+    # the next cell once that arc reaches this cell's own diameter — each cell reserves
+    # a gap equal to its own size, so a big cell (coarse tissue) leaves a wide gap and a
+    # small cell (fine tissue) a tight one, sized and spaced from its own local tissue
+    # rather than blended with its neighbour.  The target is recomputed at every step
+    # from the local cell size, so the spacing follows the tissue precisely instead of
+    # the near-constant spacing a fixed Euclidean grid produced.
     placed = []                                             # (px, py, size)
-    last, last_s = None, 0.0
+    arc = np.inf                                            # inf -> place the first eligible cell
     for i in range(m):
+        if i > 0:
+            arc += float(np.hypot(*(pts[i] - pts[i - 1])))
+
         b = pts[i]
         t = pts[(i + 1) % m] - pts[i - 1]
         nrm = np.array([t[1], -t[0]])
@@ -213,19 +266,21 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
         if max(x, y) / min(x, y) <= _SHEATH_MIN_RATIO:      # neighbours already match
             continue
         s = float(np.sqrt(x * y))                           # geometric mean
+        if arc < s:                                         # not this cell's own diameter yet
+            continue
         c = b + nrm * (0.5 * s)
         if not inside(Point(c)):
             continue
-        # Space cells by the mean of adjacent diameters, so cell_width tracks
-        # cell_diameter and the spacing follows the local tissue — coarser on a
-        # big-cell side, tighter on a fine side (a gradient or a tissue boundary).
-        if last is not None and np.hypot(c[0] - last[0], c[1] - last[1]) < 0.5 * (s + last_s):
-            continue
         placed.append((c[0], c[1], s))
-        last, last_s = c, s
+        arc = 0.0
 
     for px, py, s in placed:
-        _place_ring(cells, px, py, s * 0.5, "bundle sheath", (cx, cy))
+        # Name the cell after the tissue it is fitted into (majority over its
+        # footprint); fall back to the generic tag when no name function is given.
+        tag = "bundle sheath"
+        if name_fn is not None:
+            tag = _majority_tissue_name(name_fn, px, py, s * 0.5) or tag
+        _place_ring(cells, px, py, s * 0.5, tag, (cx, cy))
 
     mask = unary_union([foot] + [Point(px, py).buffer(s * 0.6) for px, py, s in placed])
     if outline is not None:
@@ -892,7 +947,8 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
                  ground_cell_size=None,
                  anchor: float = 0.0,
                  fill_cambium: bool = True,
-                 sheath_outline=None) -> BundleResult:
+                 sheath_outline=None,
+                 ground_tissue_name=None) -> BundleResult:
     """Build one vascular bundle at ``(cx, cy)`` oriented radially at ``theta`` (rad).
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
@@ -910,6 +966,11 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     It sits just outside the envelope, so the returned envelope — hence the removal
     mask — grows to cover it.  Left ``None`` (the organ-agnostic default), no outer
     sheath is added and the bundle is unchanged.
+
+    ``ground_tissue_name`` (a callable ``f(x, y) -> tissue name``, again organ-only
+    knowledge) names each outer-sheath cell after the tissue it is fitted into — the
+    majority tissue over the cell's footprint — instead of the generic
+    ``bundle sheath`` tag; left ``None`` the cells stay ``bundle sheath``.
 
     ``anchor`` (local +y, radial) shifts the whole bundle so that the local point
     ``(0, anchor)`` lands on ``(cx, cy)`` instead of the envelope centre.  Passing
@@ -1020,6 +1081,7 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     # (each cell sized from its own neighbours), clipped to the organ outline so it
     # never leaves the stem.  Sets the removal mask (result.envelope).
     result.envelope = _grow_bundle_sheath(
-        cells, foot_world, bp, ground_cell_size, sheath_outline, cx, cy, env=env_world)
+        cells, foot_world, bp, ground_cell_size, sheath_outline, cx, cy, env=env_world,
+        ground_tissue_name=ground_tissue_name)
 
     return result

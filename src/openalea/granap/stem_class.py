@@ -511,9 +511,10 @@ class StemAnatomy(Organ):
         names = [l["name"] for l in layers_polygons]
         section = [l["polygon"] for l in layers_polygons if l["name"] != "outside"]
         self._vascular_section_polygon = unary_union(section) if section else None
-        # Radius -> local tissue cell size, so a bundle placed out in the cortex/rind
-        # is sized against the cells it actually sits among (not the pith gradient).
-        # (r_outer, cell_diameter) per real layer, sorted outward.
+        # Radius -> local tissue cell size and name, so a bundle placed out in the
+        # cortex/rind is sized (and its sheath cells named) against the cells it
+        # actually sits among (not the pith gradient).
+        # (r_outer, cell_diameter, tissue_name) per real layer, sorted outward.
         sizes = []
         for l in layers_polygons:
             if l["name"] == "outside" or l["polygon"] is None or l["polygon"].is_empty:
@@ -522,7 +523,7 @@ class StemAnatomy(Organ):
             r_out = float(np.max(np.hypot(np.asarray(xs), np.asarray(ys))))
             layer = self.get_layer(l["name"])
             if layer is not None and layer.cell_diameter > 0:
-                sizes.append((r_out, float(layer.cell_diameter)))
+                sizes.append((r_out, float(layer.cell_diameter), l["name"]))
         self._vascular_layer_sizes = sorted(sizes)
         idx = names.index("parenchyma") if "parenchyma" in names else len(layers_polygons) - 1
         return layers_polygons[idx]["polygon"]
@@ -538,10 +539,27 @@ class StemAnatomy(Organ):
         r = float(np.hypot(x, y))
         if r <= r_pith or not getattr(self, "_vascular_layer_sizes", None):
             return self._pith_cell_diameter_at(r, r_pith)
-        for r_out, cd in self._vascular_layer_sizes:
+        for r_out, cd, _name in self._vascular_layer_sizes:
             if r <= r_out:
                 return cd
         return self._vascular_layer_sizes[-1][1]
+
+    def _local_ground_tissue_name(self, x: float, y: float, r_pith: float) -> str:
+        """Name of the tissue at ``(x, y)`` — the ground a bundle sheath cell sits in.
+
+        The stem analogue of :meth:`_local_ground_cell_size`: inside the pith
+        (r <= ``r_pith``) the ground tissue is the pith parenchyma (tagged
+        ``parenchyma``); past the pith it is the layer (cortex, hypodermis, ...)
+        whose ring contains the point.  Used to name each outer bundle-sheath cell
+        after the tissue it is fitted into instead of a generic ``bundle sheath``.
+        """
+        r = float(np.hypot(x, y))
+        if r <= r_pith or not getattr(self, "_vascular_layer_sizes", None):
+            return "parenchyma"
+        for r_out, _cd, name in self._vascular_layer_sizes:
+            if r <= r_out:
+                return name
+        return self._vascular_layer_sizes[-1][2]
 
     def _neighbour_ground_cell_size(self, cx: float, cy: float, bp: dict,
                                     r_pith: float, k: int = 12) -> float:

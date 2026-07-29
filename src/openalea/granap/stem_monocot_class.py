@@ -302,9 +302,13 @@ class MonocotStemAnatomy(StemAnatomy):
         # The sheath reads the tissue cell size at each of its own cells' positions,
         # and is clipped to the organ outline so it never leaves the stem.
         tissue_fn = lambda x, y: self._local_ground_cell_size(x, y, r_pith)
+        # Name each outer-sheath cell after the tissue it is fitted into (majority
+        # over its footprint) instead of a generic "bundle sheath".
+        name_fn = lambda x, y: self._local_ground_tissue_name(x, y, r_pith)
         outline = self.generate_base_shape()
         for cx, cy, theta, bp in self._scattered_bundle_positions(polygon):
             res = build_bundle(self.vascular_cells, self.rng, cx, cy, theta,
                                bp, xylem, phloem, cambium,
-                               ground_cell_size=tissue_fn, sheath_outline=outline)
+                               ground_cell_size=tissue_fn, sheath_outline=outline,
+                               ground_tissue_name=name_fn)
             self._register_bundle(res)

@@ -42,6 +42,12 @@ class Organ(AbstractNetwork, ABC):
     #: (e.g. roots use 0.0 to keep ring thickness exact; needles round corners).
     LAYER_SMOOTH_FACTOR: float = 0.5
 
+    #: Whether :meth:`generate_cells` absorbs empty gaps into their neighbouring
+    #: cell of the same tissue (:meth:`fuse_gaps`) as a final step, so every cross
+    #: section is gap-free by default.  Set False (per subclass or instance) to keep
+    #: the raw tessellation with its small uncovered slivers.
+    AUTO_FUSE_GAPS: bool = True
+
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
@@ -276,6 +282,12 @@ class Organ(AbstractNetwork, ABC):
             self.add_intercellular_spaces()
             log.info("Intercellular spaces:    %.3fs", time.time() - t_start)
 
+            if self.AUTO_FUSE_GAPS:
+                t_start = time.time()
+                n_fused = self.fuse_gaps()
+                log.info("Fuse gaps:               %.3fs (%d fused)",
+                         time.time() - t_start, n_fused)
+
             t_start = time.time()
             for cell in self.all_cells.cells:
                 if 0 <= cell.id_layer < len(layers_polygons):
@@ -311,6 +323,145 @@ class Organ(AbstractNetwork, ABC):
         if self._cells_gdf is not None and "type" in self._cells_gdf.columns:
             self._cells_gdf.loc[self._cells_gdf["type"] == old_tag, "type"] = new_tag
         return n
+
+    def _empty_void_polygons(self) -> List[Polygon]:
+        """Regions that are *meant* to hold no cell (so they are not gaps).
+
+        The base organ has none; the stem's medullary cavity is the usual one
+        (registered both as ``pith_cavity_polygon`` and under the
+        ``medullary cavity`` key of ``vascular_tissue_polygons``).  Protoxylem
+        lacunae and intercellular / aerenchyma spaces are seeded as real ``air
+        space`` cells, so they are covered and never reported as gaps.
+        """
+        voids: List[Polygon] = []
+        cav = getattr(self, "pith_cavity_polygon", None)
+        if cav is not None and not cav.is_empty:
+            voids.append(cav)
+        vtp = getattr(self, "vascular_tissue_polygons", None) or {}
+        voids.extend(v for v in vtp.get("medullary cavity", []) if v is not None and not v.is_empty)
+        return voids
+
+    def find_gaps(self, sliver_width: float = None, min_area: float = None,
+                  exclude_voids: bool = True) -> List[Polygon]:
+        """Detect empty space inside the organ that no cell was assigned to.
+
+        A gap is the organ outline minus the union of every cell polygon (minus the
+        declared voids — the medullary cavity — when ``exclude_voids``).  These arise
+        where the pipeline drops or clips cells: ``simplify_cells`` /
+        ``remove_nested_cells`` deleting a small cell, Voronoi clipping at the
+        boundary, or a bundle removal mask leaving a sliver between the bundle sheath
+        and the surrounding tissue.
+
+        Hairline slivers along tissue borders (sub-cell width, a meshing artefact
+        rather than a real hole) are removed by a morphological *opening*: erode then
+        dilate by ``sliver_width / 2``, so anything thinner than ``sliver_width``
+        disappears while cell-sized gaps survive.  ``sliver_width`` defaults to 15 %
+        of the median cell diameter; ``min_area`` (optional) drops pieces below an
+        area.  Returns the gap polygons, largest first — feed them to a plot or read
+        their ``.area`` / ``.centroid`` to locate each hole.
+
+        Call after :meth:`generate_cells` (it reads the materialised cells).
+        """
+        polys = [c.polygon for c in self.all_cells.get_cells()
+                 if c.polygon is not None and not c.polygon.is_empty]
+        if not polys:
+            return []
+        outline = self.generate_base_shape()
+        gaps = outline.difference(unary_union(polys))
+        if exclude_voids:
+            for v in self._empty_void_polygons():
+                gaps = gaps.difference(v)
+        if gaps.is_empty:
+            return []
+
+        if sliver_width is None:
+            med_area = float(np.median([p.area for p in polys]))
+            med_diam = 2.0 * np.sqrt(med_area / np.pi) if med_area > 0 else 0.0
+            sliver_width = 0.15 * med_diam
+        if sliver_width > 0:
+            gaps = gaps.buffer(-0.5 * sliver_width).buffer(0.5 * sliver_width)
+
+        pieces = [g for g in (gaps.geoms if hasattr(gaps, "geoms") else [gaps])
+                  if g.geom_type == "Polygon" and not g.is_empty]
+        if min_area is not None:
+            pieces = [g for g in pieces if g.area >= min_area]
+        pieces.sort(key=lambda g: g.area, reverse=True)
+        return pieces
+
+    def fuse_gaps(self, sliver_width: float = None, min_area: float = None) -> int:
+        """Absorb each detected gap into the nearest cell of its own tissue zone.
+
+        For every gap from :meth:`find_gaps`, the surrounding **tissue zone** is the
+        cell type sharing the most boundary with the hole (so a pith gap goes to the
+        pith, a sheath gap to the sheath, never into a vessel it merely touches).  The
+        hole is then unioned into the neighbouring cell of that zone with the longest
+        shared border — the nearest cell of the same tissue — so no empty space is
+        left and the cell simply grows to fill it.
+
+        The full (un-opened) uncovered area around each gap is recovered first, so the
+        fusion reaches the real hole edge rather than the eroded outline
+        :meth:`find_gaps` reports.  Returns the number of gaps fused and refreshes the
+        materialised ``_cells_gdf`` in place (no full regeneration).
+        """
+        cells = [c for c in self.all_cells.get_cells()
+                 if c.polygon is not None and not c.polygon.is_empty]
+        if not cells:
+            return 0
+        gaps = self.find_gaps(sliver_width=sliver_width, min_area=min_area)
+        if not gaps:
+            return 0
+
+        med_area = float(np.median([c.polygon.area for c in cells]))
+        med_d = 2.0 * np.sqrt(med_area / np.pi) if med_area > 0 else 0.0
+        eps = max(med_d * 1e-3, 1e-9)
+        # How far to dilate each reported gap to recover the true (un-opened) hole.
+        recover = 1.5 * sliver_width if sliver_width else 0.25 * med_d
+
+        covered = unary_union([c.polygon for c in cells])
+        raw = self.generate_base_shape().difference(covered)
+        for v in self._empty_void_polygons():
+            raw = raw.difference(v)
+
+        tree = STRtree([c.polygon for c in cells])
+        fused = 0
+        for g in gaps:
+            hole = raw.intersection(g.buffer(recover)) if recover > 0 else g
+            if hole.is_empty:
+                hole = g
+            probe = hole.buffer(eps)
+            cand = [cells[i] for i in tree.query(probe) if cells[i].polygon.intersects(probe)]
+            if not cand:
+                continue
+
+            # Dominant bordering tissue = the zone the gap belongs to; then the cell
+            # of that zone with the longest shared border (its nearest cell).
+            by_type: Dict[str, float] = defaultdict(float)
+            best: Dict[str, Any] = {}
+            for c in cand:
+                shared = c.polygon.exterior.intersection(probe).length
+                by_type[c.type] += shared
+                if c.type not in best or shared > best[c.type][0]:
+                    best[c.type] = (shared, c)
+            if by_type and max(by_type.values()) > 0:
+                zone = max(by_type, key=by_type.get)
+                target = best[zone][1]
+            else:                                   # no shared border -> nearest overall
+                target = min(cand, key=lambda c: c.polygon.distance(hole))
+
+            merged = unary_union([target.polygon, hole])
+            if merged.geom_type != "Polygon":
+                parts = [p for p in merged.geoms if p.geom_type == "Polygon"]
+                merged = max(parts, key=lambda p: p.area) if parts else target.polygon
+            target.polygon = merged
+            fused += 1
+
+        self.all_cells.recalculate_cell_properties()
+        if self._cells_gdf is not None:
+            cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
+            for i, c in enumerate(self.all_cells.cells):
+                cell_dicts[i]["geometry"] = c.polygon
+            self._cells_gdf = gpd.GeoDataFrame(cell_dicts)
+        return fused
 
     @abstractmethod
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
@@ -484,6 +635,69 @@ class Organ(AbstractNetwork, ABC):
         for ics in self.intercellular_spaces_params:
             self._apply_intercellular(ics)
 
+    _REFLEX_CORNER_DEG: float = 185.0
+
+    def _center_air_pocket(self, pocket, nb_tree, nb_polys):
+        """Rebuild a pocket at a *reflex* junction as a 4-point quad that hugs the
+        reflex cell instead of a thin, mis-oriented triangle.
+        
+        Pockets with only convex neighbours (the common case) are returned unchanged.
+        """
+        ctr = np.array([pocket.centroid.x, pocket.centroid.y])
+        pverts = np.asarray(pocket.exterior.coords)[:-1]
+        # A reflex neighbour can *wrap around* the pocket with no area overlap, and its
+        # bbox need not overlap the tiny pocket — so probe a buffered pocket and select
+        # by distance, and keep the most-reflex neighbour as A.
+        adj_tol = max(1e-6, 0.5 * np.sqrt(pocket.area / np.pi))
+        probe = pocket.buffer(adj_tol)
+        best = None                                    # (interior, V, u1, u2, A_poly)
+        for i in nb_tree.query(probe):
+            poly = nb_polys[i]
+            if poly is None or poly.is_empty or poly.geom_type != "Polygon" \
+                    or poly.distance(pocket) > adj_tol:
+                continue
+            P = np.asarray(poly.exterior.coords)[:-1]
+            if len(P) < 3:
+                continue
+            k = int(np.argmin(np.hypot(P[:, 0] - ctr[0], P[:, 1] - ctr[1])))
+            V, prev, nxt = P[k], P[(k - 1) % len(P)], P[(k + 1) % len(P)]
+            a = np.arctan2(V[1] - prev[1], V[0] - prev[0])
+            b = np.arctan2(nxt[1] - V[1], nxt[0] - V[0])
+            turn = (np.degrees(b - a) + 180.0) % 360.0 - 180.0
+            if not poly.exterior.is_ccw:               # normalise to CCW so interior is 180-turn
+                turn = -turn
+            interior = 180.0 - turn
+            if interior < self._REFLEX_CORNER_DEG:     # convex enough: not the reflex wall
+                continue
+            if best is None or interior > best[0]:
+                n1, n2 = np.hypot(*(prev - V)), np.hypot(*(nxt - V))
+                if n1 <= 0 or n2 <= 0:
+                    continue
+                best = (interior, V, (prev - V) / n1, (nxt - V) / n2, poly)
+
+        if best is None:                               # no reflex neighbour: keep the pocket
+            return pocket
+
+        _, V, u1, u2, A = best
+        r = float(np.max(np.hypot(pverts[:, 0] - V[0], pverts[:, 1] - V[1])))
+        if r <= 0:
+            return pocket
+        AB = V + u1 * r
+        AC = V + u2 * r
+        BC = AB + AC - V                               # opposite corner, between B and C
+        quad = Polygon([tuple(V), tuple(AB), tuple(BC), tuple(AC)])
+        if not quad.is_valid:
+            quad = quad.buffer(0)
+        if quad.is_empty or quad.area <= 0:
+            return pocket
+        # Never take space from A (its walls only bound the quad); keep the original
+        # pocket's coverage by unioning it in, then drop any A overlap.
+        quad = unary_union([quad, pocket]).difference(A)
+        if quad.geom_type != "Polygon":
+            parts = [g for g in quad.geoms if g.geom_type == "Polygon" and not g.is_empty]
+            quad = max(parts, key=lambda g: g.area) if parts else pocket
+        return quad if not quad.is_empty else pocket
+
     def _apply_intercellular(self, ics: dict) -> None:
         """Apply one inter_cellular_spaces entry to the relevant tissue cells."""
         tissues = ics.get("tissue", [])
@@ -551,6 +765,16 @@ class Organ(AbstractNetwork, ABC):
 
         if not air_space_polys:
             return
+
+        # Centre any lopsided pocket: where a neighbour meets it with a near-straight
+        # or reflex corner (which doesn't retreat under the corner-rounding, leaving a
+        # flat wall), clip that corner into the pocket so every side retreats and the
+        # pocket sits centered on the junction node.
+        nb_polys = [c.polygon for c in all_tissue_cells if c.polygon is not None]
+        if nb_polys:
+            nb_tree = STRtree(nb_polys)
+            air_space_polys = [self._center_air_pocket(p, nb_tree, nb_polys)
+                               for p in air_space_polys]
 
         air_union = GeometryProcessor.union_polygons(air_space_polys)
 
@@ -849,6 +1073,13 @@ class Organ(AbstractNetwork, ABC):
             # it, mirroring the None guard on the air spaces above.
             if cell.polygon is None:
                 self.all_cells.remove_cells([cell])
+                continue
+            # Only carve cells the aerenchyma / lacuna air actually reaches.  A cell
+            # the air never touches must be left intact — carving is a no-op there,
+            # but the `> 1E-6` keep-test below would otherwise *delete* an untouched
+            # small cell (e.g. a tiny intercellular air space at exactly 1e-6),
+            # orphaning its footprint into an empty gap.
+            if air_union.is_empty or not cell.polygon.intersects(air_union):
                 continue
             carved = cell.polygon.difference(air_union)
             if not carved.is_empty and carved.area > 1E-6:

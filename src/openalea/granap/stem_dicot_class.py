@@ -488,7 +488,8 @@ class DicotStemAnatomy(StemAnatomy):
                                ground_cell_size=ground,
                                anchor=bundle_cambium_anchor(slot_bp),
                                fill_cambium=False,
-                               sheath_outline=self.generate_base_shape())
+                               sheath_outline=self.generate_base_shape(),
+                               ground_tissue_name=lambda x, y: self._local_ground_tissue_name(x, y, r_pith))
             self._register_bundle(res)
             cambia_here: List[Polygon] = []
             for role, g in res.zone_polygons:
@@ -581,6 +582,16 @@ class DicotStemAnatomy(StemAnatomy):
             keep_union = unary_union(fascicular).buffer(0.25 * cell_d)
             if sheath_union is not None:
                 keep_union = keep_union.difference(sheath_union.buffer(0.5 * cell_d))
+            # In primary growth every cambium file is fascicular/inner and must stay
+            # inside a bundle — the 0.25-cell buffer above (and the mean-radius inner
+            # contour for a bicollateral bundle's inner cambium) can otherwise push a
+            # seed past the envelope.  Clip the keep region to the bundle envelopes,
+            # eroded by the cell's border reach (~0.7 cell) so it confines the *whole*
+            # cell, not just its seed centre — a seed on the very edge would still grow
+            # a cell that pokes out.  No cambium cell is then seeded beyond its bundle.
+            env_union = unary_union(self.vascular_tissue_polygons.get("bundle", []))
+            if env_union is not None and not env_union.is_empty:
+                keep_union = keep_union.intersection(env_union.buffer(-0.7 * max(cell_d, cell_w)))
             register = None      # the fascicular zones are registered per bundle
             # Also block the fascicular files from the sheath (and the conducting
             # tissues) so their files never seed on the sheath ring.
