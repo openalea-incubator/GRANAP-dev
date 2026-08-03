@@ -840,6 +840,7 @@ class NetworkExporter:
                 type="cell",
                 cgroup=row.get("cgroup", ""),
                 cell_type=row.get("type", ""),
+                protect_topology=bool(row.get("protect_topology", False)),
                 position=(cx, cy),
                 area=area,
             )
@@ -878,6 +879,7 @@ class NetworkExporter:
                     cn in air_nodes
                     and bool(wd.get("shape_signature"))
                 ):
+
                     network.graph.add_edge(
                         cn,
                         wall_id,
