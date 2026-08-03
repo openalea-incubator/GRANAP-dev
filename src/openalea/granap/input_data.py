@@ -346,103 +346,158 @@ SteleParams = _ground_region_params("SteleParams", "stele",
     thickness=0.27, cell_diameter=0.01, cell_diameter_center=0.02, inflection=0.3)
 
 
-class RootXylemParams(BaseParams):
-    name                    : str   = "xylem"
-    vessel_diameter         : float = Field(default=0.06,   ge=0.00001, title="Vessel Diameter",              description="Metaxylem vessel diameter.")
-    vessel_diameter_sd      : float = Field(default=0.005,  ge=0.0,     title="Vessel Diameter SD",           description="Standard deviation of metaxylem vessel diameter (sampled per vessel).")
-    protoxylem_diameter    : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Diameter",        description="Diameter of protoxylem elements.")
-    protoxylem_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Protoxylem Diameter SD",     description="Standard deviation of protoxylem element diameter.")
-    protoxylem_cluster_width       : float = Field(default=0.015,   ge=0.00001, title="Protoxylem Bundle Width",    description="Tangential width of the protoxylem ellipse.")
-    protoxylem_cluster_height      : float = Field(default=0.01,   ge=0.00001, title="Protoxylem Bundle Height",   description="Radial height of the protoxylem ellipse.")
-    n_vascular_bundles     : int   = Field(default=5,      ge=1,       title="Number of Vascular Bundles", description="Number of metaxylem vessels.")
-    ratio_proto_meta       : float = Field(default=2.2,    ge=0.0,     title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")
-    # Arch xylem mode (xylem_shape = "arch"): an evenly-spaced ring of metaxylem
-    # (circle, or radial ellipse where a vessel doesn't fit) with a stele sheath,
-    # a graded protoxylem chain per pole directed to its nearest metaxylem, and
-    # phloem in the valleys between poles.  The whole layout is set by just
-    # outer_radius (the pericycle) and protoxylem_band_depth (the outer band).
-    xylem_shape            : Literal["default", "arch", "star"] = Field(default="default", title="Xylem Shape", description="'default' = ring of discrete vessels; 'arch' = evenly-spaced metaxylem ring (circle, or radial ellipse where a vessel doesn't fit) with a stele sheath, a graded protoxylem chain per pole directed to its nearest metaxylem, and phloem in the valleys between poles; 'star' = star-shaped (actinostele) xylem — vessels packed into the arms with a radial size gradient and phloem strands in the valleys between arms (no cambium).")
-    n_metaxylem            : int = Field(default=0, ge=0, title="Number of Metaxylem", description="Arch mode only. Number of metaxylem, evenly spaced in the central ring; each is a circle or, where it doesn't fit, a radial ellipse. 0 defaults to n_vascular_peak.")
-    n_vascular_peak        : int   = Field(default=5,     ge=1,       title="Number of Poles",         description="Number of protoxylem poles, alternating with the phloem valleys (arch mode only).")
-    outer_radius           : float = Field(default=0.15,  ge=0.00001, title="Outer Radius",            description="Radius of the pericycle side, where the poles reach; capped at the stele radius (arch mode only).")
-    protoxylem_band_depth  : float = Field(default=0.0, ge=0.0, title="Protoxylem Band Depth", description="Arch mode only. Radial depth of the outer band (inward from outer_radius) holding the protoxylem chains + phloem; everything inside it is the metaxylem ring. 0 defaults to 35%% of the [pith_radius, outer_radius] span.")
-    pith_radius            : float = Field(default=0.0,   ge=0.0,   title="Pith Radius",             description="Inner radius of the metaxylem ring — the central pith left free of vessels (arch mode only; 0 = ring runs to the centre).")
-    vessel_diameter_min    : float = Field(default=0.01,  ge=0.00001, title="Vessel Diameter (min)",   description="Minimum metaxylem diameter floor (arch mode only).")
-    allow_ellipse          : bool  = Field(default=True,  title="Allow Ellipse Vessels", description="If True, when a metaxylem sector is too narrow for a target-diameter circle, fit an area-matched radial ellipse instead of shrinking the vessel (arch mode only).")
-    ellipse_max_aspect     : float = Field(default=2.0,   ge=1.0, title="Ellipse Max Aspect", description="Maximum major/minor axis ratio for ellipse metaxylem, so they don't become slivers (arch mode only).")
-    protoxylem_diameter_min: float = Field(default=0.0, ge=0.0, title="Protoxylem Diameter (min)", description="Arch mode only. Smallest protoxylem diameter, at the outer (pericycle) edge of the band; protoxylem_diameter is the largest, at the inner edge. 0 defaults to 0.4 * protoxylem_diameter.")
-    protoxylem_pole_width_inner: float = Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (inner)", description="Arch mode only. Tangential width of each protoxylem pole at its INNER end (near the metaxylem). The pole is a tapered trapezoid between this and protoxylem_pole_width_outer. 0 defaults to 3 * protoxylem_diameter.")
-    protoxylem_pole_width_outer: float = Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (outer)", description="Arch mode only. Tangential width of each protoxylem pole at its OUTER end (near the pericycle / stele edge). Narrower poles leave more room for the phloem in the valleys between them. 0 defaults to 3 * protoxylem_diameter.")
-    gradient_function      : Literal["five_pl", "linear"] = Field(default="five_pl", title="Gradient Function",    description="Shape function for the protoxylem size gradient across the band (arch mode only).")
-    gradient_inflection    : float = Field(default=0.7,   ge=0.001, le=1.0, title="Gradient Inflection",  description="Inflection point of the protoxylem gradient (arch mode only).")
-    gradient_steepness     : float = Field(default=5.0,   ge=0.1,   title="Gradient Steepness",          description="Hill coefficient of the protoxylem gradient (arch mode only).")
-    gradient_asymmetry     : float = Field(default=1.0,   ge=0.1,   title="Gradient Asymmetry",          description="Asymmetry exponent of the protoxylem gradient (arch mode only).")
-    # Star xylem mode (xylem_shape = "star"): a star-shaped (actinostele) xylem
-    # region — vessels packed into the arms with a radial size gradient (small
-    # proto-like vessels at the arm tips), phloem strands in the valleys between
-    # arms.  No cambium: the phloem band is positioned relative to the xylem
-    # star's valley radius.  Field names mirror the dicot xylem star; reuses
-    # pith_radius / n_vascular_peak / vessel_diameter* / gradient_* / allow_ellipse
-    # / ellipse_max_aspect above (the gradient params serve both arch and star).
-    radius_valley_side     : float = Field(default=0.05,  ge=0.00001, title="Valley Radius",            description="Star mode only. Valley-side radius of the xylem star arms from the stele centre.")
-    radius_peak_side       : float = Field(default=0.22,  ge=0.00001, title="Peak Radius",              description="Star mode only. Peak-side radius of the xylem star arms (the arm tips) from the stele centre.")
-    arc_peak_side          : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Peak",       description="Star mode only. Arc length of each arm at radius_peak_side (peak width).")
-    arc_valley_side        : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Valley",     description="Star mode only. Arc length of each arm at radius_valley_side (valley/base width).")
-    enforce_gradient_min   : float = Field(default=0.0,   ge=0.0, le=1.0, title="Enforce Gradient Minimum", description="Star mode only. Radial extent in [0, 1] over which the gradient minimum is enforced: where the local gradient position t <= this value, no vessel smaller than the gradient-prescribed diameter is placed. 0 disables it, 1 enforces everywhere.")
-    packing_strategy       : Literal["space", "target"] = Field(default="space", title="Packing Strategy", description="Star mode only. 'space' (default): space-first Apollonian fill. 'target': size-first gradient-driven radial fill.")
-    first_vessel_shift     : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Star mode only. Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
-    direction              : Optional[str] = Field(default="center", title="Packing Direction",         description="Star mode only. Size gradient direction: 'center' (large near centre), 'edge' (large near tips), 'middle', None (random).")
+# --- Shared xylem field groups --------------------------------------------
+# The star-xylem organs (root stele + dicot-stem eustele) and the leaf vein all
+# size their vessels the same way; the field *definitions* live once in these
+# group factories and each organ passes its own *defaults*.  (Descriptions/titles
+# are metadata, not emitted by to_dict_list, so one canonical wording covers every
+# organ.)  Each returns a ``{field: (type, FieldInfo)}`` dict for ``create_model``.
+
+def _vessel_sizing_fields(*, vessel_diameter: float, vessel_diameter_min: float,
+                          vessel_diameter_sd: float) -> Dict[str, Any]:
+    """Vessel diameter + its min floor + per-vessel jitter (every xylem uses these)."""
+    return {
+        "vessel_diameter":     (float, Field(default=vessel_diameter, ge=0.00001, title="Vessel Diameter", description="Metaxylem vessel diameter (upper bound of the size gradient).")),
+        "vessel_diameter_min": (float, Field(default=vessel_diameter_min, ge=0.00001, title="Vessel Diameter (min)", description="Lower bound / floor of the vessel size gradient.")),
+        "vessel_diameter_sd":  (float, Field(default=vessel_diameter_sd, ge=0.0, title="Vessel Diameter SD", description="Standard deviation added per vessel.")),
+    }
 
 
-class RootPhloemParams(BaseParams):
-    name             : str   = "phloem"
-    sieve_diameter    : float = Field(default=0.025,  ge=0.00001, title="Sieve Diameter",         description="Diameter of phloem sieve elements.")
-    sieve_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Sieve Diameter SD",      description="Standard deviation of phloem sieve diameter.")
-    cluster_width     : float = Field(default=0.025,   ge=0.00001, title="Phloem Bundle Width",   description="Tangential width of the phloem ellipse.")
-    cluster_height    : float = Field(default=0.025,  ge=0.00001, title="Phloem Bundle Height",  description="Radial height of the phloem ellipse.")
-    relative_distance : float = Field(default=0.5,    ge=0.0, le=1.0, title="Relative Distance",     description="Relative distance of the phloem from the xylem inner radius (star mode only).")
+def _size_gradient_fields(*, gradient_inflection: float, gradient_steepness: float,
+                          gradient_function: str = "five_pl", gradient_asymmetry: float = 1.0,
+                          enforce_gradient_min: float = 0.0) -> Dict[str, Any]:
+    """The centre-to-tip vessel size gradient (shared by the root & dicot-stem stars)."""
+    return {
+        "gradient_function":    (Literal["five_pl", "linear"], Field(default=gradient_function, title="Gradient Function", description="Shape function for the vessel size gradient.")),
+        "gradient_inflection":  (float, Field(default=gradient_inflection, ge=0.001, le=1.0, title="Gradient Inflection", description="Normalized position of the gradient inflection point (0 = centre, 1 = tip).")),
+        "gradient_steepness":   (float, Field(default=gradient_steepness, ge=0.1, title="Gradient Steepness", description="Hill coefficient — sharpness of the size transition.")),
+        "gradient_asymmetry":   (float, Field(default=gradient_asymmetry, ge=0.1, title="Gradient Asymmetry", description="Asymmetry exponent of the size gradient.")),
+        "enforce_gradient_min": (float, Field(default=enforce_gradient_min, ge=0.0, le=1.0, title="Enforce Gradient Minimum", description="Radial extent in [0, 1] over which the gradient minimum is enforced (0 disables, 1 everywhere).")),
+    }
+
+
+def _xylem_star_fields(*, n_vascular_peak: int, radius_valley_side: float, radius_peak_side: float,
+                       arc_peak_side: float, arc_valley_side: float) -> Dict[str, Any]:
+    """The star (actinostele / eustele) arm geometry — arm count + valley/peak radii + arcs."""
+    return {
+        "n_vascular_peak":    (int,   Field(default=n_vascular_peak, ge=1, title="Number of Poles/Arms", description="Number of xylem star arms (poles), alternating with the phloem valleys.")),
+        "radius_valley_side": (float, Field(default=radius_valley_side, ge=0.00001, title="Valley Radius", description="Valley-side radius of the star arms from the centre.")),
+        "radius_peak_side":   (float, Field(default=radius_peak_side, ge=0.00001, title="Peak Radius", description="Peak-side (arm-tip) radius of the star arms from the centre.")),
+        "arc_peak_side":      (float, Field(default=arc_peak_side, ge=0.00001, title="Arc Length at Peak", description="Arc length of each arm at radius_peak_side (peak width).")),
+        "arc_valley_side":    (float, Field(default=arc_valley_side, ge=0.00001, title="Arc Length at Valley", description="Arc length of each arm at radius_valley_side (valley/base width).")),
+    }
+
+
+def _vessel_packing_fields(*, allow_ellipse: bool, ellipse_max_aspect: float = 2.0,
+                           packing_strategy: str = "space", first_vessel_shift: float = 0.7,
+                           direction: Optional[str] = "center", pith_radius: float = 0.0) -> Dict[str, Any]:
+    """How vessels are packed into the region (ellipse fallback, strategy, seeding, pith hole)."""
+    return {
+        "allow_ellipse":      (bool,  Field(default=allow_ellipse, title="Allow Ellipse Vessels", description="Fit an area-matched radial ellipse where a target-diameter circle is too tight, instead of shrinking the vessel.")),
+        "ellipse_max_aspect": (float, Field(default=ellipse_max_aspect, ge=1.0, title="Ellipse Max Aspect", description="Maximum major/minor axis ratio for ellipse vessels.")),
+        "packing_strategy":   (Literal["space", "target"], Field(default=packing_strategy, title="Packing Strategy", description="'space' = space-first Apollonian fill; 'target' = size-first gradient-driven radial fill.")),
+        "first_vessel_shift": (float, Field(default=first_vessel_shift, ge=0.0, le=1.0, title="First Vessel Shift", description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")),
+        "direction":          (Optional[str], Field(default=direction, title="Packing Direction", description="Size gradient direction: 'center', 'edge', 'middle', or None (random).")),
+        "pith_radius":        (float, Field(default=pith_radius, ge=0.0, title="Pith Radius", description="Inner radius left free of vessels (0 = runs to the centre).")),
+    }
+
+
+# Root-stele xylem: the four shared star groups (root defaults) + root-only fields
+# for the arch mode (protoxylem chains, metaxylem ring) and the discrete-vessel ring.
+_root_xylem_extra_fields: Dict[str, Any] = {
+    "protoxylem_diameter":     (float, Field(default=0.01, ge=0.00001, title="Protoxylem Diameter", description="Diameter of protoxylem elements.")),
+    "protoxylem_diameter_sd":  (float, Field(default=0.001, ge=0.0, title="Protoxylem Diameter SD", description="Standard deviation of protoxylem element diameter.")),
+    "protoxylem_diameter_min": (float, Field(default=0.0, ge=0.0, title="Protoxylem Diameter (min)", description="Arch mode: smallest protoxylem diameter (outer edge of the band); 0 defaults to 0.4 * protoxylem_diameter.")),
+    "protoxylem_cluster_width":  (float, Field(default=0.015, ge=0.00001, title="Protoxylem Bundle Width", description="Tangential width of the protoxylem ellipse.")),
+    "protoxylem_cluster_height": (float, Field(default=0.01, ge=0.00001, title="Protoxylem Bundle Height", description="Radial height of the protoxylem ellipse.")),
+    "protoxylem_band_depth":   (float, Field(default=0.0, ge=0.0, title="Protoxylem Band Depth", description="Arch mode: radial depth of the outer band holding the protoxylem chains + phloem; 0 defaults to 35%% of the span.")),
+    "protoxylem_pole_width_inner": (float, Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (inner)", description="Arch mode: tangential width of each protoxylem pole at its inner end; 0 defaults to 3 * protoxylem_diameter.")),
+    "protoxylem_pole_width_outer": (float, Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (outer)", description="Arch mode: tangential width of each protoxylem pole at its outer end; 0 defaults to 3 * protoxylem_diameter.")),
+    "n_vascular_bundles": (int,   Field(default=5, ge=1, title="Number of Vascular Bundles", description="Number of metaxylem vessels.")),
+    "ratio_proto_meta":   (float, Field(default=2.2, ge=0.0, title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")),
+    "xylem_shape":        (Literal["default", "arch", "star"], Field(default="default", title="Xylem Shape", description="'default' = ring of discrete vessels; 'arch' = metaxylem ring + graded protoxylem chains + valley phloem; 'star' = actinostele arms with a radial size gradient.")),
+    "n_metaxylem":        (int,   Field(default=0, ge=0, title="Number of Metaxylem", description="Arch mode: metaxylem count in the central ring; 0 defaults to n_vascular_peak.")),
+    "outer_radius":       (float, Field(default=0.15, ge=0.00001, title="Outer Radius", description="Arch mode: radius of the pericycle side where the poles reach; capped at the stele radius.")),
+}
+
+RootXylemParams = create_model("RootXylemParams", __base__=BaseParams,
+    name=(str, "xylem"),
+    **_vessel_sizing_fields(vessel_diameter=0.06, vessel_diameter_min=0.01, vessel_diameter_sd=0.005),
+    **_size_gradient_fields(gradient_inflection=0.7, gradient_steepness=5.0),
+    **_xylem_star_fields(n_vascular_peak=5, radius_valley_side=0.05, radius_peak_side=0.22,
+                         arc_peak_side=0.03, arc_valley_side=0.03),
+    **_vessel_packing_fields(allow_ellipse=True),
+    **_root_xylem_extra_fields,
+)
+
+
+def _phloem_params(clsname: str, *, sieve_diameter: float, sieve_diameter_sd: float = 0.001,
+                   cluster_width: Optional[float] = None, cluster_height: Optional[float] = None,
+                   relative_distance: Optional[float] = None):
+    """A phloem param set: sieve-element sizing (always) + an optional phloem-cluster
+    ellipse (cluster_width/height + relative_distance).
+
+    Shared by every ``phloem`` bundle spec (root star, dicot-stem bundle, leaf vein);
+    the field *definitions* live here once and each organ passes its own *defaults*.
+    Omit the cluster args for a sizing-only phloem (the leaf vein reads its cluster
+    extent from the vascular_bundle spec instead).
+    """
+    fields: Dict[str, Any] = {
+        "name": (str, "phloem"),
+        "sieve_diameter": (float, Field(default=sieve_diameter, ge=0.00001,
+            title="Sieve Diameter", description="Diameter of phloem sieve elements.")),
+        "sieve_diameter_sd": (float, Field(default=sieve_diameter_sd, ge=0.0,
+            title="Sieve Diameter SD", description="Standard deviation of phloem sieve diameter.")),
+    }
+    if cluster_width is not None:
+        fields["cluster_width"] = (float, Field(default=cluster_width, ge=0.00001,
+            title="Phloem Bundle Width", description="Tangential width of the phloem ellipse."))
+        fields["cluster_height"] = (float, Field(default=cluster_height, ge=0.00001,
+            title="Phloem Bundle Height", description="Radial height of the phloem ellipse."))
+        fields["relative_distance"] = (float, Field(default=relative_distance, ge=0.0, le=1.0,
+            title="Relative Distance", description="Relative distance of the phloem from the xylem inner radius / cambium."))
+    return create_model(clsname, __base__=BaseParams, **fields)
+
+
+RootPhloemParams = _phloem_params("RootPhloemParams", sieve_diameter=0.025,
+    cluster_width=0.025, cluster_height=0.025, relative_distance=0.5)
 
 # Dicotyledon-specific layers
 SteleDicotParams = _ground_region_params("SteleDicotParams", "stele",
     thickness=0.65, cell_diameter=0.015, cell_diameter_center=0.03, inflection=0.2)
 
 
-class DicotXylemParams(BaseParams):
-    name                : str   = "xylem"
-    n_vascular_peak     : int   = Field(default=3,     ge=2,       title="Number of Vascular Peaks", description="Number of xylem arms in the star pattern.")
-    radius_valley_side  : float = Field(default=0.1,  ge=0.00001, title="Valley Radius",            description="Valley-side radius of the xylem star arms from the stele centre.")
-    radius_peak_side    : float = Field(default=0.22,  ge=0.00001, title="Peak Radius",             description="Peak-side radius of the xylem star arms from the stele centre.")
-    arc_peak_side       : float = Field(default=0.03,  ge=0.00001, title="Arc Length at Peak",       description="Arc length of each arm at radius_peak_side (peak width).")
-    arc_valley_side     : float = Field(default=0.05,  ge=0.00001, title="Arc Length at Valley",     description="Arc length of each arm at radius_valley_side (valley/base width).")
-    vessel_diameter     : float                        = Field(default=0.08,  ge=0.00001,        title="Vessel Diameter (max)",    description="Maximum vessel diameter at the star centre (upper bound of the size gradient).")
-    vessel_diameter_min : float                        = Field(default=0.02,  ge=0.00001,        title="Vessel Diameter (min)",    description="Minimum vessel diameter at the star tips (lower bound of the size gradient).")
-    vessel_diameter_sd  : float                        = Field(default=0.002, ge=0.0,            title="Vessel Diameter SD",       description="Standard deviation added to each vessel diameter.")
-    gradient_function   : Literal["five_pl", "linear"] = Field(default="five_pl",               title="Gradient Function",        description="Shape function used for the centre-to-tip vessel size gradient.")
-    gradient_inflection : float                        = Field(default=0.7,   ge=0.001, le=1.0,  title="Gradient Inflection",     description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
-    gradient_steepness  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Steepness",      description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
-    gradient_asymmetry  : float                        = Field(default=1.0,   ge=0.1,            title="Gradient Asymmetry",      description="Asymmetry exponent of the vessel size gradient. Used by five_pl.")
-    enforce_gradient_min: float                        = Field(default=0.0,   ge=0.0, le=1.0, title="Enforce Gradient Minimum", description="Radial extent in [0, 1] (same axis as gradient_inflection) over which the gradient minimum is enforced: where the local gradient position t <= this value, no vessel smaller than the gradient-prescribed diameter is placed (a spot too tight for the local target is left empty). 0 disables it, 1 enforces it everywhere.")
-    allow_ellipse       : bool                         = Field(default=False, title="Allow Ellipse Vessels", description="If True, when a tight/elongated spot is too narrow for a target-diameter circle, fit an area-matched ellipse elongated along the spot instead of shrinking the vessel.")
-    ellipse_max_aspect  : float                        = Field(default=2.0,   ge=1.0, title="Ellipse Max Aspect", description="Maximum major/minor axis ratio for ellipse vessels, so they don't become slivers.")
-    packing_strategy    : Literal["space", "target"] = Field(default="space", title="Packing Strategy", description="'space' (default): space-first Apollonian fill. 'target': size-first gradient-driven radial fill (big vessels first at the gradient radius, ellipse if too narrow, then small cells fill the rest).")
-    first_vessel_shift  : float = Field(default=0.7,   ge=0.0, le=1.0,  title="First Vessel Shift",  description="Maximum random displacement of the first vessel as a fraction of its inscribed radius.")
-    direction           : Optional[str] = Field(default="center", title="Packing Direction", description="Size gradient direction: 'center' (large near centre), 'edge' (large near boundary), 'middle' (large at mid-radius), None (random).")
-    pith_radius         : float = Field(default=0.0,   ge=0.0,   title="Pith Radius",                 description="Radius of the central pith circle subtracted from the star. 0 = no pith (star mode only).")
+# Dicot-stem eustele xylem: the same four shared star groups, dicot defaults (no
+# root-only arch/protoxylem fields).
+DicotXylemParams = create_model("DicotXylemParams", __base__=BaseParams,
+    name=(str, "xylem"),
+    **_xylem_star_fields(n_vascular_peak=3, radius_valley_side=0.1, radius_peak_side=0.22,
+                         arc_peak_side=0.03, arc_valley_side=0.05),
+    **_vessel_sizing_fields(vessel_diameter=0.08, vessel_diameter_min=0.02, vessel_diameter_sd=0.002),
+    **_size_gradient_fields(gradient_inflection=0.7, gradient_steepness=1.0),
+    **_vessel_packing_fields(allow_ellipse=False),
+)
 
 
 
-class DicotPhloemParams(BaseParams):
-    name             : str   = "phloem"
-    sieve_diameter    : float = Field(default=0.012,  ge=0.00001, title="Sieve Diameter",    description="Diameter of phloem sieve elements.")
-    sieve_diameter_sd : float = Field(default=0.001,  ge=0.0,     title="Sieve Diameter SD", description="Standard deviation of phloem sieve element diameter.")
-    cluster_width            : float = Field(default=0.1,   ge=0.00001, title="Cluster Width",            description="Width of the phloem bundle region.")
-    cluster_height           : float = Field(default=0.05,    ge=0.00001, title="Cluster Height",           description="Height of the phloem bundle region.")
-    relative_distance : float = Field(default=0.8,    ge=0.0, le = 1.0, title="Relative Distance to cambium",           description="Relative distance to cambium (0 adjacent to cambium, 1 adjacent to the last stele layer)")
+DicotPhloemParams = _phloem_params("DicotPhloemParams", sieve_diameter=0.012,
+    cluster_width=0.1, cluster_height=0.05, relative_distance=0.8)
 
 
-class DicotCambiumParams(BaseParams):
-    name             : str   = "cambium"
-    cell_diameter    : float = Field(default=0.01,  ge=0.00001, title="Cell Diameter",    description="Diameter of cambium cells.")
+class BundleCambiumParams(BaseParams):
+    """Cambium cell sizing for a vascular bundle — the fascicular cambium of a dicot
+    stem bundle or a dicot leaf vein.  Base = just the cell diameter; the dicot-stem
+    ring adds its star-placement fields (see ``DicotCambiumParams``)."""
+    name          : str   = "cambium"
+    cell_diameter : float = Field(default=0.01, ge=0.00001, title="Cell Diameter", description="Diameter of cambium cells.")
+
+
+# Leaf vein cambium: just the cell diameter (placement is handled by the bundle).
+class LeafBundleCambiumParams(BundleCambiumParams):
+    """Cambium cell sizing for dicot leaf veins (ignored by closed monocot veins)."""
+
+
+class DicotCambiumParams(BundleCambiumParams):
     cell_width       : float = Field(default=0.02,   ge=0.00001, title="Cell Width",       description="Width of cambium cells (tangential).")
     n_layers         : int   = Field(default=2, ge=1, title="Cambium Layers", description="Stem: number of concentric cambium cell files. In the fascicular cambium strip and, under secondary growth, in the continuous cambium ring — a thicker meristematic zone reads as several cell layers.")
     # for primary growth
@@ -699,6 +754,207 @@ NeedleEndodermisParams = _layer_params("NeedleEndodermisParams", "endodermis", "
 MesophyllParams        = _layer_params("MesophyllParams",        "mesophyll",  "mesophyll",  cell_diameter=0.08,   cell_width=0.045, n_layers=3, shift=0.5, order=4)
 HypodermisParams       = _layer_params("HypodermisParams",       "hypodermis", "hypodermal", cell_diameter=0.0225,                   n_layers=2, shift=0.5, order=5)
 NeedleEpidermisParams  = _layer_params("NeedleEpidermisParams",  "epidermis",  "epidermal",  cell_diameter=0.02,                     n_layers=1, shift=0.5, order=6)
+
+
+# ===========================================================================
+# Leaf params (typed, like every other organ).  A leaf is a flat slab (see
+# leaf_class.py): a folded/ribbed lamina outline + a transverse vein row + stomata.
+# ===========================================================================
+
+class LeafPlantTypeParams(PlantTypeParams):
+    """Leaf global geometry (the 'planttype' entry): the slab outline and how it is
+    shaped (custom thickness profile, fold, twist, rounded margins).  Extends the base
+    planttype (name/value/organ) with the leaf's slab-shape fields."""
+    value : int = Field(default=1, ge=1, le=2, title="Plant Type", description="1 = monocot leaf (uniform mesophyll, 'face' veins), 2 = dicot leaf (dorsiventral palisade/spongy, collateral veins).")
+    organ : str = "leaf"
+    width     : float = Field(default=4.0, ge=0.00001, title="Width", description="Leaf width (x extent) — the straight tip-to-tip chord, mm.")
+    thickness : float = Field(default=0.45, ge=0.00001, title="Thickness", description="Lamina thickness (y extent) at the centre, mm. Used for the default elliptical profile when thickness_profile is empty.")
+    thickness_profile : List[Tuple[float, float]] = Field(default_factory=list, title="Thickness Profile", description="Optional measured half-width profile: a list of (x, thickness) mm control points from the centre outward, linearly interpolated (symmetric in x, 0 beyond the last point). Overrides the elliptical thickness. Empty = plain ellipse from width/thickness.")
+    fold_sag    : float = Field(default=0.0, ge=0.0, title="Fold Sag", description="Folded (keeled) leaf: how far the mid-line sags below the tip-to-tip chord at the centre, mm (a smooth raised-cosine, 0 at the tips). The adaxial surface then hugs the chord while the abaxial swings out into a keel. 0 = flat, straight leaf.")
+    fold_width  : float = Field(default=0.0, ge=0.0, title="Fold Width", description="Span of the fold sag, mm (the cosine reaches 0 at ±fold_width/2). 0 = the whole leaf width.")
+    edge_radius : float = Field(default=0.0, ge=0.0, title="Edge Radius", description="Morphological-opening radius (mm) that rounds the sharp convex features (the thin pointed margins / tips, a narrow keel point) so they don't render as spikes. 0 = no rounding; ~half an epidermis cell blunts the tips.")
+    twist_amplitude : float = Field(default=0.0, ge=0.0, title="Twist Amplitude", description="Bend depth (mm) of the mid-line sine — a leaf that is not perfectly straight. 0 = straight.")
+    twist_waves     : float = Field(default=1.0, ge=0.0, title="Twist Waves", description="Number of half-bends of the twist sine across the width.")
+
+
+LeafEpidermisParams = _layer_params("LeafEpidermisParams", "epidermis", "epidermal",
+                                    cell_diameter=0.030, cell_width=0.035, n_layers=1, shift=0.3, order=3)
+
+
+class _LeafGroundParams(BaseParams):
+    """A leaf mesophyll ground tissue filling the lamina core (no 'order' — a central
+    fill, not a peeled ring)."""
+    name          : str   = "mesophyll"
+    cell_diameter : float = Field(default=0.045, ge=0.00001, title="Cell Diameter", description="Cell diameter (radial/vertical extent) of the ground cells.")
+    cell_width    : float = Field(default=0.045, ge=0.00001, title="Cell Width", description="Cell width (tangential/horizontal extent). Set larger than the diameter for flat cells, smaller for columnar (palisade) cells.")
+
+
+class LeafMesophyllParams(_LeafGroundParams):
+    """Monocot leaf: a single uniform mesophyll tissue (no palisade/spongy split)."""
+    name : str = "mesophyll"
+
+
+class LeafPalisadeParams(_LeafGroundParams):
+    """Dicot leaf: adaxial palisade — elongated columnar cells (diameter tall > width)."""
+    name          : str   = "palisade"
+    cell_diameter : float = Field(default=0.075, ge=0.00001, title="Cell Diameter", description="Vertical (columnar) extent of the palisade cells — larger than cell_width so the cells stand up.")
+    cell_width    : float = Field(default=0.020, ge=0.00001, title="Cell Width", description="Narrow tangential width of the palisade cells.")
+
+
+class LeafSpongyParams(_LeafGroundParams):
+    """Dicot leaf: abaxial spongy — big roundish cells (intercellular air is added by
+    an inter_cellular_spaces entry)."""
+    name          : str   = "spongy"
+    cell_diameter : float = Field(default=0.048, ge=0.00001, title="Cell Diameter", description="Diameter of the (big, roundish) spongy cells.")
+    cell_width    : float = Field(default=0.048, ge=0.00001, title="Cell Width", description="Width of the spongy cells.")
+
+
+class LeafVascularBundleParams(BaseParams):
+    """One leaf vein size-class: a transverse bundle (xylem adaxial / phloem abaxial),
+    the raised-cosine rib it raises on the lamina, and optional sclerenchyma girders.
+    Several specs give vein size-classes (midrib / minor). Bundle-internal fields not
+    listed here fall back to the ``build_bundle`` defaults."""
+    name        : str = "vascular_bundle"
+    # -- type ---------------------------------------------------------------
+    bundle_type : Literal["collateral", "bicollateral", "concentric"] = Field(default="collateral", title="Bundle Type", description="Vein bundle type; leaves are collateral (xylem inner/adaxial, phloem outer/abaxial).")
+    has_cambium : bool  = Field(default=False, title="Has Cambium", description="False (monocot 'face' vein, closed) or True (dicot collateral, a fascicular cambium between xylem and phloem).")
+    xylem_layout: Literal["packed", "files", "face"] = Field(default="face", title="Xylem Layout", description="'face' = the monocot mask (metaxylem middle, protoxylem + optional lacuna toward the centre, phloem toward the abaxial surface); 'files' = the dicot radial files; 'packed' = one open zone.")
+    lacuna      : bool  = Field(default=True, title="Protoxylem Lacuna", description="'face' layout: carve a protoxylem air lacuna (the substomatal/vein air space).")
+    sheath      : Literal["none", "ring", "caps", "both"] = Field(default="both", title="Sclerenchyma Sheath", description="Fibre sheath around the vein ('both' = caps + ring; 'none' = only a thin parenchyma bundle sheath).")
+    # -- envelope + orientation --------------------------------------------
+    shape          : Literal["ellipse", "circle", "focus_ellipse", "egg"] = Field(default="ellipse", title="Envelope Shape", description="Vein envelope outline.")
+    width          : float = Field(default=0.12, ge=0.00001, title="Envelope Width", description="Tangential extent of the vein envelope (mm). Widest class is placed first, so a midrib yields the minor veins around it.")
+    height         : float = Field(default=0.16, ge=0.00001, title="Envelope Height", description="Radial (adaxial-abaxial) extent of the vein envelope (mm).")
+    phloem_outward : bool  = Field(default=True, title="Phloem Outward", description="True = phloem faces the abaxial surface, xylem the adaxial (the normal leaf orientation).")
+    relative_distance : float = Field(default=0.5, ge=0.0, le=1.0, title="Relative Distance", description="Where the vein sits through the local (ribbed) lamina thickness: 0 = abaxial (lower) face, 0.5 = mid-plane, 1 = adaxial (upper) face.")
+    # -- rib (each vein raises the lamina) ----------------------------------
+    rib_adaxial_height : float = Field(default=0.02, ge=0.0, title="Rib Height (adaxial)", description="How much this vein bulges the upper (adaxial) surface — a raised cosine (mm). 0 = no upper rib.")
+    rib_adaxial_width  : float = Field(default=0.25, ge=0.00001, title="Rib Width (adaxial)", description="Full tangential width of the adaxial rib (mm); the bump is exactly 0 beyond ±width/2.")
+    rib_abaxial_height : float = Field(default=0.06, ge=0.0, title="Rib Height (abaxial)", description="How much this vein bulges the lower (abaxial) surface — the keel side usually bulges more (mm).")
+    rib_abaxial_width  : float = Field(default=0.30, ge=0.00001, title="Rib Width (abaxial)", description="Full tangential width of the abaxial rib (mm).")
+    # -- sclerenchyma girders (grass-style struts to both epidermes) --------
+    girder_adaxial     : bool  = Field(default=False, title="Girder (adaxial)", description="Fill a sclerenchyma triangle from this vein to the adaxial epidermis (base at the epidermis, apex at the vein).")
+    girder_abaxial     : bool  = Field(default=False, title="Girder (abaxial)", description="Fill a sclerenchyma triangle from this vein to the abaxial epidermis.")
+    girder_base_width  : float = Field(default=0.10, ge=0.00001, title="Girder Base Width", description="Tangential width of the girder triangle's base against the epidermis (mm).")
+    girder_cell_diameter : float = Field(default=0.012, ge=0.00001, title="Girder Cell Diameter", description="Diameter of the sclerenchyma (fibre) cells filling the girder.")
+    girder_cell_width    : float = Field(default=0.012, ge=0.00001, title="Girder Cell Width", description="Width of the girder fibre cells.")
+    # -- placement ----------------------------------------------------------
+    n_bundles     : int   = Field(default=7, ge=0, title="Number of Veins", description="How many veins of this size-class to place along the mid-plane.")
+    span_fraction : float = Field(default=0.75, ge=0.0, le=1.0, title="Span Fraction", description="Fraction of the leaf width the vein row spans (centred), for 'even'/'center'/'scatter' placement.")
+    placement     : Literal["even", "scatter", "center", "explicit"] = Field(default="even", title="Placement", description="'even' = endpoints-included row; 'center' = row centred on x=0 (a midrib at n=1); 'scatter' = an interleaved row offset half a step; 'explicit' = at the exact x_positions.")
+    x_positions   : List[float] = Field(default_factory=list, title="Explicit Positions", description="placement='explicit' only: the exact x (mm) of each vein of this class.")
+    # -- bundle internals commonly tuned per leaf ---------------------------
+    prop_vessel      : float = Field(default=0.5, ge=0.0, le=1.0, title="Proportion Vessels", description="Fraction of the packed xylem zone occupied by vessels (the rest is xylem parenchyma).")
+    n_metaxylem      : int   = Field(default=2, ge=0, title="Number of Metaxylem", description="'face' layout: metaxylem vessels at the radial middle (0 for a small vein with only protoxylem + phloem).")
+    n_protoxylem     : int   = Field(default=1, ge=0, title="Number of Protoxylem", description="'face' layout: protoxylem bundles toward the centre.")
+    protoxylem_diameter     : float = Field(default=0.03,  ge=0.00001, title="Protoxylem Diameter", description="Protoxylem vessel diameter (mm).")
+    protoxylem_diameter_min : float = Field(default=0.025, ge=0.00001, title="Protoxylem Diameter (min)", description="Lower clip on the packed protoxylem diameter.")
+    protoxylem_width  : float = Field(default=0.032, ge=0.00001, title="Protoxylem Bundle Width", description="Tangential extent of each protoxylem bundle region (mm).")
+    protoxylem_height : float = Field(default=0.032, ge=0.00001, title="Protoxylem Bundle Height", description="Radial extent of each protoxylem bundle region (mm).")
+    phloem_width      : float = Field(default=0.05, ge=0.00001, title="Phloem Ellipse Width", description="Tangential extent of the phloem (sieve + companion) cluster (mm).")
+    phloem_height     : float = Field(default=0.04, ge=0.00001, title="Phloem Ellipse Height", description="Radial extent of the phloem cluster (mm).")
+    sieve_diameter_min: float = Field(default=0.006, ge=0.00001, title="Sieve Diameter (min)", description="Lower bound of the sieve-element diameter when packing the phloem.")
+
+
+# Leaf-vein xylem: just the shared vessel-sizing trio (leaf-scaled), read by build_bundle.
+LeafBundleXylemParams = create_model("LeafBundleXylemParams", __base__=BaseParams,
+    name=(str, "xylem"),
+    **_vessel_sizing_fields(vessel_diameter=0.045, vessel_diameter_min=0.012, vessel_diameter_sd=0.003),
+)
+
+
+# Leaf-vein phloem: sieve sizing only (the cluster extent comes from the
+# vascular_bundle spec's phloem_width/height).
+LeafBundlePhloemParams = _phloem_params("LeafBundlePhloemParams", sieve_diameter=0.008)
+
+
+class InterBundleAerenchymaParams(BaseParams):
+    """Monocot leaf: an air lacuna in the mesophyll between each pair of veins, built
+    root-style (the mesophyll cells inside the region are converted to air and fused).
+    Two sizing modes: an ellipse (width/height) on the mid-plane, or margins holding
+    the lacuna off the bundles and faces (used when any *_margin > 0)."""
+    name           : str = "inter_bundle_aerenchyma"
+    tissue         : str = Field(default="mesophyll", title="Tissue", description="Ground tissue the lacuna is carved from.")
+    width          : float = Field(default=0.10, ge=0.0, title="Lacuna Width", description="Ellipse mode: tangential extent of the lacuna (mm).")
+    height         : float = Field(default=0.24, ge=0.0, title="Lacuna Height", description="Ellipse mode: radial extent of the lacuna (mm).")
+    side_margin    : float = Field(default=0.0, ge=0.0, title="Side Margin", description="Margin mode (any margin > 0): mesophyll kept beside each bundle (mm). The lacuna is an ellipse inscribed in the remaining gap.")
+    adaxial_margin : float = Field(default=0.0, ge=0.0, title="Adaxial Margin", description="Margin mode: mesophyll kept below the adaxial (upper) face (mm).")
+    abaxial_margin : float = Field(default=0.0, ge=0.0, title="Abaxial Margin", description="Margin mode: mesophyll kept above the abaxial (lower) face (mm).")
+
+
+class LeafStomataParams(BaseParams):
+    """Amphistomatous leaf stomata: counts per face (split along the mid-line), reusing
+    the needle stomata geometry."""
+    name        : str = "stomata"
+    n_adaxial   : int = Field(default=10, ge=0, title="Stomata (adaxial)", description="Number of stomata on the upper (adaxial) face.")
+    n_abaxial   : int = Field(default=10, ge=0, title="Stomata (abaxial)", description="Number of stomata on the lower (abaxial) face (usually denser in a dicot).")
+    edge_margin : float = Field(default=0.12, ge=0.0, le=0.5, title="Edge Margin", description="Fraction of each epidermis run skipped at both ends, so no stoma sits at the tips where the two faces meet.")
+    width       : float = Field(default=0.035, ge=0.00001, title="Width", description="Stoma width.")
+    depth       : float = Field(default=0.03, ge=0.00001, title="Depth", description="Stoma depth.")
+    sub_chamber : float = Field(default=0.06, ge=0.00001, title="Sub Chamber", description="Substomatal chamber (air space) size.")
+
+
+def _monocot_leaf_vein(**kw: Any) -> LeafVascularBundleParams:
+    """The monocot 'face' vein (metaxylem eyes + protoxylem + a lacuna), leaf-scaled —
+    the class defaults already describe it; ``kw`` overrides per size-class."""
+    return LeafVascularBundleParams(**kw)
+
+
+def _dicot_leaf_vein(**kw: Any) -> LeafVascularBundleParams:
+    """A dicot collateral vein (xylem / cambium / phloem in radial files, no metaxylem
+    eyes, no lacuna); a touch more keeled underneath.  ``kw`` overrides per size-class."""
+    base = dict(has_cambium=True, xylem_layout="files", lacuna=False, sheath="none",
+                prop_vessel=0.7, rib_abaxial_height=0.10, rib_abaxial_width=0.32)
+    base.update(kw)
+    return LeafVascularBundleParams(**base)
+
+
+def default_monocot_leaf_params() -> List[BaseParams]:
+    """Monocot leaf: the palisade/spongy distinction is not clear, so the mesophyll
+    is a **single uniform tissue** (big parenchyma) with intercellular air (and
+    substomatal chambers near the stomata); amphistomatous."""
+    return [
+        LeafPlantTypeParams(value=1, width=4.0, thickness=0.45),
+        LeafEpidermisParams(),
+        LeafMesophyllParams(),
+        _monocot_leaf_vein(),
+        LeafBundleXylemParams(),
+        LeafBundlePhloemParams(),
+        LeafBundleCambiumParams(),
+        # Air near the stomata comes from the substomatal chambers; aerenchyma is a
+        # lacuna in the mesophyll between each pair of veins.
+        InterBundleAerenchymaParams(width=0.09, height=0.16),
+        LeafStomataParams(n_adaxial=10, n_abaxial=10),   # ~equal both faces
+    ]
+
+
+def default_dicot_leaf_params() -> List[BaseParams]:
+    """Dicot leaf: dorsiventral palisade (adaxial) / spongy (abaxial); two vein
+    size-classes (a central **midrib** + scattered **minor** veins), each with its
+    own rib; stomata denser on the abaxial face (a few adaxial)."""
+    midrib = _dicot_leaf_vein(n_bundles=1, placement="center", span_fraction=0.0,
+                              width=0.18, height=0.24,
+                              rib_adaxial_height=0.035, rib_adaxial_width=0.40,
+                              rib_abaxial_height=0.12, rib_abaxial_width=0.50)   # big keeled midrib
+    minor = _dicot_leaf_vein(n_bundles=8, placement="scatter", span_fraction=0.85,
+                             width=0.08, height=0.11,
+                             rib_adaxial_height=0.012, rib_adaxial_width=0.14,
+                             rib_abaxial_height=0.035, rib_abaxial_width=0.20)    # small ribs
+    return [
+        LeafPlantTypeParams(value=2, width=4.0, thickness=0.45),
+        LeafEpidermisParams(),
+        # Both are central fills (no 'order'); the core is split at the mid-plane.
+        LeafPalisadeParams(),   # adaxial, elongated columnar
+        LeafSpongyParams(),     # abaxial, big roundish
+        midrib,
+        minor,
+        LeafBundleXylemParams(),
+        LeafBundlePhloemParams(),
+        LeafBundleCambiumParams(),
+        # Spongy = big parenchyma with lots of intercellular air (ICS module).
+        InterCellularSpacesParams(tissue=["spongy"], smoothness=0.22),
+        LeafStomataParams(n_adaxial=3, n_abaxial=12),    # abaxial-denser
+    ]
 
 
 # ===========================================================================
@@ -1224,6 +1480,20 @@ class OrganInputData(BaseModel):
             HypodermisParams(),
             NeedleEpidermisParams(),
         ])
+
+    @classmethod
+    def for_monocot_leaf(cls) -> "OrganInputData":
+        """Monocot leaf preset: spongy / palisade / spongy mesophyll, an even row of
+        transverse 'face' veins (xylem adaxial), amphistomatous.  Built by
+        ``MonocotLeafAnatomy`` (via ``LeafAnatomy``)."""
+        return cls(params=default_monocot_leaf_params())
+
+    @classmethod
+    def for_dicot_leaf(cls) -> "OrganInputData":
+        """Dicot leaf preset: dorsiventral palisade (adaxial) / spongy (abaxial), a
+        central midrib + scattered minor collateral veins, stomata denser abaxial.
+        Built by ``DicotLeafAnatomy`` (via ``LeafAnatomy``)."""
+        return cls(params=default_dicot_leaf_params())
 
     @classmethod
     def for_layer(cls) -> "OrganInputData":
