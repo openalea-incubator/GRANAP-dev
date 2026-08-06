@@ -445,7 +445,8 @@ class Organ(AbstractNetwork, ABC):
             by_type: Dict[str, float] = defaultdict(float)
             best: Dict[str, Any] = {}
             for c in cand:
-                shared = c.polygon.exterior.intersection(probe).length
+                # .boundary (not .exterior) so a MultiPolygon cell doesn't crash.
+                shared = c.polygon.boundary.intersection(probe).length
                 by_type[c.type] += shared
                 if c.type not in best or shared > best[c.type][0]:
                     best[c.type] = (shared, c)

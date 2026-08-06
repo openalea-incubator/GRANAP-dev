@@ -184,6 +184,37 @@ SclerenchymaParams = _layer_params("SclerenchymaParams", "sclerenchyma", "sclere
 # mode that uses them (same convention as RootXylemParams' default/arch/star).
 class VascularBundleParams(BaseParams):
     name             : str = "vascular_bundle"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_group_kwargs(cls, data):
+        """v2 nested authoring: accept grouped sub-model kwargs (``envelope=...``,
+        ``xylem_face=...``, ``sheath=...`` — see ``BUNDLE_GROUP_MODELS``) and flatten
+        them into the flat fields, so the storage/emission/consumer contract stays flat
+        (69 flat fields) while construction can be nested.  Pure flat construction (no
+        group key present) passes through untouched; an explicit flat kwarg wins over a
+        value coming from a group block."""
+        if not isinstance(data, dict):
+            return data
+        groups = {m["group"] for m in FIELD_META.get("VascularBundleParams", {}).values()}
+        if not groups.intersection(data):
+            return data                              # flat construction — no-op
+        data = dict(data)
+        # Three group names (sheath / placement / ring_shape) are ALSO flat field
+        # names, so only expand a group key whose value is a sub-model or dict — a
+        # scalar there is the flat field of the same name and must be left alone.
+        for g in [k for k in data if k in groups]:
+            block = data[g]
+            if isinstance(block, BaseModel):
+                block = block.model_dump()
+            elif not isinstance(block, dict):
+                continue                             # scalar -> it's the flat field
+            data.pop(g)
+            for k, v in block.items():
+                if k != "name":
+                    data.setdefault(k, v)            # explicit flat kwarg wins
+        return data
+
     # -- kind (dicot eustele pattern) ---------------------------------------
     kind             : str = Field(default="", title="Bundle Kind", description="Dicot eustele only. A label identifying this bundle spec (e.g. 'big', 'small') so a bundle_pattern can place several bundle geometries around one ring. '' (default) is the single-kind legacy behaviour — the ring is filled with n_bundles copies of this spec.")
     # -- stele arrangement (dicot stem only) --------------------------------
@@ -294,6 +325,8 @@ class BundlePatternParams(BaseParams):
     spacing       : Literal["distance", "angle", "grouped"] = Field(default="distance", title="Bundle Spacing", description="How the sequence is laid out around the ring. 'distance' (default) = the whole tiled sequence at equal arc-length spacing (bundles evenly spread). 'angle' = equal angular step from the centre (differs from 'distance' on an ellipse/star). 'grouped' = each repeat's sequence is packed as one tight cluster centred in its share of the ring, leaving empty valleys between clusters — use it (with a star ring + align_to_arms) for lobed stems where each lobe carries one group of bundles (e.g. hemp).")
     angle         : float     = Field(default=0.0, title="Pattern Angle", description="Angular offset (degrees) rotating the whole pattern around the ring — orients which direction the first kind (the sequence's first bundle) points, e.g. to line the 'big' bundles up with a chosen axis. Composes with align_to_arms.")
     align_to_arms : bool      = Field(default=True, title="Align First Kind to Star Arms", description="When the ring is a 'star' and repeats == the ring's n_peaks, phase the first bundle of each repeat onto a star arm (so the leading kind sits on the arms). Ignored for circle/ellipse rings or a mismatched arm count.")
+
+
 
 
 class VascularCylinderParams(BaseParams):
@@ -958,6 +991,228 @@ def default_dicot_leaf_params() -> List[BaseParams]:
 
 
 # ===========================================================================
+# Parameter metadata registry (sidecar — no change to the emitted params)
+# ===========================================================================
+# ``VascularBundleParams`` carries 69 flat fields, but only ~8 matter for any one
+# bundle; the rest are either mode-gated (active only for a given bundle_type /
+# xylem_layout / sheath / placement) or advanced tuning.  This registry records,
+# per field: which **group** it belongs to, its **tier** (primary vs advanced),
+# and the **mode gate** under which it is active — WITHOUT touching the Field
+# declarations, so ``to_dict_list()`` is byte-for-byte unchanged (the equivalence
+# golden stays green).  It drives a grouped/filtered ``describe`` view and a lint
+# that flags dead knobs (a mode-gated field set while its mode is off).
+#
+# active_when = (gate_field, {allowed values}) — the field is meaningful only when
+# ``params[gate_field] in allowed``; None = always active.
+
+def _build_bundle_field_meta() -> Dict[str, Dict[str, Any]]:
+    _BANDED = {"collateral", "bicollateral"}
+    # group -> (default active_when, [fields])
+    groups: Dict[str, Any] = {
+        "type":              (None, ["kind", "arrangement", "bundle_type", "concentric_type", "has_cambium"]),
+        "envelope":          (None, ["width", "height", "shape", "focus_exponent", "egg_waist", "phloem_outward"]),
+        "banded_layout":     (("bundle_type", _BANDED),
+                              ["xylem_fraction", "phloem_fraction", "cambium_fraction", "inner_phloem_fraction", "inner_cambium"]),
+        "concentric_layout": (("bundle_type", {"concentric"}), ["core_width", "core_height"]),
+        "xylem_face":        (("xylem_layout", {"face"}),
+                              ["xylem_layout", "n_xylem_files", "xylem_file_jitter", "n_metaxylem",
+                               "metaxylem_diameter", "metaxylem_diameter_sd", "metaxylem_diameter_min",
+                               "metaxylem_gap", "n_protoxylem", "protoxylem_diameter", "protoxylem_diameter_sd",
+                               "protoxylem_diameter_min", "protoxylem_width", "protoxylem_height",
+                               "protoxylem_relative_distance", "lacuna", "lacuna_width", "lacuna_height"]),
+        "sheath":            (None, ["sheath", "sheath_thickness", "n_caps_layers_outward", "n_caps_layers_inward",
+                               "sclerenchyma_cell_diameter", "sclerenchyma_cell_width", "outer_sheath", "outer_sheath_clearance"]),
+        "composition":       (None, ["prop_vessel", "prop_sieve", "phloem_width", "phloem_height", "phloem_relative_distance",
+                               "parenchyma_diameter", "parenchyma_width", "sieve_diameter_min",
+                               "companion_cell_diameter", "companion_cell_width"]),
+        "ring_shape":        (("ring_shape", {"star"}),
+                              ["ring_shape", "ring_ellipse_ratio", "n_peaks", "radius_peak_side",
+                               "radius_valley_side", "arc_peak_side", "arc_valley_side"]),
+        "placement":         (None, ["n_bundles", "radius_min", "radius_max", "radius", "placement", "n_candidates", "angle"]),
+    }
+    # Per-field gate overrides (finer than the group default).
+    gate: Dict[str, Any] = {
+        "concentric_type": ("bundle_type", {"concentric"}),
+        "has_cambium":     ("bundle_type", _BANDED),
+        "focus_exponent":  ("shape", {"focus_ellipse"}),
+        "egg_waist":       ("shape", {"egg"}),
+        "inner_phloem_fraction": ("bundle_type", {"bicollateral"}),
+        "inner_cambium":         ("bundle_type", {"bicollateral"}),
+        "xylem_layout":    None, "n_xylem_files": ("xylem_layout", {"files"}),
+        "xylem_file_jitter": ("xylem_layout", {"files"}),
+        "outer_sheath_clearance": ("outer_sheath", {True}),
+        "ring_shape":      None, "ring_ellipse_ratio": ("ring_shape", {"ellipse"}),
+        "radius":          ("placement", {"even"}), "angle": ("placement", {"even"}),
+        "radius_min":      ("placement", {"random", "spaced"}),
+        "radius_max":      ("placement", {"random", "spaced"}),
+        "n_candidates":    ("placement", {"spaced"}),
+    }
+    # Primary tier: the fields presets actually move + the single most fundamental
+    # type choice.  Everything else defaults to advanced (mode detail / tuning).
+    primary = {"bundle_type", "has_cambium", "arrangement", "width", "height",
+               "xylem_layout", "sheath", "prop_vessel", "n_bundles"}
+    meta: Dict[str, Dict[str, Any]] = {}
+    for group, (default_gate, fields) in groups.items():
+        for f in fields:
+            meta[f] = {
+                "group": group,
+                "tier": "primary" if f in primary else "advanced",
+                "active_when": gate[f] if f in gate else default_gate,
+            }
+    return meta
+
+
+# classname -> {field -> {group, tier, active_when}}
+FIELD_META: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "VascularBundleParams": _build_bundle_field_meta(),
+}
+
+
+def _build_bundle_group_models() -> Dict[str, type]:
+    """v2 nested sub-models, one per bundle field-group, **derived from the flat
+    ``VascularBundleParams`` fields** (same annotations + FieldInfo, so there is a
+    single source of truth and no default can drift).  These let you author a bundle
+    group-by-group — ``VascularBundleParams(envelope=BUNDLE_GROUP_MODELS['envelope'](width=0.5))``
+    — while the bundle stays flat internally (see ``_expand_group_kwargs``)."""
+    import copy as _copy
+    from collections import defaultdict
+    src = VascularBundleParams.model_fields
+    g2f: Dict[str, list] = defaultdict(list)
+    for field, m in FIELD_META["VascularBundleParams"].items():
+        g2f[m["group"]].append(field)
+    models: Dict[str, type] = {}
+    for group, fields in g2f.items():
+        fdefs = {f: (src[f].annotation, _copy.deepcopy(src[f])) for f in fields}
+        models[group] = create_model("Bundle_" + group, __base__=BaseParams, **fdefs)
+    return models
+
+
+# group name -> a sub-model carrying that group's fields (envelope, xylem_face, ...)
+BUNDLE_GROUP_MODELS: Dict[str, type] = _build_bundle_group_models()
+
+
+def _field_is_active(meta: Dict[str, Any], values: Dict[str, Any]) -> bool:
+    """Is a field meaningful given the current param values? (its mode gate holds)."""
+    aw = meta.get("active_when")
+    if not aw:
+        return True
+    gate_field, allowed = aw
+    return values.get(gate_field) in allowed
+
+def _preset_names() -> List[str]:
+    return [n for n in dir(OrganInputData)
+            if n.startswith("for_") and callable(getattr(OrganInputData, n))]
+
+
+_MOVED_CACHE: Optional[Dict[str, set]] = None
+
+
+def _preset_moved_fields() -> Dict[str, set]:
+    """classname -> {fields any preset sets to a non-default} (the primary set)."""
+    global _MOVED_CACHE
+    if _MOVED_CACHE is None:
+        moved: Dict[str, set] = {}
+        for pm in _preset_names():
+            try:
+                data = getattr(OrganInputData, pm)()
+            except Exception:
+                continue
+            for p in data.params:
+                if not isinstance(p, BaseModel):
+                    continue
+                cls = type(p)
+                name = cls.__name__
+                defaults = {k: f.default for k, f in cls.model_fields.items()}
+                seen = moved.setdefault(name, set())
+                for k, d in defaults.items():
+                    if getattr(p, k) != d:
+                        seen.add(k)
+        _MOVED_CACHE = moved
+    return _MOVED_CACHE
+
+
+# ---rendering (algorithm-tuning) knobs — quarantined from anatomy ------
+RENDERING_KNOBS: set = {
+    "packing_strategy", "first_vessel_shift", "n_candidates", "xylem_file_jitter",
+    "allow_ellipse", "ellipse_max_aspect", "enforce_gradient_min",
+    "gradient_function", "gradient_steepness", "gradient_asymmetry", "gradient_inflection",
+    "smoothness", "inter_cellular_space_proportion", "edge_radius",
+    "outer_sheath_clearance", "size_gradient_function", "size_gradient_inflection",
+    "size_gradient_steepness", "size_gradient_asymmetry", "first_vessel_shift",
+}
+
+
+# Core anatomical knobs — the sizing / count / identity decisions a user makes to
+# describe anatomy, always primary if a class carries them. 
+CORE_KNOBS: set = {
+    "value", "organ", "tissue", "thickness", "cavity_radius",
+    "cell_diameter", "cell_width", "cell_diameter_center", "n_layers",
+    "width", "height", "shape", "bundle_type", "has_cambium", "arrangement",
+    "sheath", "prop_vessel", "n_bundles", "n_files",
+    "vessel_diameter", "vessel_diameter_min", "sieve_diameter",
+    "n_vascular_peak", "n_vascular_bundles", "n_metaxylem", "n_protoxylem",
+    "xylem_layout", "aerenchyma_proportion", "n_medullar", "n_ring",
+}
+
+
+def _field_tier(cls: str, field: str) -> str:
+    """Tier of a field.  Rendering (algorithm) knobs are always advanced; the bundle's
+    curated registry wins next; otherwise a field is primary iff it is a core anatomical
+    knob or some preset moves it — else advanced."""
+    if field in RENDERING_KNOBS:
+        return "advanced"
+    reg = FIELD_META.get(cls)
+    if reg and field in reg:
+        return reg[field]["tier"]
+    if field in CORE_KNOBS or field in _preset_moved_fields().get(cls, set()):
+        return "primary"
+    return "advanced"
+
+
+def _field_kind(field: str) -> str:
+    """'rendering' for algorithm-tuning knobs, else 'anatomy'."""
+    return "rendering" if field in RENDERING_KNOBS else "anatomy"
+
+
+def describe_params(model, *, tier: Optional[str] = None, active_only: bool = False,
+                    hide_rendering: bool = False) -> str:
+    """A grouped, human-readable view of a param model's fields — the antidote to a
+    69-field flat wall.  ``tier='primary'`` shows only the primary knobs; ``active_only``
+    hides fields whose mode gate is off for the current values; ``hide_rendering`` drops
+    the algorithm-tuning knobs.  Works for any param model: the bundle uses its curated
+    groups/gates, every other class falls back to auto-tiering (preset-derived) with a
+    single group."""
+    from collections import defaultdict
+    cls = type(model).__name__ if isinstance(model, BaseModel) else str(model)
+    values = model.model_dump() if isinstance(model, BaseModel) else dict(model)
+    reg = FIELD_META.get(cls)
+    fields_all = [k for k in values if k != "name"]
+    by_group: Dict[str, list] = defaultdict(list)
+    group_order: List[str] = []
+    for field in fields_all:
+        m = reg.get(field) if reg else None
+        group = m["group"] if m else "params"
+        ftier = _field_tier(cls, field)
+        if tier and ftier != tier:
+            continue
+        if active_only and m and not _field_is_active(m, values):
+            continue
+        if hide_rendering and _field_kind(field) == "rendering":
+            continue
+        if group not in group_order:
+            group_order.append(group)
+        by_group[group].append(field)
+    lines = [f"{cls} (tier={tier or 'all'}, active_only={active_only}, hide_rendering={hide_rendering}):"]
+    for group in group_order:
+        lines.append(f"  [{group}]")
+        for field in by_group[group]:
+            star = "*" if _field_tier(cls, field) == "primary" else " "
+            kind = "~" if _field_kind(field) == "rendering" else " "
+            lines.append(f"   {star}{kind} {field} = {values.get(field)!r}")
+    return "\n".join(lines)
+
+
+# ===========================================================================
 # OrganInputData
 # ===========================================================================
 
@@ -987,6 +1242,49 @@ class OrganInputData(BaseModel):
             else:
                 result.append(p)
         return result
+
+    def describe(self, *, tier: Optional[str] = "primary", active_only: bool = True,
+                 hide_rendering: bool = False) -> str:
+        """A curated, per-block view of this organ's parameters.  Defaults show only the
+        **primary** knobs that are **active** for the current modes — the handful a user
+        actually decides — instead of the full flat surface.  Pass ``tier=None`` for all
+        tiers, ``hide_rendering=True`` to drop algorithm-tuning knobs."""
+        out = []
+        for p in self.params:
+            name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
+            body = describe_params(p, tier=tier, active_only=active_only, hide_rendering=hide_rendering)
+            # keep only blocks that still have at least one field after filtering
+            if body.count("\n") >= 1:
+                out.append(f"# {name}\n{body}")
+        return "\n\n".join(out)
+
+    def lint(self) -> List[str]:
+        """Flag **dead knobs**: a mode-gated field set to a non-default while its mode
+        is off (e.g. a ``metaxylem_gap`` tuned on a bundle whose ``xylem_layout`` is not
+        'face').  Such a value is silently ignored downstream, so it is almost always a
+        mistake.  Returns a list of human-readable warnings (empty = clean); uses the
+        ``FIELD_META`` registry, so only registered params (VascularBundleParams today)
+        are checked."""
+        warnings_out: List[str] = []
+        for p in self.params:
+            values = p.model_dump() if isinstance(p, BaseModel) else dict(p)
+            cls = type(p).__name__ if isinstance(p, BaseModel) else None
+            meta = FIELD_META.get(cls) if cls else None
+            if not meta:
+                continue
+            fields = type(p).model_fields
+            for field, m in meta.items():
+                if field not in fields:
+                    continue
+                default = fields[field].default
+                if values.get(field) != default and not _field_is_active(m, values):
+                    gate_field, allowed = m["active_when"]
+                    warnings_out.append(
+                        f"{values.get('name', cls)}.{field}={values.get(field)!r} is set but "
+                        f"inactive: it only applies when {gate_field} in {sorted(allowed)} "
+                        f"(here {gate_field}={values.get(gate_field)!r}) — the value is ignored."
+                    )
+        return warnings_out
 
     def get(self, name: str) -> Optional[Any]:
         """Retrieve a param entry by its `name` field, or None if absent.

@@ -433,6 +433,7 @@ class CellGenerator:
                 id_cell=r.id_cell,
                 id_layer=r.id_layer,
                 id_group=gid,
+                track_id=r.track_id,      # carry the tracked-vessel id through grouping
                 angle=r.angle,
                 radius=r.radius,
                 area=poly.area,

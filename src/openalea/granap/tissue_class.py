@@ -57,6 +57,7 @@ def place_packed_group(
     angle_center: Optional[Tuple[float, float]] = None,
     min_diameter: Optional[float] = None,
     alt_type: Optional[str] = None,
+    track_ids: Optional[list] = None,
 ) -> List[Tuple[Polygon, str, int]]:
     """Place border-point seeds for every circle of a circle-packing.
 
@@ -118,9 +119,11 @@ def place_packed_group(
             rtype = cell_type
 
         gid = id_base + i
+        tid = track_ids[i] if track_ids is not None and i < len(track_ids) else None
         for border_pt in border_coords[1:]:
             target.add_cell(Cell.radial(
                 rtype, border_pt[0], border_pt[1], actual_diam, gid, (acx, acy),
+                track_id=tid,
             ))
         placed_out.append((placed, rtype, gid))
 

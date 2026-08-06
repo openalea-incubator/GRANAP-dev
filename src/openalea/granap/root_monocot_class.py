@@ -130,6 +130,13 @@ class MonocotRootAnatomy(RootAnatomy):
         ``recipe.plan()``.
         """
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
+        # Developmental series: place the prescribed tracked vessels instead of
+        # packing (see ROOT_SERIES_PLAN / RootAnatomy.prescribe_vessels).
+        if getattr(self, "_prescribed_vessels", None):
+            recipe.special("prescribed xylem",
+                           lambda: self._place_prescribed_xylem(polygon),
+                           produces=("xylem",))
+            return recipe                       # Phase 1: xylem only (phloem later)
         shape = self.vascular_params.get("xylem_shape", "default")
         if shape != "star" and self.vascular_params.get("n_vascular_bundles", 0) == 0:
             return recipe                       # no vascular bundles -> empty
@@ -261,6 +268,29 @@ class MonocotRootAnatomy(RootAnatomy):
     # ------------------------------------------------------------------
     # Default ring-bundle methods
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def metaxylem_positions(stele_polygon: Polygon, n: int, vessel_diameter: float):
+        """The class's canonical metaxylem *centres* for ``n`` vessels — the same
+        geometry as :meth:`fit_metaxylem_elements` (pizza-slice the stele into ``n``
+        wedges, inscribe one vessel per wedge), minus the rng size jitter and cell
+        seeding.  Pure geometry, so a caller (e.g. the developmental series) can ask
+        "where would the class put ``n`` metaxylem?" without running the pipeline.
+        Returns a list of ``(x, y)`` centres."""
+        if n <= 0 or stele_polygon.is_empty:
+            return []
+        if n == 1:
+            slices = [stele_polygon]
+        else:
+            slices = GeometryProcessor.pizza_slice(
+                stele_polygon.buffer(-vessel_diameter / 4.0), n)
+        out = []
+        for s in slices:
+            if s.is_empty:
+                continue
+            c = GeometryProcessor.fit_inner_ellipse(s, vessel_diameter / 2.0)["polygon"].centroid
+            out.append((float(c.x), float(c.y)))
+        return out
 
     def fit_metaxylem_elements(self, polygon):
         n_xylem_cells = self.vascular_params["n_vascular_bundles"]

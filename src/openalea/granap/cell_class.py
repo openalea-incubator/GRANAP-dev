@@ -6,7 +6,8 @@ class Cell:
 
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
-                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None):
+                angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None,
+                track_id=None):
 
         self.x = x
         self.y = y
@@ -17,6 +18,10 @@ class Cell:
         self.id_cell = id_cell
         self.id_layer = id_layer
         self.id_group = id_group
+        # Persistent developmental-series id (see ROOT_SERIES_PLAN): a tracked xylem
+        # vessel keeps the same track_id across the apex->collet series; None for
+        # everything untracked.  Must survive Voronoi grouping and reach the gdf.
+        self.track_id = track_id
         self.angle = angle if angle != None else np.arctan2(y, x)
         self.radius = radius if radius != None else np.sqrt(x**2 + y**2)
         self.area = area if area != None else np.pi * (diameter/2)**2
@@ -25,7 +30,8 @@ class Cell:
 
     @classmethod
     def radial(cls, type: str, x: float, y: float, diameter: float,
-               id_group: int, center, *, id_cell: int = None, id_layer: int = -1) -> "Cell":
+               id_group: int, center, *, id_cell: int = None, id_layer: int = -1,
+               track_id=None) -> "Cell":
         """Build a seed cell whose ``angle``/``radius`` are measured from ``center``.
 
         This is the ubiquitous seeding idiom — a cell placed at ``(x, y)`` with its
@@ -33,13 +39,13 @@ class Cell:
         ``Point`` or an ``(cx, cy)`` tuple).  ``area`` defaults to a disc of
         ``diameter`` (as everywhere it is used); ``id_cell`` defaults to
         ``id_group`` (one seed per Voronoi group) unless an explicit running id is
-        given.
+        given.  ``track_id`` tags a persistent tracked vessel (default None).
         """
         cx, cy = (center.x, center.y) if hasattr(center, "x") else center
         return cls(
             type=type, x=x, y=y, diameter=diameter,
             id_cell=id_group if id_cell is None else id_cell,
-            id_layer=id_layer, id_group=id_group,
+            id_layer=id_layer, id_group=id_group, track_id=track_id,
             angle=np.arctan2(y - cy, x - cx),
             radius=np.sqrt((x - cx) ** 2 + (y - cy) ** 2),
         )
@@ -69,6 +75,7 @@ class Cell:
                 "id_cell": self.id_cell,
                 "id_layer": self.id_layer,
                 "id_group": self.id_group,
+                "track_id": self.track_id,
                 "angle": self.angle,
                 "radius": self.radius,
                 "area": self.area,

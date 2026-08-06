@@ -349,6 +349,34 @@ class RootAnatomy(Organ):
             if rtype == "xylem":
                 self.vascular_polygons.append(placed_poly)
 
+    # --- Developmental series: prescribed (tracked) xylem vessels -----------
+    # See ROOT_SERIES_PLAN.  When ``self._prescribed_vessels`` is set (a list of
+    # (x, y, r, track_id)), the vascular recipe places exactly these xylem vessels
+    # at the given positions/radii carrying their persistent track_id, instead of
+    # packing random ones — so a vessel keeps its identity across the apex->collet
+    # series.  The surrounding tissue still generates around them (the "refit").
+    def prescribe_vessels(self, vessels) -> "RootAnatomy":
+        """Prescribe the exact xylem vessel set for this section: an iterable of
+        ``(x, y, radius, track_id)``.  Returns self."""
+        self._prescribed_vessels = [tuple(v) for v in vessels]
+        return self
+
+    def _place_prescribed_xylem(self, stele_polygon: Polygon) -> None:
+        """Place the prescribed xylem vessels as tracked cells + feed the vascular
+        mask, so downstream tissue clears around them."""
+        vessels = getattr(self, "_prescribed_vessels", None)
+        if not vessels:
+            return
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        circles = [(float(x), float(y), float(r)) for (x, y, r, _tid) in vessels]
+        track_ids = [tid for (_x, _y, _r, tid) in vessels]
+        placed = place_packed_group(
+            self.vascular_cells, circles, "xylem",
+            id_base=0, angle_center=(cx, cy), track_ids=track_ids,
+        )
+        for placed_poly, _rtype, _gid in placed:
+            self.vascular_polygons.append(placed_poly)
+
     @staticmethod
     def _largest_polygon(geom):
         """Largest Polygon piece of a (possibly Multi)Polygon, or None."""
