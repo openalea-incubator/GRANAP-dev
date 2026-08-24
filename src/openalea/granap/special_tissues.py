@@ -208,6 +208,7 @@ def place_stomata(
                     diameter=np.sqrt(poly.area / np.pi) * 2,
                     id_cell=i_cell, id_group=id_stomata,
                     type=cell_type,
+                    protect_topology=(cell_type == "air space"),
                 ))
 
         poly   = pore.buffer(-sp["width"] / 4)

@@ -3,7 +3,7 @@ import io
 import math
 import numpy as np
 import shapely as sp
-from typing import Dict, Any, Union, List
+from typing import Dict, Any, Union, List, Optional
 from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.affinity import scale
 import matplotlib.pyplot as plt
@@ -635,7 +635,7 @@ class NetworkExporter:
     def __init__(self, organ: Organ):
         self.organ = organ
 
-    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS) -> None:
+    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS, air_link_radius: Optional[float] = None) -> None:
         """
         Populate the provided network graph from the cell GeoDataFrame.
 
@@ -1112,3 +1112,48 @@ class NetworkExporter:
 
                     if valid_connection:
                         break
+
+        # ------------------------------------------------------------------
+        # Step 4 — bridge air_link within a given radius
+        #
+        # Two protected air spaces (e.g. the sub-stomatal chamber and a
+        # mesophyll rhombus) are not always adjacent and so never match the
+        # junction motif above. Link every pair of protected air spaces whose
+        # polygons lie within ``air_link_radius`` of each other (true
+        # boundary-to-boundary gap, not centroid distance — elongated rhombi
+        # can have a centroid well outside the radius while their nearest tip
+        # is right next to the other air space). Defaults to 3x the median
+        # wall length so the radius scales with the organ's own cell size.
+        # ------------------------------------------------------------------
+
+        radius = air_link_radius
+        if radius is None:
+            wall_lengths = [wd["length"] for wd in wall_registry.values() if wd["length"] > 0]
+            radius = float(np.median(wall_lengths)) if wall_lengths else 0.0
+
+        protected_air_rows = list(protected_air_cells)
+        for i in range(len(protected_air_rows)):
+            row_a = protected_air_rows[i]
+            air_a = cell_row_to_node[row_a]
+            geom_a = cells_gdf.loc[row_a, "geometry"]
+            for j in range(i + 1, len(protected_air_rows)):
+                row_b = protected_air_rows[j]
+                air_b = cell_row_to_node[row_b]
+                if network.graph.has_edge(air_a, air_b):
+                    continue
+                geom_b = cells_gdf.loc[row_b, "geometry"]
+                if geom_a.distance(geom_b) > radius:
+                    continue
+
+                pos_a = network.graph.nodes[air_a]["position"]
+                pos_b = network.graph.nodes[air_b]["position"]
+                dist = np.hypot(pos_b[0] - pos_a[0], pos_b[1] - pos_a[1])
+                d_vec = np.array([pos_b[0] - pos_a[0], pos_b[1] - pos_a[1]])
+                network.graph.add_edge(
+                    air_a, air_b,
+                    path="air_link",
+                    length=dist,
+                    dist=dist,
+                    d_vec=d_vec,
+                )
+

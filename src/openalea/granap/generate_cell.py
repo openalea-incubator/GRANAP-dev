@@ -437,6 +437,7 @@ class CellGenerator:
                 radius=r.radius,
                 area=poly.area,
                 polygon=poly,
+                protect_topology=getattr(r, "protect_topology", False),
             ))
 
         return final_cells
