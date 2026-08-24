@@ -117,6 +117,16 @@ def _fmt_members(members) -> str:
     return "+".join(str(m) for m in sorted(members))
 
 
+def _read_field(base: OrganInputData, name: str, field: str, default: float) -> float:
+    """Read one numeric field off a config param entry (model or raw dict), or ``default``."""
+    try:
+        entry = base._require(name)
+    except Exception:
+        return float(default)
+    val = getattr(entry, field, None) if not isinstance(entry, dict) else entry.get(field)
+    return float(val) if val is not None else float(default)
+
+
 def _fill_poly(ax, poly, color) -> None:
     """Fill a (possibly Multi)Polygon with a solid colour, on top of the tissue."""
     for p in (poly.geoms if poly.geom_type == "MultiPolygon" else [poly]):
@@ -376,7 +386,191 @@ class RootSeries:
         for length in self.lengths:
             vset = migrated[length]
             prescribe = [(x, y, r, tid) for (x, y, r, tid, _m) in vset]
-            root = RootAnatomy(self._config_at(length), seed=self.seed).prescribe_vessels(prescribe)
+            cfg = self._config_at(length)
+            # Scale the (untracked, regenerated) protoxylem + phloem to the metaxylem
+            # count at this section; their density/size stays tunable via param_schedules
+            # (e.g. "xylem.ratio_proto_meta", "phloem.sieve_diameter").
+            cfg.set_value("xylem", "n_vascular_bundles", len(prescribe))
+            root = RootAnatomy(cfg, seed=self.seed).prescribe_vessels(prescribe)
+            gdf = root.generate_cells()
+            sections.append({"length": length, "root": root, "gdf": gdf, "vessels": vset})
+            for (x, y, r, tid, members) in vset:
+                track_rows.append({"track_id": tid, "length": length,
+                                   "x": x, "y": y, "radius": r, "members": members})
+        return RootSeriesResult(sections, track_rows)
+
+
+class DicotRootSeries:
+    """Longitudinal series of **dicot**-root sections with identity-tracked primary xylem.
+
+    Unlike the monocot series, dicot primary xylem vessels do **not** fuse or migrate:
+    each protoxylem / metaxylem keeps its place.  What changes along the root is the
+    **pith** — a central front that *recedes* (from the apex toward the collet).  Three
+    things together define the space a xylem vessel may occupy (per the model): the
+    **star shape**, the **5PL diameter function** and the **pith**.  The first two are
+    baked in once by extracting a reference section (the smallest-pith end, where the star
+    is fully packed by the class): every vessel's fixed radial position and its 5PL target
+    size come from there.  The pith is then the only per-section front:
+
+    * a vessel is **present** once the pith has receded past it (there is room outside the
+      pith at its position) — so the outer protoxylem appear first and the inner metaxylem
+      only near the collet;
+    * its size is ``min(5PL target, room the pith leaves)`` — small when it has just
+      cleared the pith, growing to its full 5PL target as the pith recedes further.
+
+    Positions are stored as a fraction of the stele radius, so if ``stele_radius`` grows
+    along the series the vessels ride out with it ("move a little, not much"); keep
+    ``stele_radius`` flat for pure primary growth at a fixed stele.
+
+    Sample positions (choose one): ``lengths=[...]`` or ``start=, end=, samples=``.
+
+    Schedules (each a ``(value_at_start, value_at_end)`` linear-ramp tuple **or** a
+    ``length -> value`` callable):
+        stele_radius: stele radius (mm) at a length.
+        pith_radius: pith radius (mm) at a length — the receding central front (typically
+            large at the apex, small/zero at the collet).
+        param_schedules: ``{"name.field": schedule}`` to evolve any other config field
+            (e.g. ``"xylem.vessel_diameter"`` to grow the 5PL target itself).
+
+    Other:
+        present_min_radius: a vessel counts as present once the pith leaves it at least this
+            much radius (mm); default = the base xylem ``vessel_diameter_min`` / 2.
+        seed: shared RNG seed (stable tissue refit across sections).
+    """
+
+    def __init__(self, base: OrganInputData, lengths=None, *,
+                 start: Optional[float] = None, end: Optional[float] = None,
+                 samples: Optional[int] = None,
+                 stele_radius: Schedule,
+                 pith_radius: Schedule,
+                 present_min_radius: Optional[float] = None,
+                 param_schedules: Optional[Dict[str, Schedule]] = None,
+                 seed: int = 0):
+        self.base = base
+        if lengths is not None:
+            self.lengths = [float(x) for x in lengths]
+        elif None not in (start, end, samples):
+            self.lengths = list(np.linspace(float(start), float(end), int(samples)))
+        else:
+            raise ValueError("give lengths=[...] or start=, end= and samples=")
+        self._span = (self.lengths[0], self.lengths[-1])
+        self.stele_radius = self._as_schedule(stele_radius)
+        self.pith_radius = self._as_schedule(pith_radius)
+        self.param_schedules = {k: self._as_schedule(v) for k, v in (param_schedules or {}).items()}
+        if present_min_radius is not None:
+            self.present_min_radius = float(present_min_radius)
+        else:
+            self.present_min_radius = 0.5 * _read_field(base, "xylem", "vessel_diameter_min", 0.01)
+        self.seed = seed
+        self._primordials = None                       # filled lazily by _extract()
+
+    # -- schedules ----------------------------------------------------------
+    def _as_schedule(self, spec: Schedule) -> Callable[[float], float]:
+        if callable(spec):
+            return spec
+        a, b = spec
+        start, end = self._span
+        if end == start:
+            return lambda L, a=a: float(a)
+        return lambda L, a=a, b=b, s=start, e=end: a + (b - a) * (L - s) / (e - s)
+
+    def _pith_at(self, length: float) -> float:
+        """Pith radius at ``length``, snapped to exactly 0 below a tiny epsilon — a
+        sub-epsilon pith (e.g. 1e-17 from a ramp) perturbs the packing, making the
+        extracted primordial set non-reproducible."""
+        pith = float(self.pith_radius(length))
+        return 0.0 if pith < 1e-9 else pith
+
+    def _config_at(self, length: float) -> OrganInputData:
+        cfg = copy.deepcopy(self.base)
+        cfg.set_value("stele", "thickness", 2.0 * float(self.stele_radius(length)))
+        cfg.set_value("xylem", "pith_radius", self._pith_at(length))
+        for key, fn in self.param_schedules.items():
+            name, field = key.split(".", 1)
+            cfg.set_value(name, field, fn(length))
+        return cfg
+
+    # -- primordial extraction (star + 5PL baked in) ------------------------
+    def _ref_length(self) -> float:
+        """The sample where the pith is smallest — the star is fully packed there, so it is
+        the reference for every vessel's position + 5PL target size."""
+        return min(self.lengths, key=self._pith_at)
+
+    def _extract(self):
+        """Generate the reference (smallest-pith) section with the normal dicot packer and
+        read back each primary-xylem vessel as a primordial: its position as a *fraction* of
+        the stele radius, its 5PL target radius, and a track_id.  The star shape and the 5PL
+        gradient are captured here once; only the pith varies per section afterwards."""
+        if self._primordials is not None:
+            return self._primordials
+        Lref = self._ref_length()
+        Rref = float(self.stele_radius(Lref))
+        cfg = self._config_at(Lref)
+        root = RootAnatomy(cfg, seed=self.seed)
+        gdf = root.generate_cells()
+        vessels = self._vessel_circles(root, gdf)          # [(x, y, r)]
+        vessels.sort(key=lambda v: np.hypot(v[0], v[1]))   # id 0 = innermost, rising outward
+        prim = []
+        for tid, (x, y, r) in enumerate(vessels):
+            d = np.hypot(x, y)
+            prim.append({"tid": tid, "fx": x / Rref, "fy": y / Rref,
+                         "fd": d / Rref, "target": r})
+        self._primordials = prim
+        return prim
+
+    @staticmethod
+    def _vessel_circles(root, gdf):
+        """The packed primary-xylem vessels of a reference section as ``(x, y, radius)``.
+
+        Prefers ``root.vascular_polygons`` (the placed vessel circles recorded by
+        ``_record_xylem_vessels``); falls back to the ``xylem`` cells of the gdf."""
+        polys = getattr(root, "vascular_polygons", None)
+        if polys:
+            out = []
+            for p in polys:
+                if p.is_empty:
+                    continue
+                c = p.centroid
+                out.append((c.x, c.y, float(np.sqrt(max(p.area, 1e-12) / np.pi))))
+            if out:
+                return out
+        sub = gdf[gdf["type"].isin(["xylem", "metaxylem"])]
+        return [(g.centroid.x, g.centroid.y, float(np.sqrt(max(g.area, 1e-12) / np.pi)))
+                for g in sub.geometry]
+
+    # -- per-length presence + pith-capped size -----------------------------
+    def _active_vessels(self, length: float):
+        """The vessels present at ``length`` with their pith-capped positions + sizes.
+
+        A vessel at fractional radius ``fd`` sits at ``fd * stele_radius(L)``; the pith front
+        is ``pith_radius(L)``.  ``room = distance - pith`` is how much radius the pith leaves
+        it — present once ``room >= present_min_radius``, sized ``min(5PL target, room)``.
+        Returns ``[(x, y, r, tid, members)]`` (members = the singleton ``(tid,)``)."""
+        R = float(self.stele_radius(length))
+        pith = self._pith_at(length)
+        out = []
+        no_pith = pith < self.present_min_radius   # pith gone -> no constraint, full target
+        for p in self._extract():
+            d = p["fd"] * R
+            if no_pith:
+                r = p["target"]
+            else:
+                room = d - pith
+                if room < self.present_min_radius:
+                    continue                       # still inside the pith
+                r = min(p["target"], room)
+            out.append((p["fx"] * R, p["fy"] * R, r, p["tid"], (p["tid"],)))
+        return out
+
+    # -- run ----------------------------------------------------------------
+    def generate(self) -> RootSeriesResult:
+        self._extract()
+        sections, track_rows = [], []
+        for length in self.lengths:
+            vset = self._active_vessels(length)
+            prescribe = [(x, y, r, tid) for (x, y, r, tid, _m) in vset]
+            cfg = self._config_at(length)
+            root = RootAnatomy(cfg, seed=self.seed).prescribe_vessels(prescribe)
             gdf = root.generate_cells()
             sections.append({"length": length, "root": root, "gdf": gdf, "vessels": vset})
             for (x, y, r, tid, members) in vset:

@@ -103,12 +103,12 @@ GOLDEN = {
         "resin duct": 28, "transfusion": 103, "xylem": 270,
     }),
     "dicot_stem": (dicot_stem, {
-        "air space": 130, "cambium": 28, "cortex": 132, "epidermis": 158,
-        "phloem": 87, "pith": 309, "xylem": 15,
+        "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,
+        "epidermis": 220, "parenchyma": 3962, "sieve element": 71, "xylem": 75,
     }),
     "monocot_stem": (monocot_stem, {
-        "air space": 52, "cortex": 84, "epidermis": 148, "metaxylem": 28,
-        "phloem": 15, "pith": 218, "protoxylem": 42, "sclerenchyma": 1019,
+        "air space": 543, "companion cell": 159, "cortex": 470, "epidermis": 261,
+        "parenchyma": 3853, "sclerenchyma": 2137, "sieve element": 159, "xylem": 39,
     }),
 }
 

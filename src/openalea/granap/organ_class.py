@@ -48,6 +48,14 @@ class Organ(AbstractNetwork, ABC):
     #: the raw tessellation with its small uncovered slivers.
     AUTO_FUSE_GAPS: bool = True
 
+    #: Whether :meth:`fuse_gaps` only absorbs gaps *enclosed by cells* and leaves the
+    #: uncovered ribbon along the organ surface alone.  That ribbon — between the
+    #: outermost Voronoi edges and the outline — runs unbroken past many cells and
+    #: survives the sliver opening wherever the surface curves sharply (leaf tips,
+    #: blunt margins), so fusing it stretches one surface cell right across its
+    #: neighbours.  Set False to fuse every gap, surface ones included.
+    FUSE_ENCLOSED_GAPS_ONLY: bool = True
+
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
@@ -348,8 +356,20 @@ class Organ(AbstractNetwork, ABC):
         voids.extend(v for v in vtp.get("medullary cavity", []) if v is not None and not v.is_empty)
         return voids
 
+    @staticmethod
+    def _filled_cell_mass(polys: List[Polygon]):
+        """The union of ``polys`` with its internal pockets filled in.
+
+        Anything inside this outline but not covered by a cell is a hole the tissue
+        encloses; anything outside it is the ribbon along the organ surface.
+        """
+        covered = unary_union(polys)
+        parts = covered.geoms if hasattr(covered, "geoms") else [covered]
+        return unary_union([Polygon(p.exterior) for p in parts
+                            if p.geom_type == "Polygon"])
+
     def find_gaps(self, sliver_width: float = None, min_area: float = None,
-                  exclude_voids: bool = True) -> List[Polygon]:
+                  exclude_voids: bool = True, enclosed_only: bool = False) -> List[Polygon]:
         """Detect empty space inside the organ that no cell was assigned to.
 
         A gap is the organ outline minus the union of every cell polygon (minus the
@@ -364,8 +384,11 @@ class Organ(AbstractNetwork, ABC):
         dilate by ``sliver_width / 2``, so anything thinner than ``sliver_width``
         disappears while cell-sized gaps survive.  ``sliver_width`` defaults to 15 %
         of the median cell diameter; ``min_area`` (optional) drops pieces below an
-        area.  Returns the gap polygons, largest first — feed them to a plot or read
-        their ``.area`` / ``.centroid`` to locate each hole.
+        area.  ``enclosed_only`` keeps just the holes the tissue closes around,
+        dropping the ribbon that runs along the organ surface (see
+        :attr:`FUSE_ENCLOSED_GAPS_ONLY`); the default reports every gap, so this stays
+        a full diagnostic.  Returns the gap polygons, largest first — feed them to a
+        plot or read their ``.area`` / ``.centroid`` to locate each hole.
 
         Call after :meth:`generate_cells` (it reads the materialised cells).
         """
@@ -390,6 +413,12 @@ class Organ(AbstractNetwork, ABC):
 
         pieces = [g for g in (gaps.geoms if hasattr(gaps, "geoms") else [gaps])
                   if g.geom_type == "Polygon" and not g.is_empty]
+        if enclosed_only:
+            # representative_point() is guaranteed inside the piece, unlike a centroid
+            # on a crescent, so a surface gap curving around a tip is not mistaken for
+            # an enclosed one.
+            mass = self._filled_cell_mass(polys)
+            pieces = [g for g in pieces if g.representative_point().within(mass)]
         if min_area is not None:
             pieces = [g for g in pieces if g.area >= min_area]
         pieces.sort(key=lambda g: g.area, reverse=True)
@@ -405,6 +434,10 @@ class Organ(AbstractNetwork, ABC):
         shared border — the nearest cell of the same tissue — so no empty space is
         left and the cell simply grows to fill it.
 
+        Only gaps the tissue closes around are absorbed, unless
+        :attr:`FUSE_ENCLOSED_GAPS_ONLY` is cleared; the ribbon along the organ surface
+        is left empty rather than smeared into one surface cell.
+
         The full (un-opened) uncovered area around each gap is recovered first, so the
         fusion reaches the real hole edge rather than the eroded outline
         :meth:`find_gaps` reports.  Returns the number of gaps fused and refreshes the
@@ -414,7 +447,9 @@ class Organ(AbstractNetwork, ABC):
                  if c.polygon is not None and not c.polygon.is_empty]
         if not cells:
             return 0
-        gaps = self.find_gaps(sliver_width=sliver_width, min_area=min_area)
+        enclosed_only = self.FUSE_ENCLOSED_GAPS_ONLY
+        gaps = self.find_gaps(sliver_width=sliver_width, min_area=min_area,
+                              enclosed_only=enclosed_only)
         if not gaps:
             return 0
 
@@ -428,6 +463,12 @@ class Organ(AbstractNetwork, ABC):
         raw = self.generate_base_shape().difference(covered)
         for v in self._empty_void_polygons():
             raw = raw.difference(v)
+        if enclosed_only:
+            # Clip the recoverable area too. Without this the ``recover`` dilation
+            # below reconnects an enclosed hole near the surface to the ribbon, and
+            # the cell fused with it smears along the ribbon anyway — defeating the
+            # filter find_gaps just applied.
+            raw = raw.intersection(self._filled_cell_mass([c.polygon for c in cells]))
 
         tree = STRtree([c.polygon for c in cells])
         fused = 0

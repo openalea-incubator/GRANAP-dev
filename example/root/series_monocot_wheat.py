@@ -7,8 +7,9 @@ for the lower ~60 mm, then rising toward the collet as it splits into the polyar
 Identity is a fusion group: each xylem id keeps its colour, so you can follow a vessel
 (and see which others it fuses with) up the root.
 
-Built with ``RootSeries`` (collet-anchored fusion model; see ROOT_SERIES_PLAN).  Phase 2:
-xylem only — no phloem yet.  Termination (a vessel that just stops) is the next addition.
+Built with ``RootSeries`` (see ROOT_SERIES_PLAN).  The tracked metaxylem fuse / terminate
+along the root; the protoxylem + phloem are regenerated (untracked) in each section,
+their count scaled to the metaxylem count.
 """
 
 import os
@@ -28,9 +29,9 @@ N_COLS = 4                                    # grid layout: 4 per row -> 3 rows
 
 
 def build_wheat_base() -> OrganInputData:
-    """A wheat 'Salmone' monocot-root template (the tissue that refits around the
-    tracked vessels).  The xylem/phloem tuning is left in for fidelity but is not used
-    under vessel prescription — the series drives the xylem directly."""
+    """A wheat 'Salmone' monocot-root template (the tissue that refits around the tracked
+    vessels).  The series drives the metaxylem directly (prescribed), but the phloem /
+    protoxylem tuning here still applies — those are regenerated per section around them."""
     w = OrganInputData.for_root()                     # monocot preset (planttype=1)
 
     # Stele parenchyma (its thickness is overridden per level by the series).

@@ -925,7 +925,10 @@ class GeometryProcessor:
                 new_cx    = cx + magnitude * np.cos(angle)
                 new_cy    = cy + magnitude * np.sin(angle)
                 if polygon.contains(Point(new_cx, new_cy)):
-                    new_r_ins = polygon.exterior.distance(Point(new_cx, new_cy))
+                    # .exterior for a Polygon (unchanged); .boundary for a
+                    # MultiPolygon zone (which has no .exterior).
+                    edge = polygon.exterior if polygon.geom_type == "Polygon" else polygon.boundary
+                    new_r_ins = edge.distance(Point(new_cx, new_cy))
                     if new_r_ins >= diameter_min / 2:
                         cx, cy, r_ins = new_cx, new_cy, new_r_ins
 

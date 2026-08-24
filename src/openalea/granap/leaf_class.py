@@ -33,8 +33,10 @@ from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.cell_class import Cell
 from openalea.granap.generate_cell import CellGenerator
-from openalea.granap.tissue_class import TissueRecipe, fill_by_rings
-from openalea.granap.vascular_bundle import build_bundle, _place_region_cell, _largest
+from openalea.granap.tissue_class import TissueRecipe, fill_by_rings, fill_along
+from openalea.granap.vascular_bundle import (
+    build_bundle, build_arc_bundle, _place_region_cell, _largest,
+)
 from openalea.granap.special_tissues import place_stomata
 
 
@@ -60,6 +62,13 @@ class LeafAnatomy(Organ):
 
     # Keep each peeled band's thickness exact (no ring smoothing), like the stem.
     LAYER_SMOOTH_FACTOR: float = 0.0
+
+    # The lamina outline is built from a piecewise-linear thickness profile + cosine
+    # ribs, which leave corners/kinks that force the boundary layer into stretched
+    # cells.  Gaussian-smooth the two surface profiles over this many epidermis cells
+    # before the outline is used to seed/limit cells.  A ``outline_smooth`` planttype
+    # param overrides it with an absolute mm length; 0 disables (sharp corners kept).
+    OUTLINE_SMOOTH_CELLS: float = 3.0
 
     def __new__(cls, input_data: Any = None, seed: Optional[int] = None):
         if cls is LeafAnatomy:
@@ -187,6 +196,28 @@ class LeafAnatomy(Organ):
     def _mid_at(self, x: float) -> float:
         return float(self._mid_line(np.array([x]))[0])
 
+    def _mid_slope(self, x: float) -> float:
+        """dy/dx of the lamina mid-line at ``x`` (central finite difference).
+
+        Zero on a flat leaf; non-zero wherever the twist or the fold tilts the slab,
+        which is exactly where a vein has to lean to stay square to the leaf plane."""
+        h = max(float(self.global_params.get("width", 4.0)) * 1e-3, 1e-4)
+        y = self._mid_line(np.array([x - h, x + h]))
+        return float((y[1] - y[0]) / (2.0 * h))
+
+    def _normal_theta(self, x: float) -> float:
+        """World angle of a vein's abaxial (outward, lower-surface) pole at ``x``.
+
+        A bundle's local +y points to the abaxial surface; :meth:`build_bundle` then
+        orients the whole vein — xylem->phloem axis, ribs and all — about it.  On a
+        flat leaf that pole is straight down (``-pi/2``).  On a folded or twisted leaf
+        the slab tilts, so the pole follows the **outward normal of the mid-line**:
+        perpendicular to the local tangent ``(1, dy/dx)`` and pointing to the abaxial
+        side.  This swings each vein to stay perpendicular to the local leaf plane
+        instead of every vein pointing top-to-bottom regardless of the fold."""
+        m = self._mid_slope(x)
+        return float(np.arctan2(-1.0, m))
+
     def _half_profile(self, xg):
         """Half the lamina thickness at each ``xg``.
 
@@ -231,8 +262,12 @@ class LeafAnatomy(Organ):
         mid = self._mid_line(xg)                       # twist: curved mid-line
 
         def cos_bump(x0, height, full_width):
-            """Raised-cosine bump at ``x0``: ``height`` at the vein, 0 beyond ±width/2."""
-            if height <= 0.0 or full_width <= 0.0:
+            """Raised-cosine bump at ``x0``: ``height`` at the vein, 0 beyond ±width/2.
+
+            A **negative** height dips the surface *inward* instead of out — an
+            adaxial groove / sunken channel over a major vein (paired with a positive
+            abaxial rib it makes the classic keeled, top-grooved midrib)."""
+            if height == 0.0 or full_width <= 0.0:
                 return np.zeros_like(xg)
             t = (xg - x0) / (full_width / 2.0)
             return np.where(np.abs(t) < 1.0, height * 0.5 * (1.0 + np.cos(np.pi * t)), 0.0)
@@ -250,12 +285,45 @@ class LeafAnatomy(Organ):
         # A folded leaf sags via the mid-line (see ``_mid_line``), so ``mid`` is
         # already non-zero and the ellipse shortcut below is skipped for it.
         if not any_rib and not bool(np.any(mid)) \
-                and not self.global_params.get("thickness_profile"):
+                and not self.global_params.get("thickness_profile") \
+                and self._outline_smooth_len() <= 0.0:
             # angle_deg=90 maps width->x, thickness->y (GeometryProcessor.oriented_ellipse).
             return self._round_edges(GeometryProcessor.oriented_ellipse(0.0, 0.0, width, thickness, 90.0))
+        # The upper/lower profiles are assembled from a piecewise-linear thickness
+        # profile plus cosine ribs, so they carry corners (at each profile control
+        # point) and sharp rib shoulders.  Those become high-curvature kinks in the
+        # outline, and since the outline is what limits cell growth (via the ring of
+        # "outside" seeds sampled along it), a kink forces the boundary layer to
+        # stretch one cell there.  Gaussian-smooth the two surfaces over ~a cell so the
+        # corners become gentle curves the epidermis can tile — without moving the
+        # broad shape.
+        top, bot = self._smooth_surfaces(top, bot, width)
         coords = np.vstack([np.column_stack([xg, top]),
                             np.column_stack([xg[::-1], bot[::-1]])])
         return self._round_edges(Polygon(coords).buffer(0))
+
+    def _outline_smooth_len(self) -> float:
+        """Along-surface smoothing length (mm) for the outline: the ``outline_smooth``
+        planttype param if given, else ``OUTLINE_SMOOTH_CELLS`` epidermis cells."""
+        v = self.global_params.get("outline_smooth")
+        if v is not None:
+            return float(v)
+        epi = self._get_param("epidermis") or {}
+        return self.OUTLINE_SMOOTH_CELLS * float(epi.get("cell_diameter", 0.02))
+
+    def _smooth_surfaces(self, top, bot, width: float):
+        """Gaussian-smooth the adaxial/abaxial surface profiles along x, rounding the
+        piecewise-linear corners and rib shoulders (see ``_create_base_shape``)."""
+        smooth_len = self._outline_smooth_len()
+        if smooth_len <= 0.0 or len(top) < 5:
+            return top, bot
+        from scipy.ndimage import gaussian_filter1d
+        dx = float(width) / (len(top) - 1)
+        sigma = smooth_len / dx if dx > 0 else 0.0
+        if sigma < 0.3:
+            return top, bot
+        return (gaussian_filter1d(top, sigma, mode="nearest"),
+                gaussian_filter1d(bot, sigma, mode="nearest"))
 
     def _round_edges(self, poly: Polygon) -> Polygon:
         """Round sharp convex features (the pointed margins/tips and a narrow rib
@@ -277,19 +345,35 @@ class LeafAnatomy(Organ):
         return layers_polygons
 
     def generate_layer_polygons(self) -> List[LayerPolygon]:
-        """Same as the base, but keep each layer a single Polygon.
+        """Same as the base, but split each multi-piece layer into one seedable
+        Polygon per piece.
 
-        Peeling the ribbed (scalloped) outline — or the mid-plane split — can pinch a
-        layer into a main piece plus tiny slivers; the cell seeder traces a single
-        exterior, so we keep the largest piece and let ``fuse_gaps`` absorb the
-        dropped slivers into their neighbours.
-        """
+        A peeled band routinely pinches into several pieces: the wide-thin lamina is
+        notched by the palisade band (so a spongy ring splits into a left arm and a
+        right arm) or scalloped by the ribs.  The cell seeder traces a *single*
+        exterior per layer, so a ``MultiPolygon`` layer has to be resolved into
+        single Polygons — but keeping only the largest piece **deletes a whole side**
+        of the leaf (e.g. the smaller spongy arm), which is what made the two halves
+        carry a different number of layers.  Instead, every piece down to about one
+        cell is emitted as its own layer (same tissue, same cell sizes), so both
+        arms are seeded; only true sub-cell slivers are dropped for ``fuse_gaps`` to
+        absorb into their neighbours."""
+        import dataclasses
         lps = super().generate_layer_polygons()
+        out: List[LayerPolygon] = []
         for lp in lps:
             g = lp.polygon
-            if g is not None and g.geom_type == "MultiPolygon":
-                lp.polygon = max(g.geoms, key=lambda p: p.area)
-        return lps
+            if g is None or g.geom_type != "MultiPolygon":
+                out.append(lp)
+                continue
+            # Drop only genuine slivers: pieces smaller than ~one of this layer's cells.
+            min_area = np.pi * (float(lp.cell_diameter) / 2.0) ** 2
+            pieces = sorted((p for p in g.geoms if not p.is_empty),
+                            key=lambda p: -p.area)
+            kept = [p for p in pieces if p.area >= min_area] or pieces[:1]
+            for piece in kept:
+                out.append(dataclasses.replace(lp, polygon=piece))
+        return out
 
     def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         """Region veins occupy — the innermost mesophyll band at the mid-plane."""
@@ -326,40 +410,89 @@ class LeafAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
-        """One step that lays the row of transverse veins (empty when none)."""
+        """Lay the transverse vein row, then (dicot) the columnar palisade files."""
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
-        if not self._bundle_specs():
-            return recipe
-        recipe.special(
-            "leaf veins", lambda: self._build_veins(),
-            produces=("xylem", "phloem", "sieve element", "companion cell",
-                      "cambium", "sclerenchyma", "bundle sheath", "parenchyma",
-                      "air space"))
+        if self._bundle_specs():
+            recipe.special(
+                "leaf veins", lambda: self._build_veins(),
+                produces=("xylem", "phloem", "sieve element", "companion cell",
+                          "cambium", "sclerenchyma", "bundle sheath", "parenchyma",
+                          "air space"))
+        # Palisade is seeded as horizontal files (see _build_palisade), after the veins
+        # so their envelopes can be carved out.  Only present when the subclass stashed
+        # file lines in _create_central_layers (the dicot).
+        if getattr(self, "_palisade_files", None):
+            recipe.special("leaf palisade", lambda: self._build_palisade(),
+                           produces=("palisade",))
         return recipe
 
-    def _build_veins(self) -> None:
-        """Place every vein transversely along the mid-plane (y=0), each built from
-        its own size-class spec.
+    def _build_palisade(self) -> None:
+        """Seed the columnar palisade as ``n_layers`` horizontal cell files hugging the
+        adaxial surface (the lines stashed by the dicot ``_create_central_layers``).
 
-        ``theta`` points to the abaxial (lower) surface, so with ``phloem_outward``
-        the phloem faces the lower surface and the xylem the adaxial (upper) one —
-        the idealized leaf view.
+        Each file is a row of tangentially-oriented cells (:func:`fill_along`): along a
+        horizontal line the tangent is horizontal, so the cells stand up columnar
+        (tall ``cell_diameter`` × narrow ``cell_width``).  Seeding independent rows —
+        rather than peeling concentric rings (which shrink inward, so deeper files come
+        out shorter) or adjacent slabs (whose shared edges collide into ballooning
+        Voronoi cells) — gives files that are all the same length and stay bounded.  The
+        vein envelopes are carved out so a file never runs through a bundle."""
+        data = getattr(self, "_palisade_files", None)
+        if not data:
+            return
+        lines, d, w = data
+        envs = self.vascular_tissue_polygons.get("bundle", [])
+        veinmask = unary_union(envs) if envs else None
+        for line in lines:
+            seg = line.difference(veinmask) if veinmask is not None else line
+            if seg.is_empty:
+                continue
+            fill_along(self.vascular_cells, seg, "palisade", d, w,
+                       line.centroid.x, line.centroid.y)
+
+    def _build_veins(self) -> None:
+        """Place every vein transversely along the mid-plane, each built from its own
+        size-class spec.
+
+        Each vein's ``theta`` points to the abaxial (lower) surface along the local
+        outward normal of the mid-line (see :meth:`_normal_theta`), so on a folded or
+        twisted leaf the vein leans with the slab instead of always pointing straight
+        down; with ``phloem_outward`` the phloem then faces the abaxial surface and the
+        xylem the adaxial one, square to the local leaf plane.
         """
         xylem, phloem, cambium = (self._get_param("xylem"),
                                   self._get_param("phloem"),
                                   self._get_param("cambium"))
-        theta = -np.pi / 2.0            # local +y (phloem pole) -> abaxial (down)
         outline = self.generate_base_shape()
+        ground = self._ground_cell_size_for_veins()
         placed = []                    # (x, y, spec, envelope) for the girders
         for x, spec in self._vein_layout():
             y = self._vein_y(float(x), spec)
-            res = build_bundle(self.vascular_cells, self.rng, float(x), y, theta,
-                               spec, xylem, phloem, cambium,
-                               ground_cell_size=None, sheath_outline=outline)
+            theta = self._normal_theta(float(x))   # abaxial pole = local mid-line normal
+            if float(spec.get("arc_degrees", 0.0)) > 0.0:
+                # A slice of a vascular cylinder (concentric xylem/cambium/phloem arcs).
+                res = build_arc_bundle(self.vascular_cells, self.rng, float(x), y, theta,
+                                       spec, xylem, phloem, cambium,
+                                       ground_cell_size=ground, sheath_outline=outline)
+            else:
+                res = build_bundle(self.vascular_cells, self.rng, float(x), y, theta,
+                                   spec, xylem, phloem, cambium,
+                                   ground_cell_size=ground, sheath_outline=outline)
             self._register_bundle(res)
             placed.append((float(x), y, spec, res.envelope))
         self._build_inter_bundle_aerenchyma()
         self._build_bundle_girders(placed, outline)
+
+    def _ground_cell_size_for_veins(self):
+        """Ground (mesophyll) cell diameter the veins sit among — turns on the outer
+        bundle sheath so a ring of intermediate-sized cells wraps each vein, instead
+        of the small bundle parenchyma stretching out into the coarse mesophyll as a
+        radial sunburst.  Uses the spongy size (the veins sit at the mid-plane in the
+        spongy layer); falls back to the uniform mesophyll of a monocot leaf."""
+        for p in (self._spongy, self._mesophyll):
+            if p and float(p.get("cell_diameter", 0.0)) > 0:
+                return float(p["cell_diameter"])
+        return None
 
     def _vein_y(self, x: float, spec: dict) -> float:
         """The vein's y, shifted by its ``relative_distance`` toward a face: 0.5 =
@@ -443,6 +576,52 @@ class LeafAnatomy(Organ):
         inter-bundle mesophyll into fused air lacunae (root-style)."""
         super().add_intercellular_spaces()
         self._convert_inter_bundle_aerenchyma()
+
+    def _add_aerenchyma_to_proportion(self, tol: float = 5e-3, max_iter: int = 20):
+        """Leaf (slab) aerenchyma — replaces the root/stem radial mechanism.
+
+        The base :meth:`Organ._add_aerenchyma_to_proportion` grows aerenchyma in
+        *angular sectors* around the origin, which is meaningless on a flat lamina.
+        A leaf's aerenchyma is instead **scattered**: irregular air lacunae spread
+        through the ground tissue (dense in a dicot — "almost everywhere" — but
+        never the monocot's tidy one-lacuna-per-vein-gap).  We convert a target
+        area fraction of the ground tissue into air as random blobs, leaving thin
+        tissue walls between them, then fuse touching air into organic lacunae.
+
+        With no ``aerenchyma`` param this is just the shared fuse/simplify pass, so
+        the plain intercellular-air behaviour is unchanged.
+        """
+        requested = float(self.aerenchyma_params.get("aerenchyma_proportion", 0.0)) \
+            if self.aerenchyma_params else 0.0
+        if requested > 0.0:
+            self._scatter_leaf_aerenchyma(requested)
+        # Fuse all touching air into lacunae (n_files=1 -> the whole slab is one
+        # sector, so fusing follows geometry, not a radial grid).
+        self._aerenchyma_n_files = 1
+        self._aerenchyma_start_angle = 0.0
+        self.merge_intercellular_aerenchyma()
+
+    def _scatter_leaf_aerenchyma(self, proportion: float) -> None:
+        """Convert **random** ground-tissue cells into air until their combined area
+        reaches ``proportion`` of the tissue, then let the fuse pass merge whichever
+        happen to touch.  Picking cells at random (rather than growing blobs) leaves
+        the un-picked cells as scattered walls, so the air reads as many irregular
+        lacunae instead of one solid void."""
+        tissue = str(self.aerenchyma_params.get("tissue", "spongy"))
+        cells = [c for c in self.all_cells.cells
+                 if c.type == tissue and c.polygon is not None]
+        if len(cells) < 2:
+            return
+        areas = np.array([c.polygon.area for c in cells])
+        target = float(proportion) * float(areas.sum())
+
+        order = self.rng.permutation(len(cells))
+        cumulative = 0.0
+        for i in order:
+            if cumulative >= target:
+                break
+            cells[i].type = "air space"
+            cumulative += float(areas[i])
 
     def _convert_inter_bundle_aerenchyma(self) -> None:
         """Turn the mesophyll cells inside each stored inter-bundle region into a
@@ -580,6 +759,21 @@ class LeafAnatomy(Organ):
         adaxial = [g for g in ordered if centroid[g][1] > self._mid_at(centroid[g][0])]
         abaxial = [g for g in ordered if centroid[g][1] < self._mid_at(centroid[g][0])]
 
+        # Keep stomata off the undifferentiated-mesophyll bands over a major vein —
+        # they belong over palisade / spongy tissue, not the vein's mesophyll region.
+        # A one-cell margin keeps even a boundary stoma's guard cells off the band.
+        meso_x = []
+        for vx, spec in self._vein_layout():
+            wr = float(spec.get("mesophyll_region_width", 0.0))
+            if wr > 0.0:
+                meso_x.append((vx - wr / 2.0 - cell_diam, vx + wr / 2.0 + cell_diam))
+        if meso_x:
+            def _off_meso(g):
+                gx = centroid[g][0]
+                return not any(lo <= gx <= hi for lo, hi in meso_x)
+            adaxial = [g for g in adaxial if _off_meso(g)]
+            abaxial = [g for g in abaxial if _off_meso(g)]
+
         default_n = int(sp.get("n_files", 10))
         margin = float(sp.get("edge_margin", 0.12))
         triplets = (self._pick_triplets(adaxial, centroid, int(sp.get("n_adaxial", default_n)), margin)
@@ -631,9 +825,6 @@ class LeafAnatomy(Organ):
         return results
 
 
-# ---------------------------------------------------------------------------
-# Monocot — spongy / palisade / spongy (palisade is the central fill)
-# ---------------------------------------------------------------------------
 
 class MonocotLeafAnatomy(LeafAnatomy):
     """Monocot leaf: one uniform mesophyll tissue fills the core (no palisade/spongy
@@ -655,27 +846,138 @@ class MonocotLeafAnatomy(LeafAnatomy):
 # ---------------------------------------------------------------------------
 
 class DicotLeafAnatomy(LeafAnatomy):
-    """Dicot leaf: palisade under the upper (adaxial) epidermis, spongy above the
-    lower (abaxial) one — the core split at the mid-plane."""
+    """Dicot leaf: ``palisade.n_layers`` columnar palisade files hugging the adaxial
+    (upper) surface, with spongy mesophyll filling the whole rest of the core."""
 
     def _default_params(self) -> List[Dict[str, Any]]:
         return OrganInputData.for_dicot_leaf().to_dict_list()
 
     def _create_central_layers(self, current_polygon: Polygon,
                                params: List[Dict[str, Any]]) -> List[LayerPolygon]:
-        """Split the mesophyll core at the mid-line (where the veins sit — a straight
-        line, or the twist curve) and fill the adaxial half with palisade, the abaxial
-        half with spongy."""
+        """Reserve an adaxial palisade band ``n_layers`` cells deep, fill the whole rest
+        of the core with spongy, and stash the palisade file centre-lines for
+        :meth:`_build_palisade` to seed.
+
+        The palisade is *only* the band ``n_layers × cell_diameter`` deep measured down
+        from the adaxial surface (per abscissa, so it rides the twist/fold); everything
+        below it — the rest of the adaxial side and the whole abaxial side — is spongy.
+        The palisade cells themselves are seeded later as horizontal files (see
+        :meth:`_build_palisade`); here we only carve the band out of the spongy region
+        and record one centre-line per file across the thick central span (the tapering
+        margins are left to spongy, which fills them without the files pinching)."""
         minx, miny, maxx, maxy = current_polygon.bounds
-        xg = np.linspace(minx, maxx, 200)
-        mid = self._mid_line(xg)
-        # Region above the mid-line: the curve, then closed off along the top.
-        above = Polygon(list(zip(xg, mid))
-                        + [(maxx, maxy + 1.0), (minx, maxy + 1.0)]).buffer(0)
-        top = current_polygon.intersection(above)          # adaxial half
-        bot = current_polygon.difference(above)            # abaxial half
+        n_pal = max(int(self._palisade.get("n_layers", 2)), 0)
         out: List[LayerPolygon] = []
         i = len(params)
-        i = self._peel_region(top, "palisade", self._palisade, out, i)
-        i = self._peel_region(bot, "spongy", self._spongy, out, i)
+        self._palisade_files = None
+
+        # A vein may replace the palisade/spongy around it with undifferentiated
+        # mesophyll: a full-thickness tangential band (``mesophyll_region_width``)
+        # centred on the vein, filled with mesophyll instead.  Carve these bands out of
+        # the core up front so neither the palisade band nor the spongy peel enters
+        # them, then fill each with its own mesophyll cell size.
+        meso_region, meso_x = self._mesophyll_regions(current_polygon)
+        core = current_polygon.difference(meso_region) if meso_region is not None else current_polygon
+        for strip, spec in self._mesophyll_strips(current_polygon):
+            i = self._peel_region(
+                strip, "mesophyll",
+                {"cell_diameter": float(spec.get("mesophyll_cell_diameter", 0.03)),
+                 "cell_width": float(spec.get("mesophyll_cell_width", 0.03))},
+                out, i)
+
+        if n_pal <= 0:
+            self._peel_region(core, "spongy", self._spongy, out, i)
+            return out
+
+        d = float(self._palisade.get("cell_diameter", 0.075))
+        w = float(self._palisade.get("cell_width", d))
+
+        xg = np.linspace(minx, maxx, 400)
+        surf = [self._surface_y(float(x), current_polygon) for x in xg]
+        top = np.array([(s or (miny, miny))[1] for s in surf])
+        bot = np.array([(s or (miny, miny))[0] for s in surf])
+        thickness = np.array([((s[1] - s[0]) if s else 0.0) for s in surf])
+
+        # Palisade layers TAPER toward the margins instead of stopping abruptly: at each
+        # abscissa we keep as many palisade files as fit under the adaxial surface (up to
+        # ``n_pal``), so a thin margin gets 3, then 2, then 1 layer — but the adaxial side
+        # stays palisade all the way out, never spongy.  Spongy fills only what is left
+        # *below* the (tapering) band.
+        n_col = np.clip(np.floor_divide(thickness, d).astype(int), 0, n_pal)
+        # Never inside a mesophyll band (that whole column is undifferentiated mesophyll).
+        in_meso = np.array([any(lo <= x <= hi for lo, hi in meso_x) for x in xg])
+        n_col[in_meso] = 0
+        if not (n_col >= 1).any():
+            self._peel_region(core, "spongy", self._spongy, out, i)
+            return out
+
+        # The band's lower edge rides ``n_col`` cells below the surface (never past the
+        # abaxial face), so it steps down 4->3->2->1 layers deep across the taper.
+        band_lower = np.maximum(top - n_col * d, bot)
+        band_polys: List[Polygon] = []
+        run_idx: List[int] = []
+
+        def _flush(idxs: List[int]) -> None:
+            if len(idxs) < 2:
+                return
+            xs = xg[idxs]
+            poly = Polygon(list(zip(xs, top[idxs]))
+                           + list(zip(xs[::-1], band_lower[idxs][::-1]))).buffer(0)
+            if not poly.is_empty:
+                band_polys.append(poly)
+
+        for j, ok in enumerate(n_col >= 1):
+            if ok:
+                run_idx.append(j)
+            else:
+                _flush(run_idx); run_idx = []
+        _flush(run_idx)
+
+        band = unary_union(band_polys).intersection(core) if band_polys else Polygon()
+        spongy_region = core.difference(band)
+        self._peel_region(spongy_region, "spongy", self._spongy, out, i)
+
+        # One centre-line per palisade file, at k+0.5 cell-diameters below the surface;
+        # file ``k`` runs only across the columns deep enough to hold that many layers
+        # (``n_col > k``), so the deeper files are shorter and the taper emerges.
+        lines = []
+        for k in range(n_pal):
+            cy = top - (k + 0.5) * d
+            present = n_col > k
+            run: List[tuple] = []
+            for x, y, ok in zip(xg, cy, present):
+                if ok:
+                    run.append((float(x), float(y)))
+                elif len(run) >= 2:
+                    lines.append(LineString(run)); run = []
+                else:
+                    run = []
+            if len(run) >= 2:
+                lines.append(LineString(run))
+        self._palisade_files = (lines, d, w) if lines else None
         return out
+
+    def _mesophyll_strips(self, current_polygon: Polygon):
+        """``(strip, spec)`` for each vein that requests an undifferentiated-mesophyll
+        region: a full-thickness tangential band ``mesophyll_region_width`` wide centred
+        on the vein, clipped to the lamina."""
+        minx, miny, maxx, maxy = current_polygon.bounds
+        strips = []
+        for x, spec in self._vein_layout():
+            wr = float(spec.get("mesophyll_region_width", 0.0))
+            if wr <= 0.0:
+                continue
+            strip = box(x - wr / 2.0, miny - 1.0, x + wr / 2.0, maxy + 1.0) \
+                .intersection(current_polygon)
+            if not strip.is_empty and strip.area > 0:
+                strips.append((strip, spec))
+        return strips
+
+    def _mesophyll_regions(self, current_polygon: Polygon):
+        """Union of the mesophyll bands (or ``None``) and their ``(x_lo, x_hi)`` spans."""
+        strips = self._mesophyll_strips(current_polygon)
+        if not strips:
+            return None, []
+        region = unary_union([s for s, _ in strips])
+        spans = [tuple(s.bounds[i] for i in (0, 2)) for s, _ in strips]
+        return region, spans

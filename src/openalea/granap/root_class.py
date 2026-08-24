@@ -371,7 +371,7 @@ class RootAnatomy(Organ):
         circles = [(float(x), float(y), float(r)) for (x, y, r, _tid) in vessels]
         track_ids = [tid for (_x, _y, _r, tid) in vessels]
         placed = place_packed_group(
-            self.vascular_cells, circles, "xylem",
+            self.vascular_cells, circles, "metaxylem",
             id_base=0, angle_center=(cx, cy), track_ids=track_ids,
         )
         for placed_poly, _rtype, _gid in placed:

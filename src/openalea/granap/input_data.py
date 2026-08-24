@@ -828,10 +828,12 @@ class LeafMesophyllParams(_LeafGroundParams):
 
 
 class LeafPalisadeParams(_LeafGroundParams):
-    """Dicot leaf: adaxial palisade — elongated columnar cells (diameter tall > width)."""
+    """Dicot leaf: adaxial palisade — elongated columnar cells (diameter tall > width),
+    peeled as a fixed number of layers/files down from the adaxial (upper) surface."""
     name          : str   = "palisade"
     cell_diameter : float = Field(default=0.075, ge=0.00001, title="Cell Diameter", description="Vertical (columnar) extent of the palisade cells — larger than cell_width so the cells stand up.")
     cell_width    : float = Field(default=0.020, ge=0.00001, title="Cell Width", description="Narrow tangential width of the palisade cells.")
+    n_layers      : int   = Field(default=2, ge=1, title="Number of Layers", description="How many palisade cell layers (files) to peel from the adaxial surface inward. The spongy tissue fills whatever remains below them.")
 
 
 class LeafSpongyParams(_LeafGroundParams):
@@ -860,11 +862,11 @@ class LeafVascularBundleParams(BaseParams):
     height         : float = Field(default=0.16, ge=0.00001, title="Envelope Height", description="Radial (adaxial-abaxial) extent of the vein envelope (mm).")
     phloem_outward : bool  = Field(default=True, title="Phloem Outward", description="True = phloem faces the abaxial surface, xylem the adaxial (the normal leaf orientation).")
     relative_distance : float = Field(default=0.5, ge=0.0, le=1.0, title="Relative Distance", description="Where the vein sits through the local (ribbed) lamina thickness: 0 = abaxial (lower) face, 0.5 = mid-plane, 1 = adaxial (upper) face.")
-    # -- rib (each vein raises the lamina) ----------------------------------
-    rib_adaxial_height : float = Field(default=0.02, ge=0.0, title="Rib Height (adaxial)", description="How much this vein bulges the upper (adaxial) surface — a raised cosine (mm). 0 = no upper rib.")
-    rib_adaxial_width  : float = Field(default=0.25, ge=0.00001, title="Rib Width (adaxial)", description="Full tangential width of the adaxial rib (mm); the bump is exactly 0 beyond ±width/2.")
-    rib_abaxial_height : float = Field(default=0.06, ge=0.0, title="Rib Height (abaxial)", description="How much this vein bulges the lower (abaxial) surface — the keel side usually bulges more (mm).")
-    rib_abaxial_width  : float = Field(default=0.30, ge=0.00001, title="Rib Width (abaxial)", description="Full tangential width of the abaxial rib (mm).")
+    # -- rib (each vein reshapes the lamina; negative = a sunken groove) -----
+    rib_adaxial_height : float = Field(default=0.02, title="Rib Height (adaxial)", description="How much this vein reshapes the upper (adaxial) surface — a raised cosine (mm). Positive = a rib bulging out; NEGATIVE = a groove / sunken channel dipping in (e.g. the adaxial channel over a keeled midrib); 0 = flat.")
+    rib_adaxial_width  : float = Field(default=0.25, ge=0.00001, title="Rib Width (adaxial)", description="Full tangential width of the adaxial rib/groove (mm); the bump is exactly 0 beyond ±width/2.")
+    rib_abaxial_height : float = Field(default=0.06, title="Rib Height (abaxial)", description="How much this vein reshapes the lower (abaxial) surface — the keel side usually bulges more (mm). Positive = a keel bulging out; NEGATIVE = a dimple dipping in; 0 = flat.")
+    rib_abaxial_width  : float = Field(default=0.30, ge=0.00001, title="Rib Width (abaxial)", description="Full tangential width of the abaxial rib/keel (mm).")
     # -- sclerenchyma girders (grass-style struts to both epidermes) --------
     girder_adaxial     : bool  = Field(default=False, title="Girder (adaxial)", description="Fill a sclerenchyma triangle from this vein to the adaxial epidermis (base at the epidermis, apex at the vein).")
     girder_abaxial     : bool  = Field(default=False, title="Girder (abaxial)", description="Fill a sclerenchyma triangle from this vein to the abaxial epidermis.")
@@ -887,6 +889,17 @@ class LeafVascularBundleParams(BaseParams):
     phloem_width      : float = Field(default=0.05, ge=0.00001, title="Phloem Ellipse Width", description="Tangential extent of the phloem (sieve + companion) cluster (mm).")
     phloem_height     : float = Field(default=0.04, ge=0.00001, title="Phloem Ellipse Height", description="Radial extent of the phloem cluster (mm).")
     sieve_diameter_min: float = Field(default=0.006, ge=0.00001, title="Sieve Diameter (min)", description="Lower bound of the sieve-element diameter when packing the phloem.")
+    # -- arc / cylinder-slice vein (a pie slice of a continuous vascular cylinder) --
+    arc_degrees          : float = Field(default=0.0, ge=0.0, le=360.0, title="Arc Degrees", description="0 = an ordinary compact bundle. >0 turns this vein into a slice of a vascular cylinder: concentric xylem/cambium/phloem arcs spanning this angle (e.g. 70), xylem adaxial -> phloem abaxial.")
+    arc_radius           : float = Field(default=0.25, ge=0.00001, title="Arc Radius", description="Radius of curvature of the cylinder slice (mm); larger = flatter arc. The arc's tangential width is arc_radius x arc_degrees (in radians).")
+    arc_xylem_thickness  : float = Field(default=0.05, ge=0.00001, title="Arc Xylem Thickness", description="Radial thickness of the xylem arc (adaxial, toward the curvature centre), mm.")
+    arc_phloem_thickness : float = Field(default=0.035, ge=0.00001, title="Arc Phloem Thickness", description="Radial thickness of the phloem arc (abaxial), mm.")
+    arc_cambium_thickness: float = Field(default=0.015, ge=0.00001, title="Arc Cambium Thickness", description="Radial thickness of the cambium band between the xylem and phloem arcs, mm.")
+    n_xylem_files        : int   = Field(default=0, ge=0, title="Number of Xylem Files", description="Arc vein with xylem_layout='files': number of radial xylem files (angular compartments) across the arc. 0 = a single packed arc.")
+    # -- undifferentiated mesophyll region around the vein (dicot leaf) --------
+    mesophyll_region_width  : float = Field(default=0.0, ge=0.0, title="Mesophyll Region Width", description="Dicot leaf only: replace the palisade/spongy in a full-thickness tangential band of this width (mm) centred on the vein with undifferentiated mesophyll — the common ground tissue around a major vein. 0 = off (keep palisade/spongy up to the vein).")
+    mesophyll_cell_diameter : float = Field(default=0.03, ge=0.00001, title="Mesophyll Cell Diameter", description="Cell diameter of the mesophyll filling the region (used only when mesophyll_region_width > 0).")
+    mesophyll_cell_width    : float = Field(default=0.03, ge=0.00001, title="Mesophyll Cell Width", description="Cell width of the mesophyll filling the region (used only when mesophyll_region_width > 0).")
 
 
 # Leaf-vein xylem: just the shared vessel-sizing trio (leaf-scaled), read by build_bundle.
@@ -913,6 +926,18 @@ class InterBundleAerenchymaParams(BaseParams):
     side_margin    : float = Field(default=0.0, ge=0.0, title="Side Margin", description="Margin mode (any margin > 0): mesophyll kept beside each bundle (mm). The lacuna is an ellipse inscribed in the remaining gap.")
     adaxial_margin : float = Field(default=0.0, ge=0.0, title="Adaxial Margin", description="Margin mode: mesophyll kept below the adaxial (upper) face (mm).")
     abaxial_margin : float = Field(default=0.0, ge=0.0, title="Abaxial Margin", description="Margin mode: mesophyll kept above the abaxial (lower) face (mm).")
+
+
+class LeafAerenchymaParams(BaseParams):
+    """Dicot-leaf aerenchyma: irregular air lacunae **scattered** through the ground
+    tissue (unlike the monocot ``inter_bundle_aerenchyma``, one tidy lacuna per
+    vein-gap).  Random tissue cells are converted to air until their combined area
+    reaches ``aerenchyma_proportion`` of the tissue; touching air is then fused, and
+    the un-picked cells left standing become the lacuna walls.  On a leaf slab the
+    root/stem radial aerenchyma is meaningless, so this replaces it."""
+    name          : str   = "aerenchyma"
+    tissue        : str   = Field(default="spongy", title="Tissue", description="Ground tissue the air lacunae are carved from.")
+    aerenchyma_proportion : float = Field(default=0.5, ge=0.0, le=1.0, title="Aerenchyma Proportion", description="Target fraction of the tissue area converted to air (dicot: high — 'almost everywhere').")
 
 
 class LeafStomataParams(BaseParams):

@@ -179,6 +179,31 @@ class DicotRootAnatomy(RootAnatomy):
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
         if self.vascular_params.get("n_vascular_peak", 0) == 0:
             return recipe                       # no xylem peaks -> empty
+        if getattr(self, "_prescribed_vessels", None):
+            # Developmental series (ROOT_SERIES_PLAN): tracked vessels are
+            # prescribed instead of packed; phloem/cambium/secondary growth then
+            # regenerate around them (the "refit").
+            self._xylem_star_region(polygon)    # xylem_star + pith side effects; not filled
+            recipe.special("prescribed primary xylem",
+                           lambda: self._place_prescribed_xylem(polygon),
+                           produces=("metaxylem",))
+            recipe.cleanup("clear stele engulfed by xylem",
+                           self._remove_stele_engulfed_by_xylem)
+            if self.has_primary_phloem:
+                self._add_phloem_step(recipe, polygon)
+            if self.vascular_params.get("secondary_growth", False):
+                recipe.special("secondary xylem",
+                               lambda: self.fit_secondary_xylem(polygon),
+                               produces=("xylem", "stele", "cambium", "medullar_ray"))
+                if self.has_secondary_phloem:
+                    recipe.special("secondary phloem",
+                                   lambda: self.fit_secondary_phloem(polygon),
+                                   produces=("phloem", "companion_cell", "stele"))
+            else:
+                recipe.special("primary cambium",
+                               lambda: self.fit_primary_cambium_elements(polygon),
+                               produces=("cambium",))
+            return recipe
         recipe.fill("xylem star", self._xylem_star_region(polygon),
                     strategy="packing", produces=("xylem", "stele"),
                     record=self._record_xylem_vessels, **self._xylem_pack_kwargs())

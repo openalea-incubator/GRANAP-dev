@@ -258,7 +258,7 @@ class CellGenerator:
                         all_cells.add_cell(new_cell)
                         id_cell += 1
                     id_group += 1
-        
+
         all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
         return all_cells
 

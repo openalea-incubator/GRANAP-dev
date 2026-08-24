@@ -136,6 +136,55 @@ def test_dicot_gap_free():
     assert sum(g.area for g in leaf.find_gaps()) < 0.01
 
 
+def _blunt_margin_input():
+    """Dicot leaf ending in a blunt rounded margin instead of a thin taper.
+
+    Full thickness out to 90 % of the half-width, then a short rounded edge, so the
+    surface curves sharply where it wraps the margin — the shape that leaves a fat
+    uncovered ribbon there.
+    """
+    params = OrganInputData.for_dicot_leaf().to_dict_list()
+    plant = next(p for p in params if p["name"] == "planttype")
+    half, thickness = plant["width"] / 2.0, 0.45
+    plant["thickness_profile"] = [[0.0, thickness], [0.9 * half, thickness],
+                                  [half, 0.0]]
+    plant["edge_radius"] = thickness / 2.0
+    return params
+
+
+def test_fusion_fills_enclosed_holes_but_not_the_surface_ribbon():
+    """``fuse_gaps`` absorbs the holes the tissue closes around and leaves the rest.
+
+    The tessellation always leaves a thin uncovered ribbon between the outermost
+    Voronoi edges and the organ outline, which runs unbroken past many cells wherever
+    the surface curves sharply.  Fusing that ribbon stretches a single epidermis cell
+    right across its neighbours, so ``FUSE_ENCLOSED_GAPS_ONLY`` keeps fusion to the
+    enclosed holes — which must still all be filled.
+    """
+    def longest_epidermis(leaf):
+        return max(_longest_extent(c.polygon) for c in leaf.all_cells.cells
+                   if c.type == "epidermis" and c.polygon is not None)
+
+    fused = LeafAnatomy(_blunt_margin_input(), seed=0)
+    fused.generate_cells()
+    assert fused.find_gaps(enclosed_only=True) == []
+
+    raw = LeafAnatomy(_blunt_margin_input(), seed=0)
+    raw.AUTO_FUSE_GAPS = False           # the tessellation, ribbon and all
+    raw.generate_cells()
+
+    # Growing into an enclosed hole stretches a bordering cell a little; growing
+    # along the ribbon would stretch one across a dozen neighbours (it used to reach
+    # 2.2x here, and 12x on a leaf with a blunter margin).
+    assert longest_epidermis(fused) < 1.5 * longest_epidermis(raw)
+
+
+def _longest_extent(poly):
+    """Length of the long side of a cell's minimum rotated rectangle."""
+    xs, ys = poly.minimum_rotated_rectangle.exterior.coords.xy
+    return max(np.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(4))
+
+
 def test_dicot_vein_is_collateral_with_cambium():
     """A dicot leaf vein is the collateral (xylem/cambium/phloem) bundle, not the
     monocot 'face' bundle — so it has a cambium and no protoxylem lacuna."""

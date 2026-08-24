@@ -1085,3 +1085,177 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
         ground_tissue_name=ground_tissue_name)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Arc bundle — a pie slice of a continuous vascular cylinder
+# ---------------------------------------------------------------------------
+
+def _radius_range(zone: Polygon, ox: float, oy: float) -> Tuple[float, float]:
+    """Min / max distance of ``zone``'s vertices from the curvature centre ``(ox, oy)``."""
+    ext = np.asarray(zone.exterior.coords)
+    d = np.hypot(ext[:, 0] - ox, ext[:, 1] - oy)
+    r_in, r_out = float(d.min()), float(d.max())
+    for ring in zone.interiors:
+        ic = np.asarray(ring.coords)
+        r_in = min(r_in, float(np.hypot(ic[:, 0] - ox, ic[:, 1] - oy).min()))
+    return r_in, r_out
+
+
+def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
+                     bp: dict, xylem: dict, phloem: dict, cambium: dict,
+                     ground_cell_size=None, sheath_outline=None,
+                     ground_tissue_name=None) -> BundleResult:
+    """Build one vein as a **slice of a vascular cylinder** — concentric xylem /
+    cambium / phloem *arcs* spanning ``arc_degrees`` of a circle of radius
+    ``arc_radius`` — the continuous dicot-stem cylinder kept to one pie slice.
+
+    The slice is oriented like every other leaf vein: ``theta`` points to the abaxial
+    (lower) surface, so the curvature centre sits on the adaxial side and the arcs run,
+    inner -> outer, **xylem (adaxial) -> cambium -> phloem (abaxial)**.  The xylem is
+    endarch-graded (small protoxylem on the inner/adaxial face -> large metaxylem
+    toward the cambium) and, with ``xylem_layout == "files"``, cut into
+    ``n_xylem_files`` radial files by thin parenchyma strips (the cambium and phloem
+    stay continuous), exactly like :class:`ContinuousDicotStemAnatomy`.
+
+    Returns a :class:`BundleResult` (envelope for the removal mask, vessel + zone
+    polygons) so the caller registers it like any other bundle.
+    """
+    result = BundleResult()
+    r0 = float(bp.get("arc_radius", 0.25))
+    span = np.radians(float(bp.get("arc_degrees", 70.0)))
+    if r0 <= 0.0 or span <= 0.0:
+        return result
+    half_cam = float(bp.get("arc_cambium_thickness", 0.015)) / 2.0
+    xt = float(bp.get("arc_xylem_thickness", 0.05))
+    pt = float(bp.get("arc_phloem_thickness", 0.035))
+    if not bp.get("phloem_outward", True):
+        theta = theta + np.pi        # phloem faces the adaxial side instead
+
+    # Curvature centre on the adaxial side; the outward (+radial) direction is abaxial.
+    u = np.array([np.cos(theta), np.sin(theta)])         # outward = abaxial
+    r_far = (r0 + half_cam + max(xt, pt)) * 2.0
+
+    def _build(anchor_x, anchor_y):
+        """The three concentric arcs + wedge for an anchor point on the cambium
+        contour.  Returns (ox, oy, a0, a1, xylem, phloem, cambium)."""
+        ox = float(anchor_x - r0 * u[0])
+        oy = float(anchor_y - r0 * u[1])
+        cang = float(np.arctan2(anchor_y - oy, anchor_x - ox))   # O -> bundle direction
+        cont = Point(ox, oy).buffer(r0, resolution=128)
+        xa = cont.buffer(-half_cam).difference(cont.buffer(-half_cam - xt))
+        pa = cont.buffer(half_cam + pt).difference(cont.buffer(half_cam))
+        ca = cont.buffer(half_cam).difference(cont.buffer(-half_cam))
+        b0, b1 = cang - span / 2.0, cang + span / 2.0
+        wdg = Polygon([(ox, oy)] + [(ox + r_far * np.cos(a), oy + r_far * np.sin(a))
+                                    for a in np.linspace(b0, b1, 32)])
+        return ox, oy, b0, b1, xa.intersection(wdg), pa.intersection(wdg), ca.intersection(wdg)
+
+    # Anchoring the arc by its abaxial (cambium-bottom) edge puts the whole bundle —
+    # its thick xylem especially — above the placement point, pushing the vein into the
+    # top (adaxial) side of the leaf.  Instead, build the (unclipped) bundle once, then
+    # slide it along the radial axis so its centre of mass lands on (cx, cy): the vein
+    # is then vertically centred on its placement point regardless of the arc span or
+    # the xylem/phloem thickness ratio.
+    _, _, _, _, xa0, pa0, ca0 = _build(cx, cy)
+    env0 = unary_union([g for g in (xa0, pa0, ca0) if not g.is_empty])
+    if not env0.is_empty:
+        d = np.array([cx - env0.centroid.x, cy - env0.centroid.y])
+        s = float(np.dot(d, u))                              # component along the radial axis
+        anchor_x, anchor_y = cx + s * u[0], cy + s * u[1]
+    else:
+        anchor_x, anchor_y = cx, cy
+    ox, oy, a0, a1, xylem_annulus, phloem_annulus, cambium_band = _build(anchor_x, anchor_y)
+
+    # The zones are already the pie slice (wedge-clipped in _build); clip to the outline.
+    def clip(zone):
+        z = zone.intersection(sheath_outline) if sheath_outline is not None else zone
+        return _largest(z)
+
+    xylem_zone = clip(xylem_annulus)
+    phloem_zone = clip(phloem_annulus)
+    cambium_zone = clip(cambium_band)
+
+    p_diam = float(bp.get("parenchyma_diameter", 0.012))
+    p_w = float(bp.get("parenchyma_width", 0.012))
+    vgrow = 0.25 * (p_diam + p_w)
+
+    # --- xylem: endarch-graded vessels, optionally cut into radial files ------
+    if xylem_zone is not None and not xylem_zone.is_empty:
+        grr = _radius_range(xylem_zone, ox, oy)
+        pieces = [xylem_zone]
+        n_files = int(bp.get("n_xylem_files", 0))
+        if bp.get("xylem_layout", "packed") == "files" and n_files >= 2:
+            # Split the arc into n_files angular sub-wedges (radial files); the
+            # parenchyma pass over the whole annulus fills the seams between them.
+            pieces = []
+            for k in range(n_files):
+                b0 = a0 + (a1 - a0) * k / n_files
+                b1 = a0 + (a1 - a0) * (k + 1) / n_files
+                sub = Polygon([(ox, oy)] + [(ox + r_far * np.cos(a), oy + r_far * np.sin(a))
+                                            for a in np.linspace(b0, b1, 6)])
+                pieces.extend(p for p in [_largest(xylem_zone.intersection(sub))]
+                              if p is not None and not p.is_empty)
+        vessels = []
+        for piece in pieces:
+            vs, _ = _pack_place(
+                cells, rng, piece, "xylem", cx, cy,
+                voronoi_grow=vgrow, r_floor=p_diam * 0.4, n_border=25,
+                proportion=float(bp.get("prop_vessel", 0.55)),
+                direction="edge",                    # endarch: large toward the cambium
+                gradient_center=(ox, oy), gradient_radial_range=grr,
+                diameter_max=xylem.get("vessel_diameter", 0.045),
+                diameter_min=xylem.get("vessel_diameter_min", 0.012),
+                diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+                gradient_function=xylem.get("gradient_function", "five_pl"),
+                gradient_inflection=xylem.get("gradient_inflection", 0.5),
+                gradient_steepness=xylem.get("gradient_steepness", 3.0),
+                gradient_asymmetry=xylem.get("gradient_asymmetry", 1.0),
+            )
+            vessels.extend(vs)
+        result.vessel_polygons.extend(vessels)
+        _fill_parenchyma(cells, xylem_zone, unary_union(vessels) if vessels else None,
+                         "parenchyma", cx, cy, p_diam, p_w)
+        result.zone_polygons.append(("xylem", xylem_zone))
+
+    # --- phloem: sieve + companion cells, parenchyma around them --------------
+    # Packed in angular sectors: pack_circles is superlinear in the cell count, so a
+    # wide arc packed as one region is far slower than the same cells packed
+    # sector-by-sector.  The seams are invisible — filled by the parenchyma pass.
+    if phloem_zone is not None and not phloem_zone.is_empty:
+        ph_arc = (r0 + half_cam + pt) * span
+        sieve_d = float(phloem.get("sieve_diameter", 0.012))
+        n_sec = max(1, int(round(ph_arc / (10.0 * sieve_d))))
+        occupied = []
+        for k in range(n_sec):
+            b0 = a0 + (a1 - a0) * k / n_sec
+            b1 = a0 + (a1 - a0) * (k + 1) / n_sec
+            sub = Polygon([(ox, oy)] + [(ox + r_far * np.cos(a), oy + r_far * np.sin(a))
+                                        for a in np.linspace(b0, b1, 6)])
+            sec = _largest(phloem_zone.intersection(sub))
+            if sec is None or sec.is_empty:
+                continue
+            occ = _place_phloem_cells(cells, rng, sec, cx, cy, phloem, bp)
+            if occ is not None and not occ.is_empty:
+                occupied.append(occ)
+        _fill_parenchyma(cells, phloem_zone,
+                         unary_union(occupied) if occupied else None,
+                         "parenchyma", cx, cy, p_diam, p_w)
+        result.zone_polygons.append(("phloem", phloem_zone))
+
+    # --- cambium arc ---------------------------------------------------------
+    if cambium_zone is not None and not cambium_zone.is_empty:
+        _fill_cambium(cells, rng, cambium_zone, cx, cy, cambium)
+        result.zone_polygons.append(("cambium", cambium_zone))
+
+    envelope = unary_union([z for z in (xylem_zone, cambium_zone, phloem_zone)
+                            if z is not None and not z.is_empty])
+    result.envelope = _largest(envelope) or envelope
+
+    # Optional outer bundle sheath, grown against the surrounding mesophyll.
+    if ground_cell_size is not None and result.envelope is not None \
+            and not result.envelope.is_empty:
+        result.envelope = _grow_bundle_sheath(
+            cells, result.envelope, bp, ground_cell_size, sheath_outline, cx, cy,
+            env=result.envelope, ground_tissue_name=ground_tissue_name)
+    return result

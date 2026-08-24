@@ -133,10 +133,20 @@ class MonocotRootAnatomy(RootAnatomy):
         # Developmental series: place the prescribed tracked vessels instead of
         # packing (see ROOT_SERIES_PLAN / RootAnatomy.prescribe_vessels).
         if getattr(self, "_prescribed_vessels", None):
-            recipe.special("prescribed xylem",
+            # Developmental series: the metaxylem are the prescribed (tracked) vessels;
+            # the protoxylem + phloem are regenerated per section around them (untracked),
+            # reusing the same default-mode steps — their count follows n_vascular_bundles,
+            # which the series sets to the metaxylem count for scaling.
+            recipe.special("prescribed metaxylem",
                            lambda: self._place_prescribed_xylem(polygon),
-                           produces=("xylem",))
-            return recipe                       # Phase 1: xylem only (phloem later)
+                           produces=("metaxylem",))
+            recipe.special("metaxylem sheath",
+                           lambda: self.fit_metaxylem_sheath(polygon),
+                           produces=("stele",))
+            recipe.special("phloem + protoxylem bundles",
+                           lambda: self.fit_phloem_protoxylem_elements(polygon),
+                           produces=("phloem", "protoxylem"))
+            return recipe
         shape = self.vascular_params.get("xylem_shape", "default")
         if shape != "star" and self.vascular_params.get("n_vascular_bundles", 0) == 0:
             return recipe                       # no vascular bundles -> empty
