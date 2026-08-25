@@ -1081,6 +1081,8 @@ class Organ(AbstractNetwork, ABC):
                     id_group=min(c.id_group for c in group),
                     type="air space",
                     polygon=fused_polygon,
+                    protect_topology=any(getattr(c, "protect_topology", False) for c in group),
+                    protect_shape=any(getattr(c, "protect_shape", False) for c in group),
                 ))
 
             self.all_cells.remove_cells(merge_pool)

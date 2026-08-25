@@ -113,6 +113,7 @@ def seat_air_spaces(
         )
         if protect_topology:
             lacuna.protect_topology = True
+            lacuna.protect_shape = True
         cell_manager.cells.append(lacuna)
 
     cell_manager.cells = CellGenerator.simplify_cells(cell_manager.cells)

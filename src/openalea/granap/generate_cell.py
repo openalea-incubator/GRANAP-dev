@@ -439,6 +439,7 @@ class CellGenerator:
                 area=poly.area,
                 polygon=poly,
                 protect_topology=getattr(r, "protect_topology", False),
+                protect_shape=getattr(r, "protect_shape", False),
             ))
 
         return final_cells
@@ -692,10 +693,12 @@ class CellGenerator:
         polys = [c.polygon for c in grouped_cells]
         cell_ids = list(range(len(grouped_cells)))
 
-        # Cells flagged ``protect_topology`` (the needle mesophyll air-space rhombi)
+        # Cells flagged ``protect_shape`` (the needle mesophyll air-space rhombi) keep
+        # every boundary vertex here; ``protect_topology`` alone (e.g. the substomatal
+        # chamber) only matters later for air-network wiring, not shape simplification.
         protect_ids = {
             idx for idx, cell in enumerate(grouped_cells)
-            if getattr(cell, "protect_topology", False)
+            if getattr(cell, "protect_shape", False)
         }
 
         cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(

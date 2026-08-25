@@ -7,7 +7,7 @@ class Cell:
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
                 angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None,
-                protect_topology: bool = False, track_id=None):
+                protect_topology: bool = False, protect_shape: bool = False, track_id=None):
 
         self.x = x
         self.y = y
@@ -28,6 +28,7 @@ class Cell:
         self.polygon = polygon if polygon != None else None
         self.axis = axis if axis != None else None
         self.protect_topology = protect_topology
+        self.protect_shape = protect_shape
 
     @classmethod
     def radial(cls, type: str, x: float, y: float, diameter: float,
@@ -81,6 +82,7 @@ class Cell:
                 "radius": self.radius,
                 "area": self.area,
                 "protect_topology": self.protect_topology,
+                "protect_shape": self.protect_shape,
                 }
     
     def smooth(self, smooth_factor: float = 0.01):
