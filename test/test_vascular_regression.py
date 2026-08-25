@@ -91,13 +91,13 @@ GOLDEN = {
         "phloem": 108, "stele": 1056, "xylem": 50,
     }),
     "needle_default": (needle_default, {
-        "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,
+        "Strasburger cell": 38, "air space": 476, "cambium": 58, "duct": 3,
         "endodermis": 49, "epidermis": 231, "guard cell": 8, "hypodermis": 387,
         "mesophyll": 228, "parenchyma": 244, "phloem": 310, "pore": 4,
         "resin duct": 42, "transfusion": 103, "xylem": 270,
     }),
     "needle_features": (needle_features, {
-        "Strasburger cell": 38, "air space": 327, "cambium": 58, "duct": 2,
+        "Strasburger cell": 38, "air space": 494, "cambium": 58, "duct": 2,
         "endodermis": 49, "epidermis": 219, "guard cell": 20, "hypodermis": 366,
         "mesophyll": 230, "parenchyma": 244, "phloem": 310, "pore": 10,
         "resin duct": 28, "transfusion": 103, "xylem": 270,

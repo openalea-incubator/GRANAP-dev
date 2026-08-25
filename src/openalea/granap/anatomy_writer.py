@@ -3,7 +3,7 @@ import io
 import math
 import numpy as np
 import shapely as sp
-from typing import Dict, Any, Union, List
+from typing import Dict, Any, Union, List, Optional
 from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.affinity import scale
 import matplotlib.pyplot as plt
@@ -79,7 +79,17 @@ class AnatomyWriter:
         polys    = list(valid_gdf["geometry"])
         cell_ids = list(valid_gdf.index)
 
-        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(polys, cell_ids)
+        # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
+        # keep their walls from collapsing into a single node.
+        # (see CellGenerator._build_topology's ``protect_ids``).
+        protect_ids = (
+            set(valid_gdf.index[valid_gdf["protect_topology"]])
+            if "protect_topology" in valid_gdf.columns else None
+        )
+
+        cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(
+            polys, cell_ids, protect_ids=protect_ids
+        )
 
         wall_registry = {}
         next_wall_id  = 0
@@ -90,8 +100,9 @@ class AnatomyWriter:
             junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
 
             if len(junc_positions) < 2:
-                # no junctions -> single wall loop
-                wall_key = tuple(sorted(vkeys))
+                # no junctions → single wall loop
+                shape_signature = tuple(vk for vk in vkeys if vk in protected_shape_set)
+                wall_key = (tuple(sorted(vkeys)), shape_signature,)
                 if wall_key not in wall_registry:
                     wall_registry[wall_key] = {"id": next_wall_id, "points": list(vkeys) + [vkeys[0]]}
                     next_wall_id += 1
@@ -624,7 +635,7 @@ class NetworkExporter:
     def __init__(self, organ: Organ):
         self.organ = organ
 
-    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS) -> None:
+    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS, air_link_radius: Optional[float] = None) -> None:
         """
         Populate the provided network graph from the cell GeoDataFrame.
 
@@ -647,17 +658,33 @@ class NetworkExporter:
         )
         cells_gdf = cells_gdf[valid_mask]
 
-        # Phases 0-2 — snapping, topology maps, junction detection
+        # Mesophyll air-space nodes requiring special rewiring
+        protected_air_cells = set(
+            cells_gdf.index[ (cells_gdf.get("protect_topology", False)) 
+                           & (cells_gdf["type"] == "air space")
+                           ]  
+        )
+
+
+        # Phases 0–2 — snapping, topology maps, junction detection
         polys    = list(cells_gdf["geometry"])
         cell_ids = list(cells_gdf.index)
+
+        # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
+        # keep their walls from collapsing into a single node.
+        # (see CellGenerator._build_topology's ``protect_ids``).
+        protect_ids = (
+            set(cells_gdf.index[cells_gdf["protect_topology"]])
+            if "protect_topology" in cells_gdf.columns else None
+        )
 
         def get_thickness(c_type: str) -> float:
             if isinstance(cell_wall_thickness, dict):
                 return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
             return float(cell_wall_thickness)
 
-        cell_vkeys, _, edge_to_cells, junction_set = (
-            CellGenerator._build_topology(polys, cell_ids)
+        cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
+            CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
         )
 
         if not cell_vkeys:
@@ -717,7 +744,10 @@ class NetworkExporter:
 
                 junc_start = segment[0]
                 junc_end = segment[-1]
-                wall_key = tuple(sorted((junc_start, junc_end)))
+
+                shape_signature = tuple(vk for vk in segment[1:-1] if vk in protected_shape_set)
+
+                wall_key = (tuple(sorted((junc_start, junc_end))), shape_signature,)
 
                 if wall_key not in wall_registry:
                     length = sum(
@@ -735,6 +765,7 @@ class NetworkExporter:
                         "length": length,
                         "wall_thickness": 0.0,
                         "cells": [],
+                        "shape_signature": shape_signature,
                     }
                     next_wall_id += 1
 
@@ -809,9 +840,12 @@ class NetworkExporter:
                 type="cell",
                 cgroup=row.get("cgroup", ""),
                 cell_type=row.get("type", ""),
+                protect_topology=bool(row.get("protect_topology", False)),
                 position=(cx, cy),
                 area=area,
             )
+
+        air_nodes = { cell_row_to_node[row_idx] for row_idx in protected_air_cells}   
 
         # Phase 6 — add edges
         network._wall_to_cells = {
@@ -829,20 +863,43 @@ class NetworkExporter:
             for cn in cell_nodes:
                 pos_cell = network.graph.nodes[cn]["position"]
                 pos_wall = wd["midpoint"]
+
                 dist_wall_cell = np.hypot(
                     pos_wall[0] - pos_cell[0],
                     pos_wall[1] - pos_cell[1],
                 )
-                d_vec = np.array([pos_wall[0] - pos_cell[0], pos_wall[1] - pos_cell[1]])
-                network.graph.add_edge(
-                    cn, wall_id,
-                    path="membrane",
-                    length=wall_length,
-                    dist=dist_wall_cell,
-                    d_vec=d_vec,
-                    wall_thickness=wall_thickness,
-                )
-            
+                d_vec = np.array([
+                    pos_wall[0] - pos_cell[0],
+                    pos_wall[1] - pos_cell[1],
+                ])
+
+                # Identify edges connecting to protected air spaces.
+
+                if (
+                    cn in air_nodes
+                    and bool(wd.get("shape_signature"))
+                ):
+
+                    network.graph.add_edge(
+                        cn,
+                        wall_id,
+                        path="wall_air",
+                        length=wall_length,
+                        dist=dist_wall_cell,
+                        d_vec=d_vec,
+                        wall_thickness=wall_thickness,
+                    )
+                else:
+                    network.graph.add_edge(
+                        cn,
+                        wall_id,
+                        path="membrane",
+                        length=wall_length,
+                        dist=dist_wall_cell,
+                        d_vec=d_vec,
+                        wall_thickness=wall_thickness,
+                    )
+
             # each junction connected to the wall node
             for junc in ["junc_start", "junc_end"]:
                 junc_id = network.n_walls + junction_vk_to_id[wd[junc]]
@@ -865,6 +922,18 @@ class NetworkExporter:
             
             # Symplastic: cell <-> cell
             if len(cell_nodes) == 2:
+
+                # only connect cells symplastically if they are not special air spaces 
+                # with protect_topology (mesophyll rhombic air spaces)
+
+                cid_a, cid_b = wd["cells"]
+
+                a_special = cid_a in protected_air_cells
+                b_special = cid_b in protected_air_cells
+
+                if a_special != b_special:
+                    continue
+
                 pos_a = network.graph.nodes[cell_nodes[0]]["position"]
                 pos_b = network.graph.nodes[cell_nodes[1]]["position"]
                 dist = np.hypot(
@@ -875,6 +944,215 @@ class NetworkExporter:
                     cell_nodes[0], cell_nodes[1],
                     path="plasmodesmata",
                     length=wall_length,
+                    dist=dist,
+                    d_vec=d_vec,
+                )
+
+        # ------------------------------------------------------------------
+        # Phase 8 — construct direct air-space connectivity ("air_link")
+        #
+        # Motif:
+        # air space -> new junction -> old junction -> new junction -> air space
+        #
+        # The "new junctions" are induced by protected topology handling
+        # (mesophyll rhombic air spaces). These are identified through
+        # wall segments carrying a non-empty shape_signature derived from
+        # protected_shape_set.
+        #
+        # Existing topology generation remains untouched.
+        # ------------------------------------------------------------------
+
+        # ------------------------------------------------------------------
+        # Step 1 — classify junctions
+        # ------------------------------------------------------------------
+
+        new_junctions = set()
+
+        for wd in wall_registry.values():
+
+            # shape_signature comes from protected topology handling
+            if wd.get("shape_signature"):
+
+                new_junctions.add(wd["junc_start"])
+                new_junctions.add(wd["junc_end"])
+
+        old_junctions = set(junction_list) - new_junctions
+
+        # Convert junction vertex-keys -> graph node ids
+        new_junction_nodes = {
+            network.n_walls + junction_vk_to_id[vk]
+            for vk in new_junctions
+        }
+
+        old_junction_nodes = {
+            network.n_walls + junction_vk_to_id[vk]
+            for vk in old_junctions
+        }
+
+        # ------------------------------------------------------------------
+        # Step 2 — map each air space to its adjacent NEW junctions
+        # ------------------------------------------------------------------
+
+        air_to_new_junctions = {}
+
+        for air_node in air_nodes:
+
+            attached_new_junctions = set()
+
+            # cell -> wall edges are membrane edges [1]
+            for wall_node in network.graph.neighbors(air_node):
+
+                if network.graph.nodes[wall_node].get("type") != "apo":
+                    continue
+
+                # wall -> junction edges are apoplastic wall edges [1]
+                for junc_node in network.graph.neighbors(wall_node):
+
+                    if junc_node in new_junction_nodes:
+                        attached_new_junctions.add(junc_node)
+
+            air_to_new_junctions[air_node] = attached_new_junctions
+
+        # ------------------------------------------------------------------
+        # Step 3 — construct air_link edges
+        # ------------------------------------------------------------------
+
+        for air_a in air_nodes:
+
+            for air_b in air_nodes:
+
+                if air_a >= air_b:
+                    continue
+
+                # avoid duplicate creation
+                if network.graph.has_edge(air_a, air_b):
+                    continue
+
+                # NEW junctions attached to each air space
+                juncs_a = air_to_new_junctions.get(air_a, set())
+                juncs_b = air_to_new_junctions.get(air_b, set())
+
+                if not juncs_a or not juncs_b:
+                    continue
+
+                # Search motif:
+                # airA -> wall -> new junction J1 -> wall -> old junction Jmid -> wall -> new junction J2 -> wall -> airB
+
+                valid_connection = False
+
+                for j1 in juncs_a:
+
+                    # NEW junction -> wall
+                    for wall_1 in network.graph.neighbors(j1):
+
+                        if network.graph.nodes[wall_1].get("type") != "apo":
+                            continue
+
+                        # wall -> OLD junction
+                        for old_j in network.graph.neighbors(wall_1):
+
+                            if old_j not in old_junction_nodes:
+                                continue
+
+                            # OLD junction -> wall
+                            for wall_2 in network.graph.neighbors(old_j):
+
+                                if wall_2 == wall_1:
+                                    continue
+
+                                if network.graph.nodes[wall_2].get("type") != "apo":
+                                    continue
+
+                                # wall -> NEW junction
+                                for j2 in network.graph.neighbors(wall_2):
+
+                                    if j2 == j1:
+                                        continue
+
+                                    if j2 not in juncs_b:
+                                        continue
+
+                                    valid_connection = True
+
+                                    pos_a = network.graph.nodes[air_a]["position"]
+                                    pos_b = network.graph.nodes[air_b]["position"]
+
+                                    dist = np.hypot(
+                                        pos_b[0] - pos_a[0],
+                                        pos_b[1] - pos_a[1]
+                                    )
+
+                                    d_vec = np.array([
+                                        pos_b[0] - pos_a[0],
+                                        pos_b[1] - pos_a[1]
+                                    ])
+
+                                    network.graph.add_edge(
+                                        air_a,
+                                        air_b,
+                                        path="air_link",
+                                        length=dist,
+                                        dist=dist,
+                                        d_vec=d_vec,
+                                        via_new_junction_a=j1,
+                                        via_old_junction=old_j,
+                                        via_new_junction_b=j2,
+                                    )
+
+                                    break
+
+                                if valid_connection:
+                                    break
+
+                            if valid_connection:
+                                break
+
+                        if valid_connection:
+                            break
+
+                    if valid_connection:
+                        break
+
+        # ------------------------------------------------------------------
+        # Step 4 — bridge air_link within a given radius
+        #
+        # Two protected air spaces (e.g. the sub-stomatal chamber and a
+        # mesophyll rhombus) are not always adjacent and so never match the
+        # junction motif above. Link every pair of protected air spaces whose
+        # polygons lie within ``air_link_radius`` of each other (true
+        # boundary-to-boundary gap, not centroid distance — elongated rhombi
+        # can have a centroid well outside the radius while their nearest tip
+        # is right next to the other air space). Defaults to 3x the median
+        # wall length so the radius scales with the organ's own cell size.
+        # ------------------------------------------------------------------
+
+        radius = air_link_radius
+        if radius is None:
+            wall_lengths = [wd["length"] for wd in wall_registry.values() if wd["length"] > 0]
+            radius = float(np.median(wall_lengths)) if wall_lengths else 0.0
+
+        protected_air_rows = list(protected_air_cells)
+        for i in range(len(protected_air_rows)):
+            row_a = protected_air_rows[i]
+            air_a = cell_row_to_node[row_a]
+            geom_a = cells_gdf.loc[row_a, "geometry"]
+            for j in range(i + 1, len(protected_air_rows)):
+                row_b = protected_air_rows[j]
+                air_b = cell_row_to_node[row_b]
+                if network.graph.has_edge(air_a, air_b):
+                    continue
+                geom_b = cells_gdf.loc[row_b, "geometry"]
+                if geom_a.distance(geom_b) > radius:
+                    continue
+
+                pos_a = network.graph.nodes[air_a]["position"]
+                pos_b = network.graph.nodes[air_b]["position"]
+                dist = np.hypot(pos_b[0] - pos_a[0], pos_b[1] - pos_a[1])
+                d_vec = np.array([pos_b[0] - pos_a[0], pos_b[1] - pos_a[1]])
+                network.graph.add_edge(
+                    air_a, air_b,
+                    path="air_link",
+                    length=dist,
                     dist=dist,
                     d_vec=d_vec,
                 )
