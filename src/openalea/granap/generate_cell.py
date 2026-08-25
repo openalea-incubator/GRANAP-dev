@@ -258,7 +258,7 @@ class CellGenerator:
                         all_cells.add_cell(new_cell)
                         id_cell += 1
                     id_group += 1
-        
+
         all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
         return all_cells
 
@@ -281,7 +281,7 @@ class CellGenerator:
             return all_cells
 
         # --- build group metadata ----------------------------------------
-        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        groups: dict = {}  # id_group -> {id_layer, indices, poly}
         for idx, cell in enumerate(all_cells.cells):
             g = cell.id_group
             if g not in groups:
@@ -410,7 +410,7 @@ class CellGenerator:
         # Union the per-seed Voronoi polygons into one 'biological' cell per
         # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
         # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
-        # ~13s of pure overhead (see doc/performance_proposals.md ①). Plain
+        # ~13s of pure overhead (see doc/performance_proposals.md (1)). Plain
         # Python grouping + shapely ``unary_union`` (what dissolve calls
         # internally) is byte-identical: dissolve's default aggregation is
         # 'first' per group, so the representative cell is the first-seen one;
@@ -433,6 +433,7 @@ class CellGenerator:
                 id_cell=r.id_cell,
                 id_layer=r.id_layer,
                 id_group=gid,
+                track_id=r.track_id,      # carry the tracked-vessel id through grouping
                 angle=r.angle,
                 radius=r.radius,
                 area=poly.area,
@@ -527,7 +528,7 @@ class CellGenerator:
             else 1e-4
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate.  All ball
+        # Cluster nearby vertices -> canonical snapped coordinate.  All ball
         # queries are issued in one parallel C batch; the greedy single-pass
         # assignment below is byte-identical to querying point-by-point (each
         # seed's cluster is still exactly the points within snap_tol of it).
@@ -679,7 +680,7 @@ class CellGenerator:
         Simplify cell boundaries by retaining only junction vertices.
 
         Delegates topology computation to :meth:`_build_topology` (Phases
-        0–2: KD-tree snapping, vertex/edge maps, junction detection), then
+        0-2: KD-tree snapping, vertex/edge maps, junction detection), then
         rebuilds each polygon keeping only its junction vertices (Phase 3).
 
         Args:
