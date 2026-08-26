@@ -70,6 +70,10 @@ class LeafAnatomy(Organ):
     # param overrides it with an absolute mm length; 0 disables (sharp corners kept).
     OUTLINE_SMOOTH_CELLS: float = 3.0
 
+    # Leaf air spaces are wired as dedicated wall_air network nodes (see
+    # Organ.PROTECT_AIR_TOPOLOGY); root/stem keep the base False.
+    PROTECT_AIR_TOPOLOGY: bool = True
+
     def __new__(cls, input_data: Any = None, seed: Optional[int] = None):
         if cls is LeafAnatomy:
             actual = (DicotLeafAnatomy if _leaf_planttype(input_data) == 2
@@ -621,6 +625,8 @@ class LeafAnatomy(Organ):
             if cumulative >= target:
                 break
             cells[i].type = "air space"
+            cells[i].protect_topology = True
+            cells[i].protect_shape = True
             cumulative += float(areas[i])
 
     def _convert_inter_bundle_aerenchyma(self) -> None:
@@ -653,6 +659,7 @@ class LeafAnatomy(Organ):
                     diameter=np.sqrt(part.area / np.pi) * 2,
                     id_cell=id_cell, id_layer=id_layer, id_group=id_group,
                     type="air space", polygon=part,
+                    protect_topology=True, protect_shape=True,
                 ))
 
     def _surface_y(self, x: float, outline: Polygon):

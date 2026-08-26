@@ -56,6 +56,11 @@ class Organ(AbstractNetwork, ABC):
     #: neighbours.  Set False to fuse every gap, surface ones included.
     FUSE_ENCLOSED_GAPS_ONLY: bool = True
 
+    #: Whether ordinary intercellular air-space cells (see :meth:`_apply_intercellular`)
+    #: are flagged ``protect_topology`` so NetworkExporter wires them as dedicated
+    #: wall_air network nodes.  False for root/stem; leaves override this True.
+    PROTECT_AIR_TOPOLOGY: bool = False
+
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
@@ -829,7 +834,8 @@ class Organ(AbstractNetwork, ABC):
                                for p in air_space_polys]
 
         air_union = GeometryProcessor.union_polygons(air_space_polys)
-        seat_air_spaces(self.all_cells, all_tissue_cells, air_union, air_space_polys)
+        seat_air_spaces(self.all_cells, all_tissue_cells, air_union, air_space_polys,
+                         protect_topology=self.PROTECT_AIR_TOPOLOGY)
 
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         """Denominator for the per-quadrant aerenchyma target area. Override in subclasses."""
@@ -1259,10 +1265,14 @@ class Organ(AbstractNetwork, ABC):
         return plot_tissues(self, ax=ax, show=show, labels=labels,
                             show_effective=show_effective, fuse=fuse)
 
-    def export_to_adjencymatrix(self) -> lil_matrix:
+    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None) -> lil_matrix:
         """
         Build the hydraulic network from cell geometry and return
         the sparse adjacency matrix.
+
+        ``air_link_radius`` bridges protected air-space cells that lie within
+        that distance of each other but aren't directly adjacent (see
+        ``NetworkExporter.export``); ``None`` uses its own default.
 
         Returns
         -------
@@ -1271,18 +1281,18 @@ class Organ(AbstractNetwork, ABC):
         """
         # Ensure cells are generated before building the network
         self.generate_cells()
-        return super().export_to_adjencymatrix()
+        return super().export_to_adjencymatrix(air_link_radius=air_link_radius)
 
     # ------------------------------------------------------------------
     # Network construction from Voronoi cell geometry
     # ------------------------------------------------------------------
-    def _build_anatnetwork(self) -> None:
+    def _build_anatnetwork(self, air_link_radius: Optional[float] = None) -> None:
         """
         Populate ``self.graph`` from the cell GeoDataFrame.
         Delegated to AnatomyWriter's NetworkExporter.
         """
         from openalea.granap.anatomy_writer import NetworkExporter
-        NetworkExporter(self).export(self)
+        NetworkExporter(self).export(self, air_link_radius=air_link_radius)
 
     
     def get_statistics(self) -> Dict[str, Any]:
