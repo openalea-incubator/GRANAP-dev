@@ -5,8 +5,9 @@ Needle anatomy implementation.
 import dataclasses
 import numpy as np
 from typing import List, Dict, Any, Optional
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, LineString, MultiLineString, MultiPolygon, GeometryCollection
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 
 from openalea.granap.organ_class import Organ
 from openalea.granap.cell_class import Cell
@@ -16,7 +17,7 @@ from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
-from openalea.granap.special_tissues import place_resin_duct, place_stomata
+from openalea.granap.special_tissues import place_resin_duct, place_stomata, seat_air_spaces
 from openalea.granap.tissue_class import TissueRecipe
 import matplotlib.pyplot as plt
 
@@ -27,7 +28,7 @@ import matplotlib.pyplot as plt
 _STOMATA_SKIP_BORDER_PTS: int = 300
 
 # The mesophyll ring used for duct placement is the outer annulus whose inner
-# edge is 1.2× duct diameters from the mesophyll boundary.
+# edge is 1.2x duct diameters from the mesophyll boundary.
 _DUCT_RING_BUFFER_FACTOR: float = 1.2
 
 # The parenchyma-ring polygon is obtained by shrinking the fitted ellipse
@@ -121,7 +122,7 @@ class NeedleAnatomy(Organ):
         aligned with the endodermis layer (t=1).
 
         Layers from the outside down to the endodermis are gradually morphed.
-        Layers inward from the endodermis (transfusion, parenchyma …) are
+        Layers inward from the endodermis (transfusion, parenchyma ...) are
         fully changed to fit inside the ellipse.
         """
         if self.central_cylinder_params.get("shape") != "ellipse":
@@ -160,7 +161,7 @@ class NeedleAnatomy(Organ):
             # If PolygonInterpolator fails (degenerate geometry), skip reshape.
             return layers_polygons
 
-        n_to_morph = endo_idx + 1  # indices 0 … endo_idx inclusive
+        n_to_morph = endo_idx + 1  # indices 0 ... endo_idx inclusive
         
         for i in range(1, n_to_morph):          # skip index 0 (outside)
             t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1
@@ -522,6 +523,172 @@ class NeedleAnatomy(Organ):
         return results
 
     # ------------------------------------------------------------------
+    # Intercellular air spaces (mesophyll-specific geometry)
+    # ------------------------------------------------------------------
+
+    def _apply_intercellular(self, ics: dict) -> None:
+        """Needle override of the intercellular-space geometry.
+
+        In the needle mesophyll the intercellular air spaces are small rhombic
+        (diamond-shaped) lacunae seated *on the walls* between adjacent mesophyll 
+        cells. This override intercepts the ``mesophyll`` tissue and builds those 
+        wall-centred rhombi (see :meth:`_apply_mesophyll_wall_rhombi`); 
+        any other tissue is delegated to the shared base implementation unchanged.
+        """
+        tissues = ics.get("tissue", [])
+        if isinstance(tissues, str):
+            tissues = [tissues]
+        if "mesophyll" not in tissues:
+            super()._apply_intercellular(ics)
+            return
+
+        smoothness = ics.get("smoothness", 0)
+        if isinstance(smoothness, (int, float)):
+            smoothness_per_tissue = [float(smoothness)] * len(tissues)
+        else:
+            smoothness_per_tissue = [float(s) for s in smoothness]
+        smoothness_by_tissue = dict(zip(tissues, smoothness_per_tissue))
+
+        # Build the wall-centred rhombic lacunae for the mesophyll only.
+        self._apply_mesophyll_wall_rhombi(smoothness_by_tissue.get("mesophyll", 0.0))
+
+        # Delegate the remaining tissues (if any) to the generic implementation.
+        other_tissues = [t for t in tissues if t != "mesophyll"]
+        if other_tissues:
+            remaining = dict(ics)
+            remaining["tissue"] = other_tissues
+            remaining["smoothness"] = [smoothness_by_tissue[t] for t in other_tissues]
+            super()._apply_intercellular(remaining)
+
+    def _apply_mesophyll_wall_rhombi(self, smoothness: float) -> None:
+        """Insert small rhombic air spaces on the walls between mesophyll cells.
+
+        For every wall shared by two adjacent mesophyll cells a rhombus (a
+        four-vertex diamond) is placed, centred on the wall midpoint and aligned
+        with the wall: its principal diagonal is parallel to the wall and spans
+        about ``MAJOR_WALL_FRACTION`` of the wall length, and its
+        principal-to-secondary diagonal ratio is ``AXIS_RATIO``.
+
+        The air-space cells use the same labelling conventions as the base
+        intercellular routine (``id_layer=0``, ``id_group=id_cell``).
+        """
+        MAJOR_WALL_FRACTION = 1.0 / 3.0   # principal diagonal ≈ 1/3 of the wall length
+        AXIS_RATIO = 2.0                  # principal : secondary diagonal = 2 : 1
+
+        mesophyll_cells = [
+            c for c in self.all_cells.get_cells_by_type("mesophyll")
+            if c.polygon is not None
+        ]
+        if len(mesophyll_cells) < 2:
+            return
+
+        polys = [c.polygon for c in mesophyll_cells]
+        tree = STRtree(polys)
+
+        rhombus_polys: List[Polygon] = []
+        seen_pairs: set = set()
+        for i, poly_i in enumerate(polys):
+            for j in tree.query(poly_i):
+                if j <= i:
+                    continue
+                pair = (i, j)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                poly_j = polys[j]
+                if not poly_i.intersects(poly_j):
+                    continue
+                shared = poly_i.intersection(poly_j)
+                for wall in self._iter_wall_segments(shared):
+                    rhombus = self._wall_rhombus(wall, MAJOR_WALL_FRACTION, AXIS_RATIO)
+                    if rhombus is not None and not rhombus.is_empty and rhombus.area > 1e-6:
+                        rhombus_polys.append(rhombus)
+
+        if not rhombus_polys:
+            return
+
+        # Union all lacunae once. Carving the cells and building the air-space
+        # cells from this *same* geometry keeps their shared boundaries
+        # vertex-for-vertex identical, so the network sees real walls and
+        # junctions between each lacuna and its mesophyll hosts.
+        air_union = GeometryProcessor.union_polygons(rhombus_polys)
+
+        # Split the air union into its connected lacunae; each becomes one cell.
+        if isinstance(air_union, MultiPolygon):
+            air_faces = [g for g in air_union.geoms if not g.is_empty and g.area > 1e-6]
+        elif not air_union.is_empty and air_union.area > 1e-6:
+            air_faces = [air_union]
+        else:
+            return
+
+        # Carve the lacunae out of the mesophyll cells and insert them as
+        # air-space cells (shared post-fill placement). ``protect_topology`` keeps
+        # each rhombus's straight sides as distinct walls, so the neighbouring mesophyll cell keeps the matching
+        # notch instead of being straightened across it (see ``CellGenerator._build_topology``).
+        
+        seat_air_spaces(
+            self.all_cells, mesophyll_cells, air_union, air_faces,
+            protect_topology=True,
+        )
+
+    @staticmethod
+    def _iter_wall_segments(shared) -> List[LineString]:
+        """Yield the 1-D wall segments from a cell/cell intersection geometry.
+
+        Two adjacent Voronoi cells share their boundary as a ``LineString`` (or a
+        ``MultiLineString``); point-only touches and degenerate parts are ignored.
+        """
+        walls: List[LineString] = []
+        if isinstance(shared, LineString):
+            if shared.length > 0:
+                walls.append(shared)
+        elif isinstance(shared, MultiLineString):
+            walls.extend(g for g in shared.geoms if g.length > 0)
+        elif isinstance(shared, GeometryCollection):
+            for g in shared.geoms:
+                if isinstance(g, (LineString, MultiLineString)):
+                    walls.extend(NeedleAnatomy._iter_wall_segments(g))
+        return walls
+
+    @staticmethod
+    def _wall_rhombus(wall: LineString, major_fraction: float, axis_ratio: float) -> Optional[Polygon]:
+        """Build a small rhombus centred on ``wall`` and aligned with it.
+
+        The rhombus is a four-vertex diamond whose principal diagonal is parallel
+        to the wall and spans ``major_fraction`` of the wall length; the secondary
+        (perpendicular) diagonal is the principal divided by ``axis_ratio``. 
+        Returns ``None`` for walls too short.
+        """
+        length = wall.length
+        if length <= 1e-9:
+            return None
+
+        # Wall midpoint (by arc length) and local orientation.
+        mid = wall.interpolate(0.5, normalized=True)
+        p0 = np.asarray(wall.coords[0])
+        p1 = np.asarray(wall.coords[-1])
+        direction = p1 - p0
+        norm = np.hypot(direction[0], direction[1])
+        if norm <= 1e-12:
+            return None
+        unit = direction / norm                       # along the wall
+        perp = np.array([-unit[1], unit[0]])          # perpendicular to the wall
+
+        half_major = 0.5 * length * major_fraction    # along the wall
+        half_minor = half_major / axis_ratio          # across the wall
+        if half_major <= 1e-9 or half_minor <= 1e-9:
+            return None
+
+        c = np.array([mid.x, mid.y])
+        verts = [
+            c + half_major * unit,    # tip along the wall (+)
+            c + half_minor * perp,    # tip across the wall (+)
+            c - half_major * unit,    # tip along the wall (-)
+            c - half_minor * perp,    # tip across the wall (-)
+        ]
+        return Polygon([tuple(v) for v in verts])
+
+    # ------------------------------------------------------------------
     # Cell-placement methods — call geometry helpers then place cells
     # ------------------------------------------------------------------
 
@@ -639,9 +806,3 @@ class NeedleAnatomy(Organ):
                 extra["stomata"] = [geom[0] for geom in stomata_geoms]
 
         return extra
-
-        
-
-
-
-

@@ -13,6 +13,7 @@ geometry of *where* a feature goes stays with the organ (it is organ-specific);
 these functions take that precomputed geometry and do the cell placement.
 
     carve_and_insert : remove cells under a mask, insert new cells, recompute
+    seat_air_spaces  : carve lacunae out of host cells, insert them as air spaces
     place_resin_duct : parenchyma ring + inner lumen for each resin duct
     place_stomata    : guard cells + substomatal chamber + pore for each stoma
     consider_as_cell : collapse a region into a single cell
@@ -57,6 +58,65 @@ def carve_and_insert(
     cell_manager.extend_cells(new_cells)
     if recalc:
         cell_manager.recalculate_cell_properties()
+
+
+def seat_air_spaces(
+    cell_manager: CellManager,
+    host_cells: List[Cell],
+    air_union,
+    air_faces,
+    *,
+    protect_topology: bool = False,
+    min_area: float = 1e-6,
+) -> None:
+    """Carve intercellular lacunae out of their host cells and insert them.
+
+    The shared post-fill pattern for intercellular air spaces: the lacunae have
+    already been computed (``air_union`` is their union; ``air_faces`` are the
+    individual polygons to become cells).  Each ``host_cells`` polygon is carved
+    with ``air_union`` (so the lacuna boundary and the carved host boundary stay
+    vertex-for-vertex identical), each face is inserted as an ``"air space"`` cell
+    using the standard labelling (``id_layer=0``, ``id_group=id_cell``), and the
+    cell set is re-simplified.
+
+    ``air_faces`` and ``air_union`` are passed separately on purpose: callers may
+    insert the *simplified* air polygons individually while carving with their
+    union, or insert the union's connected components — the caller decides what a
+    single lacuna cell is.
+
+    When ``protect_topology`` is True the inserted lacunae are flagged so every
+    vertex is kept as part of a crooked wall (see ``CellGenerator._build_topology``);
+    used for small mid-wall lacunae (the needle mesophyll rhombi) whose off-wall
+    tips would otherwise let a neighbour be straightened across the notch.
+    """
+    for cell in host_cells:
+        if cell.polygon is None:
+            continue
+        carved = cell.polygon.difference(air_union)
+        if not carved.is_empty and carved.area > min_area:
+            cell.polygon = carved
+        else:
+            cell.polygon = None
+
+    id_cell = len(cell_manager.cells)
+    for face in air_faces:
+        id_cell += 1
+        lacuna = Cell(
+            x=face.centroid.x,
+            y=face.centroid.y,
+            diameter=np.sqrt(face.area / np.pi) * 2,
+            id_cell=id_cell,
+            id_layer=0,
+            id_group=id_cell,
+            type="air space",
+            polygon=face,
+        )
+        if protect_topology:
+            lacuna.protect_topology = True
+            lacuna.protect_shape = True
+        cell_manager.cells.append(lacuna)
+
+    cell_manager.cells = CellGenerator.simplify_cells(cell_manager.cells)
 
 
 def place_resin_duct(
@@ -149,6 +209,7 @@ def place_stomata(
                     diameter=np.sqrt(poly.area / np.pi) * 2,
                     id_cell=i_cell, id_group=id_stomata,
                     type=cell_type,
+                    protect_topology=(cell_type == "air space"),
                 ))
 
         poly   = pore.buffer(-sp["width"] / 4)

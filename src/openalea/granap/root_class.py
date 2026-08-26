@@ -89,7 +89,7 @@ class RootAnatomy(Organ):
         super().__init__(seed=seed)
         if isinstance(input_data, OrganInputData):
             # Surface known cross-field footguns up front (secondary cambium not
-            # enclosing the primary, inner >= outer, …) as warnings rather than a
+            # enclosing the primary, inner >= outer, ...) as warnings rather than a
             # silently broken render.  Non-fatal: clipping still produces output.
             for issue in input_data.validate():
                 warnings.warn(f"[anatomy config] {issue}", stacklevel=2)
@@ -173,54 +173,22 @@ class RootAnatomy(Organ):
     # ------------------------------------------------------------------
 
     def _create_base_shape(self) -> Polygon:
-        radius = self._calculate_root_radius()
-        shape_params = self._get_param("base_shape")
-        kind = shape_params.get("shape", "circle")
-
-        if kind == "circle":
-            return GeometryProcessor.circle_polygon(radius)
-
-        if kind == "star":
-            # Star outline uses the same parameters as the xylem star.
-            return GeometryProcessor.oriented_star_polygon(
-                n_branches=int(shape_params.get("n_peaks", 5)),
-                radius_peak_side=float(shape_params.get("radius_peak_side", 0.6)),
-                radius_valley_side=float(shape_params.get("radius_valley_side", 0.4)),
-                arc_peak_side=float(shape_params.get("arc_peak_side", 0.05)),
-                arc_valley_side=float(shape_params.get("arc_valley_side", 0.10)),
-            )
-
-        # width/height define the bounding box; 0 (auto) falls back to the
-        # auto-computed diameter so the shape matches the default circle's size.
-        width = float(shape_params.get("width", 0.0)) or 2 * radius
-        height = float(shape_params.get("height", 0.0)) or 2 * radius
-
-        if kind == "ellipse":
-            return GeometryProcessor.ellipse_to_polygon(0.0, 0.0, width / 2, height / 2, 0.0)
-        if kind == "focus_ellipse":
-            # Preferred: a measured contour ``profile`` (list of (major_pos,
-            # minor_width) mm points) best-fitted to a single superellipse — no
-            # exponent to hand-tune.  Major axis runs along +y (height).  Falls
-            # back to the width/height bounding box (+ optional exponent) when no
-            # profile is given.
-            profile = shape_params.get("profile")
-            if profile:
-                semi_major, semi_minor, exponent = GeometryProcessor.fit_focus_ellipse(profile)
-                return GeometryProcessor.focus_ellipse_polygon(
-                    0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exponent,
-                )
-            return GeometryProcessor.focus_ellipse_polygon(
-                0.0, 0.0, width / 2, height / 2, 0.0,
-                exponent=float(shape_params.get("exponent", 4.0)),
-            )
-        if kind == "square":
-            return GeometryProcessor.rectangle_polygon(width, width)
-        if kind == "rectangle":
-            return GeometryProcessor.rectangle_polygon(width, height)
-        if kind == "triangle":
-            return GeometryProcessor.triangle_polygon(width, height)
-        # Unknown shape — fall back to circle.
-        return GeometryProcessor.circle_polygon(radius)
+        # One shape family for every organ contour — see
+        # GeometryProcessor.contour_polygon.  The root star uses the xylem-star
+        # parameters (peak/valley radii + arcs); focus_ellipse prefers a measured
+        # profile, else width/height + exponent.
+        sp_ = self._get_param("base_shape")
+        return GeometryProcessor.contour_polygon(
+            sp_.get("shape", "circle"),
+            radius=self._calculate_root_radius(),
+            width=float(sp_.get("width", 0.0)), height=float(sp_.get("height", 0.0)),
+            n_branches=int(sp_.get("n_peaks", 5)),
+            radius_peak_side=float(sp_.get("radius_peak_side", 0.6)),
+            radius_valley_side=float(sp_.get("radius_valley_side", 0.4)),
+            arc_peak_side=float(sp_.get("arc_peak_side", 0.05)),
+            arc_valley_side=float(sp_.get("arc_valley_side", 0.10)),
+            profile=sp_.get("profile"), exponent=float(sp_.get("exponent", 4.0)),
+        )
 
     def _calculate_root_radius(self) -> float:
         radius = self.vascular_params["thickness"] / 2
@@ -381,6 +349,34 @@ class RootAnatomy(Organ):
             if rtype == "xylem":
                 self.vascular_polygons.append(placed_poly)
 
+    # --- Developmental series: prescribed (tracked) xylem vessels -----------
+    # See ROOT_SERIES_PLAN.  When ``self._prescribed_vessels`` is set (a list of
+    # (x, y, r, track_id)), the vascular recipe places exactly these xylem vessels
+    # at the given positions/radii carrying their persistent track_id, instead of
+    # packing random ones — so a vessel keeps its identity across the apex->collet
+    # series.  The surrounding tissue still generates around them (the "refit").
+    def prescribe_vessels(self, vessels) -> "RootAnatomy":
+        """Prescribe the exact xylem vessel set for this section: an iterable of
+        ``(x, y, radius, track_id)``.  Returns self."""
+        self._prescribed_vessels = [tuple(v) for v in vessels]
+        return self
+
+    def _place_prescribed_xylem(self, stele_polygon: Polygon) -> None:
+        """Place the prescribed xylem vessels as tracked cells + feed the vascular
+        mask, so downstream tissue clears around them."""
+        vessels = getattr(self, "_prescribed_vessels", None)
+        if not vessels:
+            return
+        cx, cy = stele_polygon.centroid.x, stele_polygon.centroid.y
+        circles = [(float(x), float(y), float(r)) for (x, y, r, _tid) in vessels]
+        track_ids = [tid for (_x, _y, _r, tid) in vessels]
+        placed = place_packed_group(
+            self.vascular_cells, circles, "metaxylem",
+            id_base=0, angle_center=(cx, cy), track_ids=track_ids,
+        )
+        for placed_poly, _rtype, _gid in placed:
+            self.vascular_polygons.append(placed_poly)
+
     @staticmethod
     def _largest_polygon(geom):
         """Largest Polygon piece of a (possibly Multi)Polygon, or None."""
@@ -393,17 +389,13 @@ class RootAnatomy(Organ):
     @staticmethod
     def _oriented_ellipse(tx: float, ty: float, width: float, height: float,
                           angle_deg: float, resolution: int = 64) -> Polygon:
-        """Axis-aligned unit disc scaled to ``width``x``height``, rotated so its
-        major (height) axis points along ``angle_deg`` (minus the 90° that maps the
-        +y major axis to the radial direction), then translated to ``(tx, ty)``.
+        """Oriented vascular-cluster ellipse (thin delegator).
 
-        The one source for every oriented vascular cluster ellipse (phloem valleys,
-        arch phloem, proto/phloem bundles).
+        The one source now lives in :meth:`GeometryProcessor.oriented_ellipse`
+        (shared with the stem package); kept here so the root vascular code and
+        its subclasses keep calling ``self._oriented_ellipse(...)`` unchanged.
         """
-        raw = Point(0, 0).buffer(1, resolution=resolution)
-        raw = affine_scale(raw, width / 2, height / 2)
-        raw = rotate(raw, angle_deg - 90, origin=(0, 0))
-        return translate(raw, tx, ty)
+        return GeometryProcessor.oriented_ellipse(tx, ty, width, height, angle_deg, resolution)
 
     def _remove_stele_engulfed_by_xylem(self, area_fraction: float = 0.6) -> None:
         """Drop stele cells whose footprint is mostly covered by xylem vessels.

@@ -9,6 +9,14 @@ Reproducibility note: full ``seed=0`` determinism depends on the Voronoi jitter
 drawing from the organ's seeded ``self.rng`` (see ``Cell.jitter`` /
 ``CellGenerator.voronoi_diagram``).  Before that fix, dicot secondary growth
 drifted run-to-run because the jitter used the global ``np.random``.
+
+Cross-platform note: ``dicot_stem`` used to differ on macOS/Windows because the
+xylem file-separator strips were clipped to the zone before being used to cut it
+(``_xylem_file_strips``), which left severance to a collinear-boundary decision
+GEOS resolves at the last bit — a 1e-9 nudge flipped 2 of 8 bundles from 3 xylem
+files to 2.  With the cutter left unclipped all 8 bundles split as parameterised
+and the census is stable to ~1e-4.  Counts here are stable across GEOS 3.13/3.14
+and py3.13/3.14; the geometry stack is pinned in ``pyproject.toml``.
 """
 
 import os
@@ -18,6 +26,7 @@ sys.path.append(os.path.abspath(".."))
 
 from openalea.granap.root_class import RootAnatomy
 from openalea.granap.needle_class import NeedleAnatomy
+from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.input_data import OrganInputData
 
 SEED = 0
@@ -61,6 +70,16 @@ def needle_features() -> NeedleAnatomy:
     return NeedleAnatomy(data, seed=SEED)
 
 
+def dicot_stem() -> StemAnatomy:
+    """Dicot stem eustele: a ring of open collateral bundles around a pith."""
+    return StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED)
+
+
+def monocot_stem() -> StemAnatomy:
+    """Monocot stem atactostele: scattered 'face' bundles + sclerenchyma."""
+    return StemAnatomy(OrganInputData.for_monocot_stem(), seed=SEED)
+
+
 # -- golden census (seed=0) --------------------------------------------------
 
 GOLDEN = {
@@ -80,16 +99,24 @@ GOLDEN = {
         "phloem": 108, "stele": 1056, "xylem": 50,
     }),
     "needle_default": (needle_default, {
-        "Strasburger cell": 38, "air space": 312, "cambium": 58, "duct": 3,
+        "Strasburger cell": 38, "air space": 476, "cambium": 58, "duct": 3,
         "endodermis": 49, "epidermis": 231, "guard cell": 8, "hypodermis": 387,
         "mesophyll": 228, "parenchyma": 244, "phloem": 310, "pore": 4,
         "resin duct": 42, "transfusion": 103, "xylem": 270,
     }),
     "needle_features": (needle_features, {
-        "Strasburger cell": 38, "air space": 327, "cambium": 58, "duct": 2,
+        "Strasburger cell": 38, "air space": 494, "cambium": 58, "duct": 2,
         "endodermis": 49, "epidermis": 219, "guard cell": 20, "hypodermis": 366,
         "mesophyll": 230, "parenchyma": 244, "phloem": 310, "pore": 10,
         "resin duct": 28, "transfusion": 103, "xylem": 270,
+    }),
+    "dicot_stem": (dicot_stem, {
+        "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,
+        "epidermis": 220, "parenchyma": 3963, "sieve element": 71, "xylem": 72,
+    }),
+    "monocot_stem": (monocot_stem, {
+        "air space": 543, "companion cell": 159, "cortex": 470, "epidermis": 261,
+        "parenchyma": 3853, "sclerenchyma": 2137, "sieve element": 159, "xylem": 39,
     }),
 }
 
@@ -145,3 +172,11 @@ def test_needle_default_golden():
 
 def test_needle_features_golden():
     _check("needle_features")
+
+
+def test_dicot_stem_golden():
+    _check("dicot_stem")
+
+
+def test_monocot_stem_golden():
+    _check("monocot_stem")

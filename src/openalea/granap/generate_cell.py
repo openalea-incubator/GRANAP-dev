@@ -5,7 +5,7 @@ Cell generator module for creating cells using Voronoi tessellation.
 import numpy as np
 import shapely as sp
 from scipy.spatial import Voronoi
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -258,7 +258,7 @@ class CellGenerator:
                         all_cells.add_cell(new_cell)
                         id_cell += 1
                     id_group += 1
-        
+
         all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
         return all_cells
 
@@ -281,7 +281,7 @@ class CellGenerator:
             return all_cells
 
         # --- build group metadata ----------------------------------------
-        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        groups: dict = {}  # id_group -> {id_layer, indices, poly}
         for idx, cell in enumerate(all_cells.cells):
             g = cell.id_group
             if g not in groups:
@@ -410,7 +410,7 @@ class CellGenerator:
         # Union the per-seed Voronoi polygons into one 'biological' cell per
         # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
         # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
-        # ~13s of pure overhead (see doc/performance_proposals.md ①). Plain
+        # ~13s of pure overhead (see doc/performance_proposals.md (1)). Plain
         # Python grouping + shapely ``unary_union`` (what dissolve calls
         # internally) is byte-identical: dissolve's default aggregation is
         # 'first' per group, so the representative cell is the first-seen one;
@@ -433,10 +433,13 @@ class CellGenerator:
                 id_cell=r.id_cell,
                 id_layer=r.id_layer,
                 id_group=gid,
+                track_id=r.track_id,      # carry the tracked-vessel id through grouping
                 angle=r.angle,
                 radius=r.radius,
                 area=poly.area,
                 polygon=poly,
+                protect_topology=getattr(r, "protect_topology", False),
+                protect_shape=getattr(r, "protect_shape", False),
             ))
 
         return final_cells
@@ -445,6 +448,7 @@ class CellGenerator:
     def _build_topology(
         polys: List,
         cell_ids: List[Any],
+        protect_ids: Optional[set] = None,
     ) -> Tuple[Dict[Any, List[tuple]], Dict[tuple, set], Dict[tuple, set], set]:
         """
         Build the shared vertex/edge topology for a collection of polygons.
@@ -462,14 +466,18 @@ class CellGenerator:
                        ``cell_ids``.
             cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
                        index, integer position, …).
+            protect_ids:Optional set of ``cell_ids`` in ``protected_shape_set``. 
+                        Used for small inserted mid-wall air spaces 
+                        Left ``None`` for the ordinary cell/aerenchyma pipeline.
 
         Returns:
-            ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set)``
+            ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set)``
 
-            * ``cell_vkeys``       – ``{cell_id: [snapped (x,y) tuples]}``
-            * ``vertex_to_cells``  – ``{(x,y): set(cell_ids)}``
-            * ``edge_to_cells``    – ``{edge_key: set(cell_ids)}``
-            * ``junction_set``     – set of ``(x,y)`` junction vertices
+            * ``cell_vkeys``            – ``{cell_id: [snapped (x,y) tuples]}``
+            * ``vertex_to_cells``       – ``{(x,y): set(cell_ids)}``
+            * ``edge_to_cells``         – ``{edge_key: set(cell_ids)}``
+            * ``junction_set``          – set of ``(x,y)`` junction vertices
+            * ``protected_shape_set``   – set of ``(x,y)`` vertices that are protected
         """
         n_dec = 6
 
@@ -521,7 +529,7 @@ class CellGenerator:
             else 1e-4
         )
 
-        # Cluster nearby vertices → canonical snapped coordinate.  All ball
+        # Cluster nearby vertices -> canonical snapped coordinate.  All ball
         # queries are issued in one parallel C batch; the greedy single-pass
         # assignment below is byte-identical to querying point-by-point (each
         # seed's cluster is still exactly the points within snap_tol of it).
@@ -591,7 +599,14 @@ class CellGenerator:
             if len(incident_pairs) > 1:
                 junction_set.add(vk)
 
-        return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
+        # keep track of the vertices that are protected
+        protected_shape_set: set = set()
+        if protect_ids:
+            for cid in protect_ids:
+                for vk in cell_vkeys.get(cid, ()):  # skip ids dropped in Phase 1
+                    protected_shape_set.add(vk)
+
+        return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set    
 
     @staticmethod
     def remove_nested_cells(grouped_cells: List[Cell], min_overlap: float = 0.1) -> List[Cell]:
@@ -666,7 +681,7 @@ class CellGenerator:
         Simplify cell boundaries by retaining only junction vertices.
 
         Delegates topology computation to :meth:`_build_topology` (Phases
-        0–2: KD-tree snapping, vertex/edge maps, junction detection), then
+        0-2: KD-tree snapping, vertex/edge maps, junction detection), then
         rebuilds each polygon keeping only its junction vertices (Phase 3).
 
         Args:
@@ -678,20 +693,28 @@ class CellGenerator:
         polys = [c.polygon for c in grouped_cells]
         cell_ids = list(range(len(grouped_cells)))
 
-        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
-            polys, cell_ids
+        # Cells flagged ``protect_shape`` (the needle mesophyll air-space rhombi) keep
+        # every boundary vertex here; ``protect_topology`` alone (e.g. the substomatal
+        # chamber) only matters later for air-network wiring, not shape simplification.
+        protect_ids = {
+            idx for idx, cell in enumerate(grouped_cells)
+            if getattr(cell, "protect_shape", False)
+        }
+
+        cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(
+            polys, cell_ids, protect_ids=protect_ids or None
         )
 
         if not cell_vkeys:
             return grouped_cells
 
-        # Phase 3 — rebuild each polygon keeping only junction vertices
+        # Phase 3 — rebuild each polygon keeping only junction and protected vertices
         for idx, cell in enumerate(grouped_cells):
             if idx not in cell_vkeys:
                 continue
 
             vkeys = cell_vkeys[idx]
-            simplified = [vk for vk in vkeys if vk in junction_set]
+            simplified = [vk for vk in vkeys if (vk in junction_set or vk in protected_shape_set)]
 
             if len(simplified) < 3:
                 simplified = vkeys
