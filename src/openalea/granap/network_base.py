@@ -49,13 +49,18 @@ class AbstractNetwork(ABC):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def _build_anatnetwork(self) -> None:
+    def _build_anatnetwork(self, air_link_radius: Optional[float] = None) -> None:
         """
         Populate ``self.graph`` with wall, junction and cell nodes,
         and connect them with the appropriate edges.
 
         Must set ``self.n_walls``, ``self.n_junctions``, ``self.n_cells``
         and ``self._wall_to_cells``.
+
+        ``air_link_radius`` bridges protected air-space cells (see
+        ``NetworkExporter.export``) that lie within that distance of each
+        other but aren't directly adjacent; ``None`` uses that method's
+        own default (3x the median wall length).
         """
         ...
 
@@ -66,9 +71,12 @@ class AbstractNetwork(ABC):
     def n_total(self) -> int:
         return self.n_walls + self.n_junctions + self.n_cells
 
-    def export_to_adjencymatrix(self) -> lil_matrix:
+    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None) -> lil_matrix:
         """
         Build the network (if needed) and return the sparse adjacency matrix.
+
+        ``air_link_radius`` is forwarded to ``_build_anatnetwork`` (only used
+        the first time the graph is built — it has no effect once cached).
 
         Returns
         -------
@@ -83,7 +91,7 @@ class AbstractNetwork(ABC):
 
         # Ensure the graph is built
         if self.graph.number_of_nodes() == 0:
-            self._build_anatnetwork()
+            self._build_anatnetwork(air_link_radius=air_link_radius)
 
         n = self.n_total
         mat = lil_matrix((n, n))

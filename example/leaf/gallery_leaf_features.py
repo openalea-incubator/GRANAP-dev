@@ -1,3 +1,14 @@
+"""Gallery: full feature set (layers / cells / network / air-link network) for
+one monocot leaf and one dicot leaf.
+
+Mirrors ``example/needle/gallery_needle_features.py``, built from the same
+``OrganInputData.for_monocot_leaf()`` / ``.for_dicot_leaf()`` presets used by
+``example/leaf/gallery_leaf.py``. Both presets already carry air-space tissues
+(inter-bundle aerenchyma for the monocot, intercellular spaces in the spongy
+mesophyll for the dicot, plus substomatal chambers for both), so the air-link
+network highlight has something to show for each.
+"""
+
 import sys
 import os
 import matplotlib.pyplot as plt
@@ -6,9 +17,10 @@ import networkx as nx
 # Add parent directory to path to allow importing anatomy package
 sys.path.append(os.path.abspath('..'))
 
-from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.input_data import OrganInputData
-from openalea.granap.visualization import plot_layers_simple, plot_section
+from openalea.granap.leaf_class import LeafAnatomy
+
+SEED = 0
 
 
 def _air_space_network_elements(organ):
@@ -84,21 +96,23 @@ def plot_air_link_network(organ, title, show=True):
     return fig
 
 
+def run_leaf_features(label, data, show, radius):
+    leaf = LeafAnatomy(data, seed=SEED)
+
+    leaf.plot_layers(show=show, title=f"{label} Layers")
+
+    leaf.plot_cells(show=show, title=f"{label} Cells")
+
+    _ = leaf.export_to_adjencymatrix(air_link_radius = radius)
+    leaf.plot_network(show=show, title=f"{label} Network")
+
+    plot_air_link_network(leaf, f"{label} air-link network", show=show)
+
+
 def main(show=False):
-    # Configure the input data, then build once.
-    data = OrganInputData.for_needle()
-    data.set_value("resin_duct", "n_files", 2)
-    data.set_value("stomata", "n_files", 10)
-    needle = NeedleAnatomy(data)
+    run_leaf_features("Monocot Leaf", OrganInputData.for_monocot_leaf(), show, radius=0.1)
+    run_leaf_features("Dicot Leaf", OrganInputData.for_dicot_leaf(), show, radius= 0.04)
 
-    needle.plot_layers(show=show, title=f"Needle Layers")
-
-    needle.plot_cells(show=show, title=f"Needle Cells")
-
-    _ = needle.export_to_adjencymatrix()
-    needle.plot_network(show=show, title="Needle Network")
-
-    plot_air_link_network(needle, "Needle air-link network", show=show)
 
 if __name__ == "__main__":
     main(show=True)
