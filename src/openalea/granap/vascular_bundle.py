@@ -524,9 +524,16 @@ def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
         center = np.array([gx, gy]) + tang * t
         strip = LineString([tuple(center - d * reach), tuple(center + d * reach)]).buffer(
             half_width, cap_style=2)
-        piece = strip.intersection(zone)
-        if not piece.is_empty:
-            strips.append(piece)
+        # Keep the strip *unclipped*.  It is a cutter — the caller does
+        # ``zone.difference(unary_union(strips))`` — and clipping it to ``zone``
+        # first lands its end caps exactly on the zone boundary, so whether the
+        # strip severs the zone becomes a collinear-boundary question GEOS
+        # resolves at the last bit.  Unclipped the cutter runs clear through the
+        # boundary and the split is unambiguous: a 1e-9 change in ``half_width``
+        # used to flip 2 of 8 bundles from 3 files to 2 (and the xylem census
+        # with them), which is what made the golden test OS-dependent.
+        if strip.intersects(zone):
+            strips.append(strip)
     return strips
 
 

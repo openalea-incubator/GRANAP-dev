@@ -9,6 +9,14 @@ Reproducibility note: full ``seed=0`` determinism depends on the Voronoi jitter
 drawing from the organ's seeded ``self.rng`` (see ``Cell.jitter`` /
 ``CellGenerator.voronoi_diagram``).  Before that fix, dicot secondary growth
 drifted run-to-run because the jitter used the global ``np.random``.
+
+Cross-platform note: ``dicot_stem`` used to differ on macOS/Windows because the
+xylem file-separator strips were clipped to the zone before being used to cut it
+(``_xylem_file_strips``), which left severance to a collinear-boundary decision
+GEOS resolves at the last bit — a 1e-9 nudge flipped 2 of 8 bundles from 3 xylem
+files to 2.  With the cutter left unclipped all 8 bundles split as parameterised
+and the census is stable to ~1e-4.  Counts here are stable across GEOS 3.13/3.14
+and py3.13/3.14; the geometry stack is pinned in ``pyproject.toml``.
 """
 
 import os
@@ -104,7 +112,7 @@ GOLDEN = {
     }),
     "dicot_stem": (dicot_stem, {
         "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,
-        "epidermis": 220, "parenchyma": 3962, "sieve element": 71, "xylem": 75,
+        "epidermis": 220, "parenchyma": 3963, "sieve element": 71, "xylem": 72,
     }),
     "monocot_stem": (monocot_stem, {
         "air space": 543, "companion cell": 159, "cortex": 470, "epidermis": 261,
