@@ -4,7 +4,7 @@ Geometry processor module for handling polygon operations.
 
 import numpy as np
 import shapely as sp
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Callable
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
 from shapely.affinity import translate as _shapely_translate, rotate as _shapely_rotate, scale as _shapely_scale
 from cv2 import fitEllipse
@@ -381,6 +381,73 @@ class GeometryProcessor:
                 return sp.Polygon(coords_smooth)
         else:
             return polygon_buffered
+
+    @staticmethod
+    def variable_buffer_polygon(polygon: Polygon, center: Point, offset_fn: Callable[[float], float],
+                                n_pts: int = 720, smooth_factor: float = 0.3) -> Polygon:
+        """
+        Buffer a polygon boundary by a per-angle distance around ``center``,
+        instead of the uniform Minkowski buffer of :meth:`buffer_polygon`.
+
+        Used for tissue rings whose radial thickness varies with position
+        (e.g. a needle's adaxial-thicker mesophyll or corner-thickened
+        hypodermis): each resampled boundary point is moved along its own
+        radial direction from ``center`` by ``offset_fn`` of its polar angle,
+        rather than by one shared distance.
+
+        Args:
+            polygon:       Input polygon.
+            center:        Point used as the polar-angle / radial-offset origin.
+            offset_fn:     Callable(angle_degrees) -> distance, same sign
+                            convention as buffer_polygon's ``distance``
+                            (negative = shrink inward, positive = expand
+                            outward). ``angle_degrees`` is the boundary
+                            point's polar angle around ``center``, in [0, 360).
+            n_pts:         Number of points the boundary is resampled to
+                            before offsetting (uniform arc-length resampling).
+            smooth_factor: Optional post-offset Laplacian smoothing (0 = none).
+
+        Returns:
+            The offset (and optionally smoothed) polygon.
+        """
+        coords = np.array(polygon.exterior.coords)
+        coords = GeometryProcessor.resample_coords(coords, target_n_points=n_pts)
+
+        cx, cy = center.x, center.y
+        dx = coords[:, 0] - cx
+        dy = coords[:, 1] - cy
+        r = np.hypot(dx, dy)
+        r_safe = np.where(r < 1e-9, 1e-9, r)
+        angles = np.degrees(np.arctan2(dy, dx)) % 360.0
+        offsets = np.array([offset_fn(a) for a in angles])
+
+        r_new = np.clip(r + offsets, 1e-6, None)
+        scale = r_new / r_safe
+        new_coords = np.column_stack((cx + dx * scale, cy + dy * scale))
+
+        new_poly = sp.Polygon(new_coords)
+        if not new_poly.is_valid or new_poly.is_empty:
+            new_poly = new_poly.buffer(0)
+
+        # A self-intersecting ("bowtie") result -- e.g. from closely-spaced
+        # narrow peaks in offset_fn combined with coarse resampling -- can
+        # make buffer(0) split the polygon into a MultiPolygon of a real
+        # lobe plus tiny sliver artifacts. Collapse to the single largest
+        # component, same defensive pattern buffer_polygon already uses for
+        # its smoothing branch, so callers always get back one Polygon.
+        if hasattr(new_poly, "geoms"):
+            parts = [g for g in new_poly.geoms if not g.is_empty and hasattr(g, "exterior")]
+            if parts:
+                new_poly = max(parts, key=lambda g: g.area)
+            else:
+                new_poly = Polygon()
+
+        if smooth_factor > 0 and not new_poly.is_empty and hasattr(new_poly, "exterior") and new_poly.exterior is not None:
+            xy = np.array(new_poly.exterior.coords.xy)
+            coords_smooth = GeometryProcessor.smoothing_polygon(xy.T, smooth_factor)
+            new_poly = sp.Polygon(coords_smooth)
+
+        return new_poly
 
     @staticmethod
     def union_polygons(polygons: List[Polygon]) -> Polygon:
@@ -1061,9 +1128,15 @@ class GeometryProcessor:
         return placed
 
     @staticmethod
-    def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
+    def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, angle: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
         """
-        Fit an inner ellipse to a polygon
+        Fit an inner ellipse to a polygon.
+
+        ``angle`` (degrees), when given, overrides the orientation that would
+        otherwise be auto-detected from the polygon's own shape via
+        ``fitEllipse`` -- useful when the polygon being fit into (e.g. one
+        half of a vascular region split down the middle) has a natural aspect
+        ratio that doesn't reflect the desired ellipse orientation.
         """
         # convert to numpy array of points
         points = np.array(polygon.exterior.coords.xy).T
@@ -1074,8 +1147,9 @@ class GeometryProcessor:
         points = points.reshape(-1, 1, 2).astype(np.float32)
 
         # fit ellipse to get orientation and aspect ratio
-        (cx_fit, cy_fit), (major, minor), angle = fitEllipse(points)
-        
+        (cx_fit, cy_fit), (major, minor), fit_angle = fitEllipse(points)
+        angle = fit_angle if angle is None else angle
+
         # Use Chebyshev Center (deepest point inside) instead of fitEllipse center or Centroid
         cx, cy = GeometryProcessor.get_chebyshev_center(polygon)
     
@@ -1108,7 +1182,7 @@ class GeometryProcessor:
                 break
     
             scale_factor_x *= shrink_step
-            scale_factor_y *= shrink_step*0.95
+            scale_factor_y *= shrink_step
         
         if result_ellipse is None:
             # Fallback
@@ -1129,6 +1203,47 @@ class GeometryProcessor:
             plt.show()
     
         return result_ellipse
+
+    @staticmethod
+    def push_ellipse_to_boundary(polygon, ellipse, direction, max_iter=40):
+        """Translate ``ellipse`` (a :func:`fit_inner_ellipse`-style dict) along
+        ``direction`` as far as possible while it stays inside ``polygon``.
+
+        Binary search on the translation distance, same style as the
+        shrink-until-it-fits loop in :func:`fit_inner_ellipse`: an ellipse
+        fit via a Chebyshev centre or a shrink search can end up well short
+        of the polygon's actual boundary, so this pushes it the rest of the
+        way until it touches. ``axes``/``angle`` are left unchanged; only
+        ``center``/``polygon`` move.
+        """
+        dx, dy = direction
+        norm = np.hypot(dx, dy)
+        if norm == 0:
+            return ellipse
+        dx, dy = dx / norm, dy / norm
+
+        base_polygon = ellipse["polygon"]
+        minx, miny, maxx, maxy = polygon.bounds
+        hi = np.hypot(maxx - minx, maxy - miny)
+        lo = 0.0
+
+        def fits(t):
+            return polygon.contains(sp.affinity.translate(base_polygon, dx * t, dy * t))
+
+        for _ in range(max_iter):
+            mid = (lo + hi) / 2.0
+            if fits(mid):
+                lo = mid
+            else:
+                hi = mid
+
+        if lo == 0.0:
+            return ellipse
+        return {
+            **ellipse,
+            "center": [ellipse["center"][0] + dx * lo, ellipse["center"][1] + dy * lo],
+            "polygon": sp.affinity.translate(base_polygon, dx * lo, dy * lo),
+        }
 
     @staticmethod
     def pizza_slice(polygon, n_slices):
@@ -1161,7 +1276,7 @@ class GeometryProcessor:
     
 
     @staticmethod
-    def two_ellipses(polygon, rx, ry):
+    def two_ellipses(polygon, rx, ry, angle: Optional[float] = None):
         # vertical splitting line (make it long enough to fully cross the polygon)
         center = polygon.centroid
     
@@ -1195,10 +1310,24 @@ class GeometryProcessor:
         )
     
         ellipses = []
-    
 
-        ellipses.append(GeometryProcessor.fit_inner_ellipse(left_poly.buffer(-0.002), rx, ry))
-        ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
+        # When an explicit angle is given, mirror it across the vertical
+        # split line for the right-hand ellipse (180-angle, equivalent to
+        # -angle for an axis whose orientation is only defined mod 180) so
+        # the pair forms a symmetric "V"/"^" pattern tilted outward from the
+        # midline, rather than both ellipses tilting the same direction.
+        right_angle = angle if angle is None else (180.0 - angle)
+
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(left_poly.buffer(-0.002), rx, ry, angle=angle))
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry, angle=right_angle))
+
+        # A Chebyshev-centre/shrink-search fit can land well short of the
+        # region's actual edge; slide each ellipse the rest of the way
+        # outward (against the *full*, undivided polygon -- the split line
+        # above is no longer an obstacle once moving away from it) so it
+        # touches the real boundary instead of floating near the middle.
+        ellipses[0] = GeometryProcessor.push_ellipse_to_boundary(polygon, ellipses[0], (-1.0, 0.0))
+        ellipses[1] = GeometryProcessor.push_ellipse_to_boundary(polygon, ellipses[1], (1.0, 0.0))
     
         return ellipses
 

@@ -18,7 +18,7 @@ from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.special_tissues import place_resin_duct, place_stomata, seat_air_spaces
-from openalea.granap.tissue_class import TissueRecipe
+from openalea.granap.tissue_class import TissueRecipe, fill_by_packing
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------
@@ -90,30 +90,102 @@ class NeedleAnatomy(Organ):
         for param in self.layers:
             self.layer_manager.add_layer(Layer.from_dict(param))
     
+    @staticmethod
+    def _angular_multiplier(profile: List[List[float]], angle_deg: float) -> float:
+        """
+        Circularly interpolate a list of ``(angle_degrees, multiplier)``
+        control points at ``angle_deg`` (wrapping at 360 degrees).
+
+        Consumed by ``_offset_layer_polygon`` for any layer carrying a
+        ``"thickness_profile"`` entry, e.g. the extra abaxial-only mesophyll
+        ring or the corner-thickened hypodermis ring: the ring's nominal
+        radial offset is scaled by this multiplier as a function of position
+        around the needle cross-section. The actual pole/corner angles
+        depend on the base shape's aspect ratio -- see example/needle/
+        pinus_pinaster.py's ``_pole_and_corner_angles`` for the derivation
+        (for this needle: adaxial pole ~270 deg, abaxial pole ~90 deg,
+        corners ~0/~180 deg-ish).
+        """
+        if not profile:
+            return 1.0
+        pts = sorted((float(a) % 360.0, float(m)) for a, m in profile)
+        angles = np.array([a for a, _ in pts])
+        mults = np.array([m for _, m in pts])
+        # Extend circularly so np.interp sees a monotonically increasing
+        # x-range that safely covers any angle in [0, 360).
+        ext_angles = np.concatenate(([angles[-1] - 360.0], angles, [angles[0] + 360.0]))
+        ext_mults = np.concatenate(([mults[-1]], mults, [mults[0]]))
+        return float(np.interp(angle_deg % 360.0, ext_angles, ext_mults))
+
+    def _offset_layer_polygon(self, polygon: Polygon, distance: float, layer: Dict[str, Any],
+                              smooth_factor: float, center: Optional[Point] = None) -> Polygon:
+        """
+        Needle override: dispatch to an angle-varying offset when the layer
+        dict carries a ``"thickness_profile"`` entry; otherwise fall back to
+        the shared uniform-buffer behavior (every other layer, unchanged).
+        """
+        profile = layer.get("thickness_profile")
+        if not profile:
+            return super()._offset_layer_polygon(polygon, distance, layer, smooth_factor, center=center)
+
+        offset_center = center if center is not None else polygon.centroid
+        offset_fn = lambda angle: distance * self._angular_multiplier(profile, angle)
+        return GeometryProcessor.variable_buffer_polygon(
+            polygon, offset_center, offset_fn, smooth_factor=smooth_factor
+        )
+
+    def _resolved_dimensions(self) -> tuple:
+        """Resolve the needle's actual (width, thickness), computing from the
+        layer stack whichever of the two global params was left at 0.
+        Shared by ``_create_base_shape`` and ``_pole_and_corner_angles``
+        (both need the *real* extent, not just whatever's in global_params).
+        """
+        if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
+            return self._calculate_needle_width(), self._calculate_needle_thickness()
+        elif self.global_params["width"] == 0:
+            return self._calculate_needle_width(), self.global_params["thickness"]
+        elif self.global_params["thickness"] == 0:
+            return self.global_params["width"], self._calculate_needle_thickness()
+        else:
+            return self.global_params["width"], self.global_params["thickness"]
+
     def _create_base_shape(self) -> Polygon:
         """
         Create the half-ellipse shape of a needle cross-section.
-        
+
         Returns:
             Half-ellipse polygon
         """
-        # if width and thickness are not provided (set to 0), calculate them from the layers
-        if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
-            width = self._calculate_needle_width()
-            thickness = self._calculate_needle_thickness()
-        # if width or thickness is provided, calculate the other
-        elif self.global_params["width"] == 0:
-            width = self._calculate_needle_width()
-            thickness = self.global_params["thickness"]
-        elif self.global_params["thickness"] == 0:
-            width = self.global_params["width"]
-            thickness = self._calculate_needle_thickness()
-        # if both width and thickness are provided, use them
-        else:
-            width = self.global_params["width"]
-            thickness = self.global_params["thickness"]
-        
+        width, thickness = self._resolved_dimensions()
         return GeometryProcessor.half_ellipse_polygon(width, thickness)
+
+    @staticmethod
+    def pole_and_corner_angles(width: float, thickness: float) -> tuple:
+        """Locate the needle cross-section's adaxial pole, abaxial pole, and
+        two corners as polar angles (degrees) around the base shape's
+        centroid -- the convention ``thickness_profile``/``zone_angles``
+        entries use (see ``_angular_multiplier``/``_offset_layer_polygon``),
+        and the single source of truth for every angle-based zone in this
+        class, including directional stomata placement
+        (``_directional_stomata_triplets``).
+
+        The base half-ellipse (``GeometryProcessor.half_ellipse_polygon``) is
+        flat at y=0 (adaxial edge, x in [-width/2, width/2]) and domed up to
+        (0, thickness) (abaxial peak). Treated as a uniform lamina its
+        centroid sits at y_c = k*thickness/(3*pi) above the flat edge (the
+        half-disk-centroid formula has k=4; k=3.5 here tracks the actual
+        padded "outside" polygon's centroid slightly better) -- a naive
+        "0=adaxial, 180=abaxial, +-90=corners" guess is wrong for any but a
+        specific aspect ratio, putting the poles at the corners instead for
+        a needle this flat.
+        """
+        a = width / 2.0
+        y_c = 3.5 * thickness / (3.0 * np.pi)
+        adaxial_pole = np.degrees(np.arctan2(-y_c, 0.0)) % 360.0
+        abaxial_pole = np.degrees(np.arctan2(thickness - y_c, 0.0)) % 360.0
+        corner_pos = np.degrees(np.arctan2(-y_c, a)) % 360.0     # near 0/360 side
+        corner_neg = np.degrees(np.arctan2(-y_c, -a)) % 360.0    # near 180 side
+        return float(adaxial_pole), float(abaxial_pole), float(corner_pos), float(corner_neg)
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
@@ -227,10 +299,37 @@ class NeedleAnatomy(Organ):
         central_layers = []
         space_increment = self.central_cylinder_params["cell_diameter"] / 2
         transfusion_layers_remaining = self.transfusion_params["n_layers"]
-
-        tt_diameter = self.transfusion_params["tracheids_diameter"]
-        tp_diameter = self.transfusion_params["parenchyma_diameter"]
         parenchyma_diameter = self.central_cylinder_params["cell_diameter"]
+
+        self._transfusion_zone = None
+        pack_circles = self.transfusion_params.get("pack_circles", False)
+        if pack_circles:
+            # Reserve the transfusion zone's depth here (so the parenchyma/
+            # vascular region that follows starts in the right place), but
+            # place the cells later via circle-packing (add_transfusion_tissue)
+            # instead of one row of ring cells per nominal layer -- see that
+            # method's docstring.
+            nominal_diameter = self.transfusion_params.get("diameter_max", 0.05)
+            transfusion_depth = transfusion_layers_remaining * nominal_diameter
+            transfusion_outer = current_polygon
+            if transfusion_depth > 0:
+                shrunk = GeometryProcessor.buffer_polygon(
+                    current_polygon, -space_increment - transfusion_depth, smooth_factor=0.6
+                )
+                if not shrunk.is_empty and shrunk.is_valid and shrunk.area > 0:
+                    self._transfusion_zone = transfusion_outer.difference(shrunk)
+                    current_polygon = shrunk
+                    # Sized from the *upcoming* parenchyma ring's own (much
+                    # smaller) cell scale, not the transfusion zone's own
+                    # nominal_diameter -- using the latter left an oversized
+                    # gap before the first parenchyma ring, whose seeds then
+                    # had unusually large Voronoi territory (rendering as
+                    # visibly bigger cells than every parenchyma ring after it).
+                    space_increment = parenchyma_diameter / 2
+            transfusion_layers_remaining = 0  # skip the ring-based branch below entirely
+
+        tt_diameter = self.transfusion_params["tracheids_diameter"] if not pack_circles else 0.0
+        tp_diameter = self.transfusion_params["parenchyma_diameter"] if not pack_circles else 0.0
         transfusion_type = self.transfusion_params.get("transfusion_type", False)
         tt_ratio = self.transfusion_params.get("transfusion_tracheids_ratio", 0.5)
         p_tt = tt_ratio / (1.0 + tt_ratio) if tt_ratio > 0 else 0.0
@@ -247,6 +346,8 @@ class NeedleAnatomy(Organ):
                     -space_increment - avg_diameter / 2,
                     smooth_factor=0.6
                 )
+                if current_polygon.is_empty or not current_polygon.is_valid or current_polygon.area <= 0:
+                    break  # the ring buffered down to nothing; stop before appending a degenerate polygon
 
                 space_increment = avg_diameter / 2
 
@@ -267,6 +368,8 @@ class NeedleAnatomy(Organ):
                     -space_increment - parenchyma_diameter / 2,
                     smooth_factor=0.7
                 )
+                if current_polygon.is_empty or not current_polygon.is_valid or current_polygon.area <= 0:
+                    break  # the ring buffered down to nothing; stop before appending a degenerate polygon
 
                 space_increment = parenchyma_diameter / 2
 
@@ -327,56 +430,130 @@ class NeedleAnatomy(Organ):
         recipe = TissueRecipe()
         recipe.special("vascular ellipse grid",
                        lambda: self.fit_vascular_elements(polygon),
-                       produces=("xylem", "phloem", "cambium", "Strasburger cell"))
+                       produces=("xylem", "phloem", "cambium", "Strasburger cell", "Str. Interstitial cell"))
         return recipe
 
     def fit_vascular_elements(self, polygon):
         # from polygon, fit two ellipses
         rx = self.central_cylinder_params["vascular_width"]/2
         ry = self.central_cylinder_params["vascular_height"]/2
-        ellipses = GeometryProcessor.two_ellipses(polygon, rx, ry)
+        angle = self.central_cylinder_params.get("vascular_angle")
+        ellipses = GeometryProcessor.two_ellipses(polygon, rx, ry, angle=angle)
+        self._parenchyma_pocket_zone = self._corner_parenchyma_pockets(polygon, ellipses)
         cells_in_ellipses, list_ellipses_polygons = self.vascular_elements_in_ellipses(ellipses)
         vascular_cm = CellManager()
         vascular_cm.cells = cells_in_ellipses
         self.vascular_cells = vascular_cm
         self.vascular_polygons = list_ellipses_polygons
-        
+
+    @staticmethod
+    def _corner_parenchyma_pockets(polygon: Polygon, ellipses: List[Dict[str, Any]]) -> Optional[Polygon]:
+        """The sliver of ``polygon`` left over beyond each ellipse's own
+        outer (lateral, away-from-centre) side.
+
+        Even after ``GeometryProcessor.push_ellipse_to_boundary`` slides an
+        ellipse out to touch the region's real edge, its rounded outline
+        can't perfectly fill a sharper corner -- the small crescent that's
+        left over is exactly what should become Strasburger cell instead of
+        parenchyma (see example/needle/Str place blue.png). Clipping to the
+        half-plane on each ellipse's own outer side of its centre keeps just
+        that corner sliver, excluding both the gap between the two ellipses
+        and anything toward the needle's own centre.
+        """
+        minx, miny, maxx, maxy = polygon.bounds
+        pad = max(maxx - minx, maxy - miny) + 1.0
+        pockets = []
+        for ellipse in ellipses:
+            cx = ellipse["center"][0]
+            if cx <= 0:
+                half_plane = Polygon([(minx - pad, miny - pad), (cx, miny - pad),
+                                      (cx, maxy + pad), (minx - pad, maxy + pad)])
+            else:
+                half_plane = Polygon([(cx, miny - pad), (maxx + pad, miny - pad),
+                                      (maxx + pad, maxy + pad), (cx, maxy + pad)])
+            pocket = polygon.difference(ellipse["polygon"]).intersection(half_plane)
+            if not pocket.is_empty:
+                pockets.append(pocket)
+        return unary_union(pockets) if pockets else None
+
+    def retag_corner_parenchyma(self) -> None:
+        """Retag parenchyma cells in the corner pockets (see
+        ``_corner_parenchyma_pockets``) to "Strasburger cell" -- a plain
+        rename, existing cells kept at their existing size/position.
+        """
+        zone = getattr(self, "_parenchyma_pocket_zone", None)
+        if zone is None or zone.is_empty:
+            return
+        for c in self.all_cells.get_cells_by_type("parenchyma"):
+            if zone.contains(Point(c.x, c.y)):
+                c.type = "Strasburger cell"
+
 
     def vascular_elements_in_ellipses(self, ellipses, debug=False):
-        """Seed the rectangular xylem/phloem grid (with a central cambium row and
-        interstitial Strasburger files) into each of the two vascular ellipses.
+        """Seed the rectangular xylem/phloem grid (with a central cambium row
+        and interstitial Strasburger-lineage files) into each of the two
+        vascular ellipses.
 
         Each grid coordinate is built in the ellipse's local frame, then rotated
         by the ellipse angle and translated to its centre (:func:`place`); cells
         that land inside the ellipse are kept.  A bespoke fill — there is no
         region to pack, the layout is an explicit grid.
+
+        ``"Str. Interstitial cell"`` columns run through both the xylem
+        *and* phloem rows of the grid (retyped from ordinary xylem/phloem),
+        matching example/needle/vascular_ellipse.png. The other Strasburger-
+        lineage cells -- the corner cluster outside the ellipse -- are
+        handled separately, by retagging real parenchyma cells in place
+        (see ``retag_corner_parenchyma``/``_corner_parenchyma_pockets``)
+        rather than seeded here.
         """
         list_ellipses_polygons: List[Polygon] = []
         cells_in_ellipses: List[Cell] = []
 
-        params_xylem   = next(p for p in self.params if p["name"] == "xylem")
-        params_phloem  = next(p for p in self.params if p["name"] == "phloem")
-        params_cambium = next(p for p in self.params if p["name"] == "cambium")
+        params_xylem       = next(p for p in self.params if p["name"] == "xylem")
+        params_phloem      = next(p for p in self.params if p["name"] == "phloem")
+        params_cambium     = next(p for p in self.params if p["name"] == "cambium")
+        params_strasburger = next((p for p in self.params if p["name"] == "Strasburger cells"), None)
         xylem_rows       = params_xylem["n_files"]
         phloem_rows      = params_phloem["n_files"]
         xylem_cell_width = params_xylem["cell_diameter"]
         xylem_cluster_n  = int(params_xylem["n_clusters"])
 
         id_cell = 0
-        for ellipse in ellipses:
+        for idx, ellipse in enumerate(ellipses):
             center = ellipse["polygon"].centroid
             rx, ry = ellipse["axes"]
-            angle  = np.deg2rad(ellipse["angle"]) - np.pi / 2
+            # `two_ellipses` mirrors the *outline* angle for the second
+            # (right) ellipse across the vertical midline (180-angle) --
+            # correct for the ellipse shape itself (symmetric under 180 deg
+            # rotation), but the content grid below is built from an
+            # explicit rotation, not a reflection, so reusing that mirrored
+            # angle here rotates the right ellipse's internal xylem/phloem
+            # layout 180 deg out of step with the left one's. Adding 180 deg
+            # back for the first (left) ellipse only realigns the two,
+            # independent of whatever angle central_cylinder.vascular_angle
+            # is actually set to.
+            content_angle_deg = ellipse["angle"] + (180.0 if idx == 0 else 0.0)
+            angle  = np.deg2rad(content_angle_deg) - np.pi / 2
             cos_a, sin_a = np.cos(angle), np.sin(angle)
 
-            xylem_cell_height  = (rx - params_cambium["cell_diameter"]) / xylem_rows
-            phloem_cell_height = (rx - params_cambium["cell_diameter"]) / phloem_rows
+            # `angle` is built so that local_y always ends up aligned with
+            # the ellipse's *actual* rx (major/width) direction (and local_x
+            # with its ry/minor direction) once `place()` rotates+translates
+            # it -- see `place()` below. The xylem/cambium/phloem stack is
+            # radial (spans the bundle's short, ry axis) with repeated
+            # column files spread along the long, rx axis, so rows are built
+            # on local_x (sized by ry) and columns on local_y (sized by rx):
+            # the reverse of a naive rx-for-rows/ry-for-columns assignment.
+            xylem_cell_height  = (ry - params_cambium["cell_diameter"]) / xylem_rows
+            phloem_cell_height = (ry - params_cambium["cell_diameter"]) / phloem_rows
             xylem_cell_diameter  = (xylem_cell_width + xylem_cell_height) / 2
             phloem_cell_diameter = (xylem_cell_width + phloem_cell_height) / 2
+            strasburger_diameter = params_strasburger["cell_diameter"] if params_strasburger else xylem_cell_diameter
 
-            n_xylem_width      = int(np.ceil(ry * 2 / xylem_cell_width))
+            n_xylem_width      = int(np.ceil(rx * 2 / xylem_cell_width))
             xylem_cluster_size = int(np.ceil(
-                (ry * 2 - xylem_cell_width * (xylem_cluster_n - 1)) / (xylem_cell_width * xylem_cluster_n)
+                (rx * 2 - xylem_cell_width * (xylem_cluster_n - 1)) / (xylem_cell_width * xylem_cluster_n)
             ))
             temp_cluster_id    = xylem_cluster_size
 
@@ -392,30 +569,39 @@ class NeedleAnatomy(Organ):
                     )
 
             for i in range(n_xylem_width + 1):
-                col_x = i * xylem_cell_width - ry + xylem_cell_width / 2
+                col_y = i * xylem_cell_width - rx + xylem_cell_width / 2
 
-                # xylem rows (upper part); interstitial cluster files are Strasburger cells
-                xylem_type = "Strasburger cell" if temp_cluster_id == 0 else "xylem"
+                # Interstitial cluster files are the Strasburger lineage
+                # running straight through the grid -- both the xylem *and*
+                # phloem rows of that column are retyped (from ordinary
+                # xylem/phloem), sized like the corner cluster below.
+                is_interstitial = (temp_cluster_id == 0)
+                xylem_type  = "Str. Interstitial cell" if is_interstitial else "xylem"
+                phloem_type = "Str. Interstitial cell" if is_interstitial else "phloem"
                 for j in range(xylem_rows + 1):
-                    place(col_x, j * xylem_cell_height - ry + xylem_cell_height / 2,
-                          xylem_type, xylem_cell_diameter)
+                    place(j * xylem_cell_height - ry + xylem_cell_height / 2, col_y,
+                          xylem_type, strasburger_diameter if is_interstitial else xylem_cell_diameter)
 
-                # phloem rows (lower part)
                 for j in range(1, phloem_rows + 1):
-                    place(col_x, j * phloem_cell_height + phloem_cell_height / 2,
-                          "phloem", phloem_cell_diameter)
+                    place(j * phloem_cell_height + phloem_cell_height / 2, col_y,
+                          phloem_type, strasburger_diameter if is_interstitial else phloem_cell_diameter)
 
                 if temp_cluster_id == 0:
                     temp_cluster_id = xylem_cluster_size + 1
                 temp_cluster_id -= 1
 
                 # cambium cell on the ellipse mid-line
-                place(col_x, 0, "cambium", xylem_cell_diameter)
+                place(0, col_y, "cambium", xylem_cell_diameter)
 
+            # The corner-pocket parenchyma (beyond the ellipse's own outer
+            # edge) is retagged to "Strasburger cell" separately, once real
+            # parenchyma cells exist to relabel -- see
+            # NeedleAnatomy.retag_corner_parenchyma / _corner_parenchyma_pockets.
             list_ellipses_polygons.append(ellipse["polygon"])
 
             if debug:
-                color_map = {"Strasburger cell": "red", "xylem": "blue", "phloem": "green", "cambium": "yellow"}
+                color_map = {"Strasburger cell": "red", "Str. Interstitial cell": "orange",
+                            "xylem": "blue", "phloem": "green", "cambium": "yellow"}
                 plt.plot(ellipse["polygon"].exterior.xy[0], ellipse["polygon"].exterior.xy[1])
                 for cell in cells_in_ellipses:
                     plt.plot(cell.x, cell.y, "o", color=color_map[cell.type])
@@ -426,16 +612,36 @@ class NeedleAnatomy(Organ):
     def _organ_recipe(self) -> TissueRecipe:
         """Needle organ-specific tissues as a recipe of P2 special-tissue steps.
 
-        Both are cell-relative post-fill placements (carved into existing cells),
-        so they are ``special`` steps; the geometry is computed in ``add_canal`` /
-        ``add_stomata`` and placed by ``special_tissues.place_resin_duct`` /
-        ``place_stomata``.
+        Resin ducts and stomata are cell-relative post-fill placements
+        (carved into existing cells); transfusion tissue (when
+        ``transfusion_tissue.pack_circles`` is set) is a zone fill via
+        circle-packing rather than a ring seed.
+
+        ``add_stomata`` calls ``self.all_cells.recenter_cells()``, which
+        shifts every *existing* cell's coordinates to the population mean but
+        cannot retroactively shift ``self._transfusion_zone`` (a shapely
+        polygon computed earlier, during layer-polygon construction, in the
+        original un-recentred frame). "transfusion tissue" therefore has to
+        run *before* "stomata": placing its cells while everything is still
+        in that same original frame keeps them consistent with the zone, and
+        the subsequent recenter shifts them correctly along with every other
+        cell. Running it after "stomata" (as before) placed transfusion
+        cells relative to the stale, un-shifted zone while the rest of the
+        organ had already moved -- the two point clouds no longer shared an
+        origin, and the downstream global Voronoi tessellation stretched
+        cells across that gap into huge, wildly misplaced polygons.
+        ``"layer-count zoning"`` reads ``cell.angle`` as set by
+        ``recenter_cells``, so it must stay *after* "stomata".
         """
         recipe = TissueRecipe()
         recipe.special("resin ducts", self.add_canal,
                        produces=("resin duct", "duct"))
+        recipe.special("transfusion tissue", self.add_transfusion_tissue,
+                       produces=("transfusion parenchyma", "transfusion tracheid"))
+        recipe.special("corner parenchyma to strasburger", self.retag_corner_parenchyma)
         recipe.special("stomata", self.add_stomata,
                        produces=("guard cell", "air space", "pore"))
+        recipe.special("layer-count zoning", self._restrict_zoned_layers)
         return recipe
 
     # ------------------------------------------------------------------
@@ -460,10 +666,18 @@ class NeedleAnatomy(Organ):
         rdp = rdp_list[0]
 
         layer_names = [l["name"] for l in layers_polygons]
-        if "mesophyll" not in layer_names:
+        # Match every mesophyll-family layer (plain "mesophyll" plus any
+        # "mesophyll_*" variant, e.g. the adaxial-only extra ring), not just
+        # the single literal "mesophyll" entry -- ducts should sit inside the
+        # full combined mesophyll region. layers_polygons is ordered
+        # outer-to-inner, so the first match bounds the combined zone and the
+        # last match is its inner edge.
+        mesophyll_idx = [i for i, n in enumerate(layer_names) if n == "mesophyll" or n.startswith("mesophyll_")]
+        if not mesophyll_idx:
             return [], None
 
-        polygon_for_duct = layers_polygons[layer_names.index("mesophyll")]["polygon"]
+        mesophyll_polys = [layers_polygons[i]["polygon"] for i in mesophyll_idx]
+        polygon_for_duct = mesophyll_polys[0].difference(mesophyll_polys[-1]) if len(mesophyll_polys) > 1 else mesophyll_polys[0]
         polygon_for_duct = polygon_for_duct.difference(
             GeometryProcessor.buffer_polygon(polygon_for_duct, -rdp["diameter"] * _DUCT_RING_BUFFER_FACTOR, 0)
         )
@@ -575,9 +789,12 @@ class NeedleAnatomy(Organ):
         MAJOR_WALL_FRACTION = 1.0 / 3.0   # principal diagonal ≈ 1/3 of the wall length
         AXIS_RATIO = 2.0                  # principal : secondary diagonal = 2 : 1
 
+        # Any mesophyll-family type (plain "mesophyll" plus variants like the
+        # adaxial-only extra ring) gets the same wall-rhombi treatment -- they
+        # are all spongy mesophyll tissue.
         mesophyll_cells = [
-            c for c in self.all_cells.get_cells_by_type("mesophyll")
-            if c.polygon is not None
+            c for c in self.all_cells.cells
+            if c.polygon is not None and (c.type == "mesophyll" or c.type.startswith("mesophyll_"))
         ]
         if len(mesophyll_cells) < 2:
             return
@@ -705,49 +922,220 @@ class NeedleAnatomy(Organ):
         layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
         place_resin_duct(self.all_cells, duct_data, rdp, layer_for_duct)
 
+    def add_transfusion_tissue(self):
+        """Fill the reserved transfusion-tissue zone by circle-packing.
+
+        Only runs when ``transfusion_tissue.pack_circles`` is set (see
+        ``_create_central_layers``, which reserves ``self._transfusion_zone``
+        instead of emitting one-row-per-ring "transfusion" layer polygons in
+        that case). Transfusion cells are irregular and densely packed
+        rather than a uniform ring, so :func:`tissue_class.fill_by_packing`
+        (Apollonian circle packing, already used this way for vessels/rays
+        elsewhere in the engine) is a better fit than the ring seeder.
+
+        Two structural passes, tracheids first: transfusion tracheids are
+        packed into the *full* zone, then transfusion parenchyma is packed
+        into whatever's left over (``zone`` minus the tracheids' own
+        footprint) -- parenchyma filling the gaps around an already-placed
+        tracheid structure, rather than both types being packed as one
+        uniform batch and relabeled after the fact. ``transfusion_tracheids
+        _ratio`` (tracheid:parenchyma, default 1.0 = "same quantities" per
+        the docstring) splits the overall ``proportion`` occupancy target
+        between the two passes; the second pass's ``proportion`` is rescaled
+        against the *remaining* region's own (usually smaller) area so the
+        combined tissue still lands close to the original total occupancy.
+        """
+        zone = getattr(self, "_transfusion_zone", None)
+        if zone is None or zone.is_empty:
+            return
+
+        tp = self.transfusion_params
+        diameter_max = tp.get("diameter_max", 0.05)
+        proportion = tp.get("proportion", 0.6)
+        ratio = tp.get("transfusion_tracheids_ratio", 1.0)
+        p_tt = ratio / (1.0 + ratio) if ratio > 0 else 0.0
+
+        zone_area = zone.area
+        remaining_zone = zone
+        if p_tt > 0:
+            tracheid_placed = fill_by_packing(
+                self.all_cells, zone, "transfusion tracheid",
+                rng=self.rng, diameter_max=diameter_max,
+                proportion=proportion * p_tt, allow_ellipse=True,
+            )
+            if tracheid_placed:
+                tracheid_union = unary_union([p for p, _, _ in tracheid_placed])
+                remaining_zone = zone.difference(tracheid_union)
+
+        if remaining_zone.is_empty or remaining_zone.area <= 0 or p_tt >= 1.0:
+            return
+
+        remaining_target_area = zone_area * proportion * (1.0 - p_tt)
+        parenchyma_proportion = min(0.95, remaining_target_area / remaining_zone.area)
+        if parenchyma_proportion <= 0:
+            return
+        fill_by_packing(
+            self.all_cells, remaining_zone, "transfusion parenchyma",
+            rng=self.rng, diameter_max=diameter_max,
+            proportion=parenchyma_proportion, allow_ellipse=True,
+        )
+
+    def _restrict_zoned_layers(self) -> None:
+        """Prune any layer carrying a ``zone_angles`` entry down to only the
+        cells whose recentred polar angle falls inside the configured zone.
+
+        Layers like ``hypodermis_corner`` or ``mesophyll_abaxial`` need a
+        nonzero ``thickness_profile`` floor everywhere (see
+        ``_offset_layer_polygon``) purely to keep ``CellGenerator``'s
+        next-layer bleed clip from cropping the *neighboring* ring -- that
+        floor was never meant to also seed a visible row of cells outside the
+        layer's real zone (a corner wedge, or one half of the cross-section).
+        This mirrors how ``DicotLeafAnatomy`` varies its palisade layer count
+        by region (some rows genuinely don't exist outside their zone,
+        leaf_class.py:862-965) without needing that mechanism's per-column
+        ``fill_along`` seeding -- the ring geometry here is left completely
+        untouched; only cell *presence* is restricted, via the same
+        ``CellManager.remove_cells``/``cell.angle`` (set by
+        ``recenter_cells``, already called earlier by ``add_stomata``) used
+        for directional stomata placement.
+        """
+        for layer in self.layers:
+            zone = layer.get("zone_angles")
+            if not zone:
+                continue
+            cells = self.all_cells.get_cells_by_type(layer["name"])
+            if not cells:
+                continue
+            to_remove = [c for c in cells
+                        if not self._angle_in_zone(np.degrees(c.angle) % 360.0, zone)]
+            if to_remove:
+                self.all_cells.remove_cells(to_remove)
+
+    @staticmethod
+    def _angle_in_zone(angle_deg: float, zone: Dict[str, Any]) -> bool:
+        if zone.get("mode") == "half":
+            pole = float(zone["pole"]) % 360.0
+            return NeedleAnatomy._circular_diff(angle_deg, pole) < 90.0
+        half_width = float(zone.get("half_width", 15.0))
+        return any(NeedleAnatomy._circular_diff(angle_deg, c) <= half_width
+                   for c in zone.get("centers", []))
+
+    @staticmethod
+    def _circular_diff(a: float, b: float) -> float:
+        d = abs(a - b) % 360.0
+        return min(d, 360.0 - d)
+
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         return float(n_files ** 1.12 + 1)
 
     def add_stomata(self):
-        """Add stomata to the needle epidermis."""
+        """Add stomata to the needle epidermis.
+
+        With ``n_files`` only, stomata are spread evenly around the whole
+        epidermis ring (previous behavior, unchanged). With ``n_adaxial`` and
+        ``n_abaxial`` both set, placement instead goes through
+        :meth:`_directional_stomata_triplets` for a directional,
+        corner-excluded layout.
+        """
         self.all_cells.recenter_cells()
         stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
         if not stomata_params_list:
             return
 
-        sp         = stomata_params_list[0]
-        n_stomata  = sp["n_files"]
+        sp = stomata_params_list[0]
         epidermis_cells = self.all_cells.get_cells_by_type("epidermis")
         if not epidermis_cells:
             return
 
         cell_diam = epidermis_cells[0].diameter
+        n_adaxial = sp.get("n_adaxial")
+        n_abaxial = sp.get("n_abaxial")
 
-        # Sample n_stomata evenly spaced groups, avoiding the very ends
-        indices = np.linspace(
-            _STOMATA_SKIP_BORDER_PTS,
-            len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
-            n_stomata, dtype=int
-        )
+        if n_adaxial is not None and n_abaxial is not None:
+            triplet_centers = self._directional_stomata_triplets(epidermis_cells, sp, n_adaxial, n_abaxial)
+        else:
+            n_stomata = sp["n_files"]
+            # Sample n_stomata evenly spaced groups, avoiding the very ends
+            indices = np.linspace(
+                _STOMATA_SKIP_BORDER_PTS,
+                len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
+                n_stomata, dtype=int
+            )
 
-        # Build triplet centroids from placed epidermis cell groups
-        triplet_centers = []
-        for i in indices:
-            g = epidermis_cells[i].id_group
-            try:
-                triplet_centers.append((
-                    self.all_cells.get_centroid_of_group(g - 1),
-                    self.all_cells.get_centroid_of_group(g),
-                    self.all_cells.get_centroid_of_group(g + 1),
-                ))
-            except KeyError:
-                pass  # adjacent group was removed; skip this stomata position
+            # Build triplet centroids from placed epidermis cell groups
+            triplet_centers = []
+            for i in indices:
+                g = epidermis_cells[i].id_group
+                try:
+                    triplet_centers.append((
+                        self.all_cells.get_centroid_of_group(g - 1),
+                        self.all_cells.get_centroid_of_group(g),
+                        self.all_cells.get_centroid_of_group(g + 1),
+                    ))
+                except KeyError:
+                    pass  # adjacent group was removed; skip this stomata position
 
         stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
 
         # Cell placement (guard cells + chamber + pore, carved into the
         # epidermis) is the shared special-tissue function.
         place_stomata(self.all_cells, stomata_geoms, sp, cell_diam)
+
+    def _directional_stomata_triplets(self, epidermis_cells: List[Cell], sp: Dict[str, Any],
+                                      n_adaxial: int, n_abaxial: int) -> List[tuple]:
+        """Split epidermis groups into an adaxial (flat) and abaxial (domed)
+        angular run around the needle centre, excluding a corner wedge from
+        both, and pick ``n_adaxial``/``n_abaxial`` evenly spaced triplets.
+
+        ``recenter_cells`` (called by ``add_stomata`` before this) already
+        centres every cell on the organ's centroid and sets ``cell.angle =
+        atan2(y, x)``, in the same frame ``pole_and_corner_angles`` measures
+        -- used here as the single source of truth for where the adaxial/
+        abaxial poles and the two corners actually sit (a fixed 0/90/180/270
+        guess is only exactly right for one specific aspect ratio; this
+        needle's actual corners sit well off 0/180, see
+        ``pole_and_corner_angles``'s docstring).
+        """
+        width, thickness = self._resolved_dimensions()
+        adaxial_pole, abaxial_pole, corner_pos, corner_neg = self.pole_and_corner_angles(width, thickness)
+
+        group_angle: Dict[int, float] = {}
+        for c in epidermis_cells:
+            group_angle.setdefault(c.id_group, float(np.degrees(c.angle) % 360.0))
+
+        centroid: Dict[int, Any] = {}
+        for g in group_angle:
+            try:
+                centroid[g] = self.all_cells.get_centroid_of_group(g)
+            except KeyError:
+                pass  # adjacent group was removed
+
+        # edge_margin (0-0.5, default 0.12) as a fraction of a quarter-turn:
+        # how many degrees of wedge to exclude on each side of each corner.
+        corner_half_width = float(sp.get("edge_margin", 0.12)) * 90.0
+        corner_zone = {"mode": "wedge", "centers": [corner_pos, corner_neg], "half_width": corner_half_width}
+        adaxial_zone = {"mode": "half", "pole": adaxial_pole}
+
+        non_corner = [(g, a) for g, a in group_angle.items() if not self._angle_in_zone(a, corner_zone)]
+        adaxial_run = sorted(g for g, a in non_corner if self._angle_in_zone(a, adaxial_zone))
+        abaxial_run = sorted(g for g, a in non_corner if not self._angle_in_zone(a, adaxial_zone))
+
+        return (self._pick_stomata_triplets(adaxial_run, centroid, n_adaxial)
+                + self._pick_stomata_triplets(abaxial_run, centroid, n_abaxial))
+
+    @staticmethod
+    def _pick_stomata_triplets(run: List[int], centroid: Dict[int, Any], n: int) -> List[tuple]:
+        """``n`` evenly spaced prev/curr/next triplets along one epidermis
+        angular run (an adaxial or abaxial arc, corners already excluded)."""
+        if n <= 0 or not run:
+            return []
+        picks = np.unique(np.linspace(0, len(run) - 1, n).astype(int))
+        out = []
+        for i in picks:
+            g = run[i]
+            if (g - 1) in centroid and (g + 1) in centroid:
+                out.append((centroid[g - 1], centroid[g], centroid[g + 1]))
+        return out
 
     # ------------------------------------------------------------------
     # Visualization hook

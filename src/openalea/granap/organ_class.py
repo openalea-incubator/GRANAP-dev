@@ -8,7 +8,7 @@ import geopandas as gpd
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 from collections import defaultdict
@@ -195,9 +195,10 @@ class Organ(AbstractNetwork, ABC):
         """Build layer polygons from current layer configuration."""
         layers_polygons = []
         layer_array = self.layer_manager.expand_layers()
-        
+
         polygon = self.generate_base_shape()
-        
+        base_center = polygon.centroid
+
         for i_layer, layer in enumerate(layer_array):
             if i_layer == 0:
                 # Add outside layer
@@ -216,10 +217,12 @@ class Organ(AbstractNetwork, ABC):
             # corner-cuts slightly *past* the requested buffer distance, so a high
             # factor applied once per peeled ring accumulates and shrinks the
             # innermost region (the stele) well below its nominal thickness.
-            polygon = GeometryProcessor.buffer_polygon(
+            polygon = self._offset_layer_polygon(
                 polygon,
                 -space_increment - layer["cell_diameter"] / 2,
-                smooth_factor=self.LAYER_SMOOTH_FACTOR,
+                layer,
+                self.LAYER_SMOOTH_FACTOR,
+                center=base_center,
             )
 
             space_increment = layer["cell_diameter"] / 2
@@ -240,9 +243,22 @@ class Organ(AbstractNetwork, ABC):
 
         # Optional reshape: let subclasses morph layer polygons
         layers_polygons = self.reshape_layers(layers_polygons)
-        
+
         return layers_polygons
-    
+
+    def _offset_layer_polygon(self, polygon: Polygon, distance: float, layer: dict,
+                              smooth_factor: float, center: Optional[Point] = None) -> Polygon:
+        """
+        Shrink/expand one ring layer's polygon by ``distance``.
+
+        Default implementation: a plain uniform buffer, identical to the
+        previous inline call — every organ keeps today's behavior unchanged.
+        Subclasses (e.g. ``NeedleAnatomy``) may override to offset by a
+        per-angle distance instead (see ``GeometryProcessor.variable_buffer_polygon``),
+        driven by an optional ``"thickness_profile"`` entry in ``layer``.
+        """
+        return GeometryProcessor.buffer_polygon(polygon, distance, smooth_factor=smooth_factor)
+
     def generate_cells(self) -> gpd.GeoDataFrame:
         """
         Generate cell geometries using Voronoi tessellation.

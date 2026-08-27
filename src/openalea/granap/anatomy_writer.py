@@ -33,6 +33,7 @@ DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
     "duct": 5,
     "guard cell": 2,
     "Strasburger cell": 1,
+    "Str. Interstitial cell": 1,
     "outerwall": 2,
     "air space": 0.001,
     "pore": 0.001,

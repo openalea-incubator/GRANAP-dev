@@ -708,6 +708,7 @@ class CentralCylinderParams(BaseParams):
     layer_length    : float = Field(default=1.05,  ge=0.00001, title = "Layer Length", description = "Length of the central cylinder layers")
     vascular_width  : float = Field(default=0.15,  ge=0.00001, title = "Vascular Width", description = "Width of the vascular bundles")
     vascular_height : float = Field(default=0.2,   ge=0.00001, title = "Vascular Height", description = "Height of the vascular bundles")
+    vascular_angle  : Optional[float] = Field(default=None, title = "Vascular Angle", description = "Explicit rotation (degrees) for the vascular ellipses; None auto-detects orientation from the local polygon shape")
 
 
 class TransfusionTissueParams(BaseParams):
@@ -717,6 +718,9 @@ class TransfusionTissueParams(BaseParams):
     transfusion_tracheids_ratio : float = Field(default=0.5,  ge=0.0, title = "Transfusion Tracheids Ratio", description = "Ratio of transfusion tracheids to parenchyma cells")
     n_layers                    : int   = Field(default=2,    ge=1, title = "Number of Layers", description = "Number of transfusion tissue layers")
     transfusion_type            : bool  = Field(default=False, title = "Transfusion Type", description = "If True, differentiate into tracheids and parenchyma during tessellation using type-specific cell radii")
+    pack_circles                : bool  = Field(default=False, title = "Pack Circles", description = "If True, fill the transfusion zone by circle-packing (irregular, densely-packed cells) instead of one row of ring cells per layer. Uses diameter_max/proportion below instead of tracheids_diameter/parenchyma_diameter.")
+    diameter_max                : float = Field(default=0.05, ge=0.00001, title = "Max Cell Diameter", description = "Target circle diameter for packed transfusion cells (only used when pack_circles is True)")
+    proportion                  : float = Field(default=0.6,  ge=0.0, le=1.0, title = "Fill Proportion", description = "Target packed area fraction of the transfusion zone (only used when pack_circles is True)")
 
 
 class XylemParams(BaseParams):
@@ -777,10 +781,13 @@ class NeedleAerenchymaParams(BaseParams):
 
 class StomataParams(BaseParams):
     name       : str   = "stomata"
-    n_files    : int   = Field(default=4,     ge=1, title = "Number of Stomata", description = "Number of stomata to generate")
+    n_files    : int   = Field(default=4,     ge=1, title = "Number of Stomata", description = "Number of stomata to generate, evenly spread around the epidermis. Ignored if n_adaxial/n_abaxial are set.")
     width      : float = Field(default=0.025, ge=0.00001, title = "Width", description = "Width of the stomata")
     depth      : float = Field(default=0.06,  ge=0.00001, title = "Depth", description = "Depth of the stomata")
     sub_chamber: float = Field(default=0.04,  ge=0.00001, title = "Sub Chamber", description = "Sub chamber of the stomata")
+    n_adaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (adaxial)", description = "Number of stomata on the upper (adaxial) side. If set together with n_abaxial, overrides n_files with a directional, corner-excluded placement.")
+    n_abaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (abaxial)", description = "Number of stomata on the lower (abaxial) side. If set together with n_adaxial, overrides n_files with a directional, corner-excluded placement.")
+    edge_margin: float = Field(default=0.12, ge=0.0, le=0.5, title = "Edge Margin", description = "Fraction of each adaxial/abaxial epidermis run skipped at both ends (where the two sides meet, i.e. the corners) when n_adaxial/n_abaxial are set.")
 
 
 NeedleEndodermisParams = _layer_params("NeedleEndodermisParams", "endodermis", "endodermal", cell_diameter=0.02,   cell_width=0.05,  n_layers=1, shift=0.5, order=3)
