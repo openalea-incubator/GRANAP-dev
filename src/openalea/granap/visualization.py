@@ -293,9 +293,10 @@ def plot_tissues(organ: "Organ",
 
     # Organ-specific extras (e.g. resin ducts, stomata for needles)
     _extra_style = {
-        "resin_duct":  ("burlywood",  "darkorange", 0.75),
-        "resin_canal": ("lightyellow", "goldenrod",  0.90),
-        "stomata":     ("lightpink",   "crimson",    0.80),
+        "resin_sheath": ("peru",        "sienna",     0.65),
+        "resin_duct":   ("burlywood",   "darkorange", 0.75),
+        "resin_canal":  ("lightyellow", "goldenrod",  0.90),
+        "stomata":      ("lightpink",   "crimson",    0.80),
     }
     for tissue_name, poly_list in organ._extra_tissue_polygons(layers).items():
         face, edge, alpha = _extra_style.get(tissue_name, ("orange", "darkorange", 0.7))

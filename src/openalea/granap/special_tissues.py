@@ -34,6 +34,11 @@ from openalea.granap.geometry_collection import GeometryProcessor
 # Number of resampled points for the inner lumen (canal) polygon of a resin duct.
 _CANAL_RESAMPLE_PTS: int = 15
 
+# Minimum number of cells placed around each duct's sheath ring, regardless
+# of how few its own tangential cell size would otherwise fit -- matches the
+# real anatomy (resin_duct.png panel G shows ~10 sheath cells per duct).
+_DUCT_SHEATH_MIN_CELLS: int = 10
+
 
 def carve_and_insert(
     cell_manager: CellManager,
@@ -122,14 +127,28 @@ def seat_air_spaces(
 def place_resin_duct(
     cell_manager: CellManager,
     duct_data,
-    rdp: dict,
     layer_index: int,
 ) -> None:
-    """Place resin ducts: a parenchyma ring + an inner lumen for each duct.
+    """Place resin ducts: an outer sheath ring, an inner epithelium ring, the
+    central lumen, and (where the organ's geometry calls for one) an outer
+    transition ring, for each duct.
 
-    ``duct_data`` is a list of per-duct dicts (``"outer"``/``"ring"``/``"canal"``/
-    ``"ring_center"``) as computed by the organ; ``rdp`` is the resin-duct param
-    dict; ``layer_index`` is the id_layer the duct cells belong to.
+    Modeled inside-out: lumen (L) -> epithelium (Ep, 1 cell layer, thin-walled/secretory)
+    -> sheath (Sh, 1 cell layer, thicker-walled), embedded in the mesophyll.
+    The optional transition ring is a ring of ordinary host-tissue
+    ("mesophyll") cells sized down to bridge the sheath and the coarse
+    surrounding tissue -- see NeedleAnatomy._duct_zone_data, which decides
+    per-duct whether one is needed and how big its cells are.
+
+    Ring cells are elliptical, sized independently along the ring
+    (tangential, "cell_width"/"sheath_cell_width") and across it (radial,
+    "cell_diameter"/"sheath_cell_diameter") -- 0 for either width field means
+    isotropic (falls back to the matching radial diameter), the same
+    convention CellGenerator.cells_on_layer uses for ordinary ring layers.
+    CellGenerator.cell_border's own parameter names are misleading here:
+    what matters is argument *position* -- 1st = tangential (major axis,
+    aligned along the boundary's local tangent), 2nd = radial (minor axis).
+    The transition ring is isotropic (its own cell size, both axes).
     """
     if not duct_data:
         return
@@ -139,23 +158,51 @@ def place_resin_duct(
     id_group = cell_manager.get_last_id_group() + 1
 
     for duct in duct_data:
-        ring_center = duct["ring_center"]
+        center = duct["center"]
 
-        # resin-duct parenchyma cells along the ring
-        x, y   = duct["ring"].exterior.coords.xy
-        coords = np.column_stack((x, y))
-        coords = GeometryProcessor.resample_coords(
-            coords,
-            target_n_points=np.round(duct["ring"].length / rdp["cell_diameter"]).astype(int),
-        )
-        for border in CellGenerator.cell_border(coords, rdp["cell_diameter"], rdp["cell_diameter"])[1:]:
-            id_group += 1
-            for cell_coord in border:
-                duct_cells.append(Cell.radial(
-                    "resin duct", cell_coord[0], cell_coord[1], rdp["cell_diameter"],
-                    id_group, ring_center, id_cell=id_cell, id_layer=layer_index,
-                ))
-                id_cell += 1
+        # Outer-to-inner: transition ring (when present) first, then sheath
+        # ring, then epithelium ring. Sizes come from this duct's own
+        # (possibly scaled-to-fit) dict entries. The transition ring is
+        # tagged as ordinary "mesophyll" -- the host tissue it's fitted
+        # into -- rather than a new tissue type, exactly like
+        # vascular_bundle.py's outer bundle sheath.
+        ring_specs = []
+        if duct.get("transition_ring") is not None:
+            t = duct["transition_cell_size"]
+            ring_specs.append(("mesophyll", "transition_ring", t, t))
+        ring_specs += [
+            ("resin duct sheath",     "sheath_ring",     duct["sheath_cell_width"], duct["sheath_cell_diameter"]),
+            ("resin duct epithelium", "epithelium_ring", duct["cell_width"],        duct["cell_diameter"]),
+        ]
+
+        for cell_type, ring_key, tangential, radial in ring_specs:
+            ring_poly = duct[ring_key]
+            # Clamp the tangential cell size so at least
+            # _DUCT_SHEATH_MIN_CELLS cells fit around this ring, regardless
+            # of how few its own tangential size would otherwise produce
+            # (matches resin_duct.png panel G, ~10 sheath cells per duct).
+            # +1 because the resampled ring's first point duplicates its
+            # last (closed boundary) and is dropped below ([1:]), so
+            # target_n_points must be one more than the cell count wanted.
+            tangential = min(tangential, ring_poly.length / (_DUCT_SHEATH_MIN_CELLS + 1))
+            x, y   = ring_poly.exterior.coords.xy
+            coords = np.column_stack((x, y))
+            coords = GeometryProcessor.resample_coords(
+                coords,
+                target_n_points=np.round(ring_poly.length / tangential).astype(int),
+            )
+            # Anisotropic cell's metadata "diameter" = mean of its two axes
+            # (matches the vascular grid's own precedent: xylem_cell_diameter
+            # in vascular_elements_in_ellipses).
+            mean_diameter = (tangential + radial) / 2
+            for border in CellGenerator.cell_border(coords, tangential, radial)[1:]:
+                id_group += 1
+                for cell_coord in border:
+                    duct_cells.append(Cell.radial(
+                        cell_type, cell_coord[0], cell_coord[1], mean_diameter,
+                        id_group, center, id_cell=id_cell, id_layer=layer_index,
+                    ))
+                    id_cell += 1
 
         # inner lumen cells along the canal
         canal_center = duct["canal"].centroid
@@ -164,12 +211,12 @@ def place_resin_duct(
         id_group += 1
         for coord in coords[1:]:
             duct_cells.append(Cell.radial(
-                "duct", coord[0], coord[1], rdp["diameter"],
+                "duct", coord[0], coord[1], duct["lumen_diameter"],
                 id_group, canal_center, id_cell=id_cell, id_layer=layer_index,
             ))
             id_cell += 1
 
-    carve_and_insert(cell_manager, [d["outer"] for d in duct_data], duct_cells)
+    carve_and_insert(cell_manager, [d["carve"] for d in duct_data], duct_cells)
 
 
 def place_stomata(
@@ -180,7 +227,9 @@ def place_stomata(
 ) -> None:
     """Place stomata: two guard cells, a substomatal chamber and a pore each.
 
-    ``stomata_geoms`` is a list of ``(carve_poly, gc1, gc2, chamber, pore)`` as
+    ``stomata_geoms`` is a list of ``(carve_poly, gc1, gc2, chamber, pore)`` --
+    or, for sunken stomata, ``(carve_poly, gc1, gc2, chamber, pore, caps)``
+    where ``caps`` are epidermis cells arching over the guard-cell pit -- as
     computed by the organ; ``sp`` is the stomata param dict; ``cell_diam`` the
     epidermis cell diameter (sets the carve buffer and inset).
     """
@@ -189,7 +238,9 @@ def place_stomata(
     id_stomata = len(cell_manager.cells) + 1
     i_cell     = id_stomata
 
-    for carve_poly, gc1, gc2, chamber, pore in stomata_geoms:
+    for geom in stomata_geoms:
+        carve_poly, gc1, gc2, chamber, pore = geom[:5]
+        caps = geom[5] if len(geom) > 5 else []
         stomata_carve_polys.append(carve_poly)
 
         for raw_poly, cell_type, n_pts in [
@@ -210,6 +261,23 @@ def place_stomata(
                     id_cell=i_cell, id_group=id_stomata,
                     type=cell_type,
                     protect_topology=(cell_type == "air space"),
+                ))
+
+        for cap_poly in caps:
+            poly = cap_poly.buffer(-cell_diam / 5)
+            if poly.is_empty or poly.area <= 0 or not hasattr(poly, "exterior") or poly.exterior is None:
+                continue
+            coords = GeometryProcessor.resample_coords(
+                np.column_stack(poly.exterior.coords.xy), 20
+            )
+            id_stomata += 1
+            for i_coord in coords:
+                i_cell += 1
+                organ_specific_cells.cells.append(Cell(
+                    x=i_coord[0], y=i_coord[1],
+                    diameter=np.sqrt(poly.area / np.pi) * 2,
+                    id_cell=i_cell, id_group=id_stomata,
+                    type="epidermis",
                 ))
 
         poly   = pore.buffer(-sp["width"] / 4)

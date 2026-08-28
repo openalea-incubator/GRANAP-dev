@@ -744,6 +744,7 @@ class CellGenerator:
         width = stomata_setting["width"]
         depth = stomata_setting["depth"]
         sub_chamber = stomata_setting["sub_chamber"]
+        sunken = bool(stomata_setting.get("sunken", False))
 
         # get unique id_group of the cells
         id_groups = [cell.id_group for cell in cells]
@@ -807,39 +808,54 @@ class CellGenerator:
     
         guard_cell_1_rect = create_local_rectangle(gc1_x - 0.2 * cell.width, rect_y, rect_w, rect_h)
         guard_cell_2_rect = create_local_rectangle(gc2_x + 0.2 * cell.width, rect_y, rect_w, rect_h)
-    
-        guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
-        guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
-    
-        guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
-        guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
-    
+
+        caps: list = []
+        if sunken:
+            # Sunken stomata: guard cells sit deeper in a pit, capped by
+            # epidermal cells (the rectangles) arching over them -- so the
+            # guard cell itself is the ellipse only, and the rectangles are
+            # returned separately as epidermis caps.
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_ellipse, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_ellipse, 0, 0.5)
+            caps = [guard_cell_1_rect, guard_cell_2_rect]
+        else:
+            guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
+            guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
+
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
+
         # Create sub-stomatal chamber
         chamber_rx = width
         chamber_ry = sub_chamber
         chamber_y = gc_y
         sub_stomatal_chamber = create_local_ellipse(0, chamber_y, chamber_rx * 0.75, chamber_ry)
-    
+
         # Create pore
         pore_w = width
         if pore_w < 0:
             pore_w = 0.005  # fallback
         pore_h = chamber_y
         pore_poly = create_local_rectangle(0, pore_h / 2, pore_w, pore_h)
-    
-        # Combine geometries
-        spacing_poly = pore_poly.difference(unary_union([guard_cell_1_poly, guard_cell_2_poly]))
-        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, guard_cell_1_poly, guard_cell_2_poly]))
-    
+
+        # Combine geometries. Difference against the guard cells *and* the caps
+        # (when sunken) so that, once the rectangles leave the guard-cell
+        # union, the pore/chamber don't balloon upward into the space the
+        # rectangles vacated -- the pore must stay the narrow antechamber
+        # between the two caps.
+        occupied = unary_union([guard_cell_1_poly, guard_cell_2_poly, *caps])
+        spacing_poly = pore_poly.difference(occupied)
+        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, occupied]))
+
         if hasattr(sub_stomatal_chamber, 'geoms'):
             sub_stomatal_chamber = sub_stomatal_chamber.geoms[0]
-    
-        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly])
-    
+
+        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, *caps])
+
         if debug:
             print(carve_poly.area)
 
-        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly
+        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, caps
 
     
     

@@ -31,6 +31,8 @@ DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
     "metaxylem": 2,
     "cambium": 1,
     "duct": 5,
+    "resin duct epithelium": 1,   # thin-walled, secretory (Ep)
+    "resin duct sheath": 2,        # thicker-walled (Sh)
     "guard cell": 2,
     "Strasburger cell": 1,
     "Str. Interstitial cell": 1,

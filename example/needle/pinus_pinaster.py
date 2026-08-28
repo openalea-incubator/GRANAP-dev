@@ -21,8 +21,13 @@ here being <=0.09 mm; a literal 0.6 mm cell width left the mesophyll ring with o
 *1 endodermis layer* (height 0.035, width 0.045)
 
 *2 transfusion tissue layers* (height 0.1) ~3.36 mm²:
-  - transfusion parenchyma (ellipse of major 0.05, 0.04 minor) 60% of occupancy filled via circle-packing
-  - transusion tracheid (in same quantities)
+  - transfusion parenchyma (ellipse of major 0.05, 0.04 minor) the dominant, larger cells, packed
+    first into the full zone
+  - transfusion tracheid, smaller and more numerous, packed second into the residual gaps around
+    the parenchyma
+  the two share the 85% occupancy target evenly ("in same quantities"), but because the second
+  pass packs into a gap-constrained residue it under-fills, so the realized split is ~63/37 by
+  area in the parenchyma's favour
 
 
 2 vascular ellipses (major 0.32, minor 0.2; Angle 30°) ~0.055mm²; the 30° orientation is set
@@ -38,7 +43,11 @@ both bundles leaning the same direction.
  - 0.02 vascular parenchyma
 
 11 stomata on the abaxial side, 6 on the adaxial side; none in corners
-2 resin ducts (diameter 0.1 including their parenchyma cells 0.012)
+2 resin ducts, modeled inside-out from direct measurements: an open lumen
+(canal) 0.037mm across, a single epithelium cell layer directly bordering it
+(radial 0.006mm, tangential 0.013mm), and an outer sheath cell layer
+(radial 0.018mm, tangential 0.023mm) additive beyond the epithelium -- true
+total footprint (~0.085mm) is derived from these, not a separate figure.
 
 abaxial
   _____
@@ -51,7 +60,6 @@ A few notes on how the measurements map onto the model are inline below.
 
 import os
 import sys
-import math
 
 SEED = 0
 
@@ -81,31 +89,9 @@ def _bump_profile(peaks, floor=0.15):
     return sorted(pts)
 
 
-def _pole_and_corner_angles(width, thickness):
-    """Locate the needle cross-section's adaxial pole, abaxial pole, and two
-    corners as polar angles (degrees) around the base shape's centroid --
-    the convention "thickness_profile"/"zone_angles" entries use (see
-    NeedleAnatomy._angular_multiplier / _offset_layer_polygon).
-
-    The base half-ellipse (GeometryProcessor.half_ellipse_polygon) is flat
-    at y=0 (adaxial edge, x in [-width/2, width/2]) and domed up to
-    (0, thickness) (abaxial peak). Treated as a uniform lamina its centroid
-    sits at y_c = 4*thickness/(3*pi) above the flat edge (half-disk-centroid
-    formula) -- a naive "0=adaxial, 180=abaxial, +-90=corners" guess is wrong
-    for this shape's aspect ratio, putting the poles at the corners instead.
-    """
-    a = width / 2.0
-    y_c = 3.5 * thickness / (3.0 * math.pi)
-    adaxial_pole = math.degrees(math.atan2(-y_c, 0.0)) % 360.0
-    abaxial_pole = math.degrees(math.atan2(thickness - y_c, 0.0)) % 360.0
-    corner_pos = math.degrees(math.atan2(-y_c, a)) % 360.0    # near 0/360 side
-    corner_neg = math.degrees(math.atan2(-y_c, -a)) % 360.0   # near 180 side
-    return adaxial_pole, abaxial_pole, corner_pos, corner_neg
-
-
 def build_pinaster():
     WIDTH, THICKNESS = 2.232, 1.29
-    _, ABAXIAL_POLE, CORNER_POS, CORNER_NEG = _pole_and_corner_angles(WIDTH, THICKNESS)
+    _, ABAXIAL_POLE, CORNER_POS, CORNER_NEG = NeedleAnatomy.pole_and_corner_angles(WIDTH, THICKNESS)
 
     # thickness_profile floors stay well above 0 (never fully flush with the
     # outer neighbor's boundary) so CellGenerator.generate_cells_info's
@@ -130,8 +116,14 @@ def build_pinaster():
     ])
 
     # Hypodermis corner thickening: 2 large deposits at the corners (up to 5
-    # total hypodermis cell layers there), none elsewhere.
-    HYPODERMIS_FLOOR = 0.7
+    # total hypodermis cell layers there), none elsewhere. Floor must clear
+    # *epidermis*'s own border-point bleed-clip margin (its outer neighbor,
+    # cell_diameter=0.02): ~0.7*0.02=0.014 needs to stay under
+    # floor*hypodermis_corner's own cell_diameter (0.0225) => floor >=
+    # ~0.622; 0.7 left only ~11% margin (too thin -- was cropping epidermis
+    # at the adaxial pole, where this ring sits right at the floor with no
+    # corner nodule to widen it). 0.85 keeps margin, same as MESOPHYLL_FLOOR.
+    HYPODERMIS_FLOOR = 0.85
     NODULE_PROFILE = _bump_profile(
         [(CORNER_POS, 10.0, 1.0), (CORNER_NEG, 10.0, 1.0)],
         floor=HYPODERMIS_FLOOR,
@@ -143,7 +135,7 @@ def build_pinaster():
 
     return [
         {"name": "planttype", "value": 3, "organ": "needle",
-         "width": 2.232, "thickness": 1.29},
+         "width": 2.132, "thickness": 1.29},
         # Half-ellipse central cylinder (schema default; "ellipse" would
         # morph it via reshape_layers, not wanted here). vascular_width/
         # height are the two vascular bundles' major/minor axes; overall
@@ -172,18 +164,29 @@ def build_pinaster():
         # (n_layers=3, not bigger cells -- cells_on_layer seeds one row per
         # ring regardless of depth) confined to the two corners via
         # NODULE_PROFILE (structural floor) + zone_angles (actual presence).
-        {"name": "hypodermis", "cell_diameter": 0.0225, "n_layers": 2, "order": 5},
+        {"name": "hypodermis", "cell_diameter": 0.02, "cell_width":0.0225, "n_layers": 2, "order": 5},
         {"name": "hypodermis_corner", "cell_diameter": 0.0225, "n_layers": 3, "order": 5.1,
          "thickness_profile": NODULE_PROFILE,
          "zone_angles": {"mode": "wedge", "centers": [CORNER_POS, CORNER_NEG],
                          "half_width": CORNER_ZONE_HALF_WIDTH}},
-        {"name": "epidermis", "cell_diameter": 0.02, "order": 6},
+        {"name": "epidermis", "cell_diameter": 0.015, "cell_width":0.02, "order": 6},
         # Transfusion tissue: circle-packed (NeedleAnatomy.
-        # add_transfusion_tissue) at 60% occupancy, tracheids and parenchyma
-        # in two structural passes (tracheids into the full zone first,
-        # parenchyma into what's left) rather than the ring seeder.
+        # add_transfusion_tissue) at 85% occupancy, in two structural passes
+        # -- parenchyma (large ellipses, 0.045 diameter) into the full zone
+        # first, then tracheids (small, 0.022 diameter, more numerous) into
+        # what's left -- rather than the ring seeder. transfusion_tracheids
+        # _ratio=1.0 is the docstring's "in same quantities" (a 50/50 split of
+        # the packed occupancy target). The *realized* areas are not 50/50
+        # though: the first pass nearly reaches its target while the second
+        # packs into a gap-constrained residue and under-fills, so 1.0 lands
+        # at ~63% parenchyma / ~37% tracheid -- parenchyma reads as the
+        # dominant element with tracheids as a fine matrix between them,
+        # matching Transfusion_tissue.png. (Measured sweep: ratio 0.6 -> 78%
+        # parenchyma, too dominant, tracheids reduced to slivers; 1.5 -> 49%,
+        # back to parenchyma not occupying enough.)
         {"name": "transfusion_tissue", "n_layers": 2, "pack_circles": True,
-         "diameter_max": 0.05, "proportion": 0.6,
+         "diameter_max": 0.05, "proportion": 0.85,
+         "parenchyma_diameter": 0.045, "tracheids_diameter": 0.022,
          "transfusion_tracheids_ratio": 1.0},
         # Vascular grid: n_per_cluster=3/n_clusters=4 approximates "clusters
         # of 3 cells separated by a 0.015mm interstitial cell"; n_files is a
@@ -196,13 +199,21 @@ def build_pinaster():
         # parenchyma at its own (unrelated) size -- see
         # NeedleAnatomy.retag_corner_parenchyma.
         {"name": "Strasburger cells", "cell_diameter": 0.02},
-        # Resin ducts: "diameter 0.1 including their parenchyma cells 0.012"
-        # -> the inner-canal packing diameter plus the ring cell size.
-        {"name": "resin_duct", "n_files": 2, "diameter": 0.1, "cell_diameter": 0.012},
+        # Resin duct, inside-out from direct measurements: lumen 0.037 ->
+        # epithelium (radial/height 0.006, tangential/width 0.013) -> sheath
+        # (radial/height 0.018, tangential/width 0.023), each layer strictly
+        # additive. True total outer diameter is derived, not itself a
+        # parameter: 0.037 + 2*0.006 + 2*0.018 ~= 0.085mm.
+        {"name": "resin_duct", "n_files": 2, "lumen_diameter": 0.037,
+         "cell_diameter": 0.006, "cell_width": 0.013,
+         "sheath_cell_diameter": 0.018, "sheath_cell_width": 0.023},
         # Directional, corner-excluded stomata: 11 abaxial (domed/top), 6
         # adaxial (flat/bottom) -- see docstring diagram above.
-        {"name": "stomata", "n_adaxial": 8, "n_abaxial": 11, "edge_margin": 0.08,
-         "width": 0.025, "depth": 0.08, "sub_chamber": 0.04},
+        # chamber_clearance=1.0: delete the innermost hypodermis cell under each
+        # sub-stomatal chamber (1 hypodermis-cell-diameter clearance) so palisade
+        # mesophyll can extend up to the chamber, matching the sunken-stoma anatomy.
+        {"name": "stomata", "n_adaxial": 8, "n_abaxial": 11, "edge_margin": 0.1,
+         "width": 0.025, "depth": 0.08, "sub_chamber": 0.04, "chamber_clearance": 1.0},
         # Rhombic wall-centred air spaces for the "loose" spongy mesophyll
         # (NeedleAnatomy._apply_mesophyll_wall_rhombi covers both mesophyll
         # rings).

@@ -749,10 +749,13 @@ class StrasburgerCellsParams(BaseParams):
 
 
 class ResinDuctParams(BaseParams):
-    name         : str   = "resin_duct"
-    diameter     : float = Field(default=0.1,  ge=0.00001, title = "Diameter", description = "Diameter of the resin duct")
-    n_files      : int   = Field(default=3,    ge=1, title = "Number of Resin Ducts", description = "Number of resin ducts to generate")
-    cell_diameter: float = Field(default=0.02, ge=0.00001, title = "Cell Diameter", description = "Diameter of the resin duct cells")
+    name                 : str   = "resin_duct"
+    n_files              : int   = Field(default=3,     ge=1,       title = "Number of Resin Ducts", description = "Number of resin ducts to generate")
+    lumen_diameter       : float = Field(default=0.037, ge=0.00001, title = "Lumen Diameter", description = "Diameter of the open central lumen (canal) -- a direct measurement; the canal is built at this size")
+    cell_diameter        : float = Field(default=0.02,  ge=0.00001, title = "Epithelium Cell Diameter", description = "Radial (ring-thickness) size of the epithelium cells -- the ring directly bordering the lumen")
+    cell_width           : float = Field(default=0,     ge=0.0,     title = "Epithelium Cell Width", description = "Tangential (along-the-ring) size of the epithelium cells; 0 = isotropic, falls back to cell_diameter")
+    sheath_cell_diameter : float = Field(default=0.02,  ge=0.00001, title = "Sheath Cell Diameter", description = "Radial (ring-thickness) size of the sheath cells -- the outer ring surrounding the epithelium")
+    sheath_cell_width    : float = Field(default=0,     ge=0.0,     title = "Sheath Cell Width", description = "Tangential (along-the-ring) size of the sheath cells; 0 = isotropic, falls back to sheath_cell_diameter")
 
 
 class NeedleInterCellularSpacesParams(BaseParams):
@@ -788,6 +791,8 @@ class StomataParams(BaseParams):
     n_adaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (adaxial)", description = "Number of stomata on the upper (adaxial) side. If set together with n_abaxial, overrides n_files with a directional, corner-excluded placement.")
     n_abaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (abaxial)", description = "Number of stomata on the lower (abaxial) side. If set together with n_adaxial, overrides n_files with a directional, corner-excluded placement.")
     edge_margin: float = Field(default=0.12, ge=0.0, le=0.5, title = "Edge Margin", description = "Fraction of each adaxial/abaxial epidermis run skipped at both ends (where the two sides meet, i.e. the corners) when n_adaxial/n_abaxial are set.")
+    chamber_clearance: float = Field(default=0.0, ge=0.0, title = "Chamber Clearance", description = "Radius (multiples of the hypodermis cell diameter) around each sub-stomatal chamber within which the innermost hypodermis cell seed is deleted before tessellation, so palisade mesophyll can extend up to the chamber. 0 = feature off (no cells removed).")
+    sunken     : bool  = Field(default=False, title = "Sunken Stomata", description = "Split each guard cell into its outer rectangle and the ellipse below it: the ellipse stays the guard cell (sunk into a pit) and the rectangle becomes an epidermal cell arching over it, as in conifer needles. False = one fused guard cell flush with the surface.")
 
 
 NeedleEndodermisParams = _layer_params("NeedleEndodermisParams", "endodermis", "endodermal", cell_diameter=0.02,   cell_width=0.05,  n_layers=1, shift=0.5, order=3)
