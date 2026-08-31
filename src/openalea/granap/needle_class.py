@@ -50,6 +50,21 @@ _DUCT_PLACEMENT_ORDER: list = [3, 6, 0, 2, 4, 1, 5]
 # mode (a small ring stretching out into coarse tissue as a radial sunburst).
 _DUCT_SHEATH_MIN_RATIO: float = 4.0
 
+# Fixed tangential/radial slack (multiples of the hypodermis cell diameter,
+# independent of chamber_clearance) added to the sub-stomatal-chamber removal
+# column in _inward_column. The hypodermis ring is seeded as its own
+# independent layer pass, not snapped to any one stoma's local frame, so the
+# hypodermis cell genuinely touching a given chamber can sit measurably
+# outside the chamber's own raw silhouette. Tuned empirically against
+# pinus_pinaster.py with tune_clearance.py's ray-cast open/blocked metric:
+# below ~1.0 almost nothing in the padded probe's reach is a real hypodermis
+# cell (0-2 of 18 stomata open regardless of depth); 1.75 clears 14/18 at
+# chamber_clearance=2 while keeping total removal to ~3.6 cells/stoma. The
+# remaining ~4 blocked stomata sit against the corner hypodermis_corner
+# nodules (up to 5 layers there vs. 2 elsewhere) and would need a
+# disproportionately larger pad -- costly everywhere else -- to also clear.
+_STOMA_HYPODERMIS_PAD_FACTOR: float = 1.75
+
 class NeedleAnatomy(Organ):
     """
     Needle cross-sectional anatomy.
@@ -943,15 +958,22 @@ class NeedleAnatomy(Organ):
         """Needle override of the intercellular-space geometry.
 
         In the needle mesophyll the intercellular air spaces are small rhombic
-        (diamond-shaped) lacunae seated *on the walls* between adjacent mesophyll 
-        cells. This override intercepts the ``mesophyll`` tissue and builds those 
-        wall-centred rhombi (see :meth:`_apply_mesophyll_wall_rhombi`); 
-        any other tissue is delegated to the shared base implementation unchanged.
+        (diamond-shaped) lacunae seated *on the walls* between adjacent mesophyll
+        cells. This override intercepts the ``mesophyll`` tissue and builds those
+        wall-centred rhombi (see :meth:`_apply_mesophyll_wall_rhombi`).
+
+        It also intercepts ``palisade``: instead of rhombi, thin full-height
+        air *slits* are carved across every ``slit_every``-th wall between
+        angularly-adjacent palisade cells (see
+        :meth:`_apply_palisade_wall_slits`), read from the optional
+        ``slit_width``/``slit_every`` per-tissue lists.
+
+        Any other tissue is delegated to the shared base implementation unchanged.
         """
         tissues = ics.get("tissue", [])
         if isinstance(tissues, str):
             tissues = [tissues]
-        if "mesophyll" not in tissues:
+        if "mesophyll" not in tissues and "palisade" not in tissues:
             super()._apply_intercellular(ics)
             return
 
@@ -962,15 +984,43 @@ class NeedleAnatomy(Organ):
             smoothness_per_tissue = [float(s) for s in smoothness]
         smoothness_by_tissue = dict(zip(tissues, smoothness_per_tissue))
 
+        # slit_width / slit_every: optional parallel per-tissue lists (only
+        # consumed for "palisade"). Default to 0 (off) so tissue entries that
+        # don't set them -- and every pre-existing config, which never had
+        # these keys at all -- see no behaviour change.
+        slit_width = ics.get("slit_width", 0.0)
+        if isinstance(slit_width, (int, float)):
+            slit_width_per_tissue = [float(slit_width)] * len(tissues)
+        else:
+            slit_width_per_tissue = [float(w) for w in slit_width]
+        slit_width_by_tissue = dict(zip(tissues, slit_width_per_tissue))
+
+        slit_every = ics.get("slit_every", 0)
+        if isinstance(slit_every, (int, float)):
+            slit_every_per_tissue = [int(slit_every)] * len(tissues)
+        else:
+            slit_every_per_tissue = [int(e) for e in slit_every]
+        slit_every_by_tissue = dict(zip(tissues, slit_every_per_tissue))
+
         # Build the wall-centred rhombic lacunae for the mesophyll only.
-        self._apply_mesophyll_wall_rhombi(smoothness_by_tissue.get("mesophyll", 0.0))
+        if "mesophyll" in tissues:
+            self._apply_mesophyll_wall_rhombi(smoothness_by_tissue.get("mesophyll", 0.0))
+
+        # Carve the thin wall slits for the palisade only.
+        if "palisade" in tissues:
+            self._apply_palisade_wall_slits(
+                slit_width_by_tissue.get("palisade", 0.0),
+                slit_every_by_tissue.get("palisade", 0),
+            )
 
         # Delegate the remaining tissues (if any) to the generic implementation.
-        other_tissues = [t for t in tissues if t != "mesophyll"]
+        other_tissues = [t for t in tissues if t not in ("mesophyll", "palisade")]
         if other_tissues:
             remaining = dict(ics)
             remaining["tissue"] = other_tissues
             remaining["smoothness"] = [smoothness_by_tissue[t] for t in other_tissues]
+            remaining.pop("slit_width", None)
+            remaining.pop("slit_every", None)
             super()._apply_intercellular(remaining)
 
     def _apply_mesophyll_wall_rhombi(self, smoothness: float) -> None:
@@ -1047,6 +1097,90 @@ class NeedleAnatomy(Organ):
             protect_topology=True,
         )
 
+    def _apply_palisade_wall_slits(self, width: float, every: int) -> None:
+        """Carve thin, full-height air slits across every ``every``-th wall
+        between angularly-adjacent palisade cells.
+
+        The palisade is a single ring, so its cells form one closed angular
+        sequence around the needle. Cells are ordered by the polar angle
+        (``atan2``) of their own polygon centroid about the organ centre --
+        by the time intercellular spaces are computed the whole cell
+        population has already been recentred on the origin (``add_stomata``
+        calls ``CellManager.recenter_cells`` earlier in ``_organ_recipe``,
+        well before Voronoi grouping / ``add_intercellular_spaces`` run), so
+        this angle is a genuine position around the ring, not an arbitrary
+        seeding index.
+
+        ``id_group`` is deliberately NOT used to pick "every Nth cell":
+        stomata carving and ``_restrict_zoned_layers`` both remove palisade
+        cells after they are first seeded, opening gaps in the ``id_group``
+        sequence. Taking parity on ``id_group`` would drift across those gaps
+        and skip walls unevenly instead of a true "every Nth cell" pattern.
+        The angular ordering has no such gaps -- it is recomputed from the
+        cells that actually survived to this point.
+
+        Only every ``every``-th wall of the ring's ``n`` walls is slit (wall
+        ``k`` sits between the ``k``-th and ``(k+1)``-th cell in angular
+        order); with ``every=2`` this pairs up angularly-adjacent cells
+        (0-1, 2-3, 4-5, ...), giving one slit per two cells as the bug
+        report asks for, and leaves every other wall solid so no palisade
+        cell loses more than one of its walls to a slit.
+        """
+        if width <= 0 or every < 2:
+            return
+
+        palisade_cells = [
+            c for c in self.all_cells.cells
+            if c.polygon is not None and c.type == "palisade"
+        ]
+        if len(palisade_cells) < every:
+            return
+
+        # Order the ring by angular position about the (recentred) organ centre.
+        palisade_cells.sort(key=lambda c: np.arctan2(c.polygon.centroid.y, c.polygon.centroid.x))
+        polys = [c.polygon for c in palisade_cells]
+        n = len(polys)
+
+        slit_polys: List[Polygon] = []
+        for k in range(0, n, every):
+            j = (k + 1) % n
+            poly_i, poly_j = polys[k], polys[j]
+            if not poly_i.intersects(poly_j):
+                continue
+            shared = poly_i.intersection(poly_j)
+            for wall in self._iter_wall_segments(shared):
+                # Slightly short of the full wall length (not exactly 1.0):
+                # a slit reaching all the way to the wall's own endpoints
+                # lands its corners exactly on existing cell-junction
+                # vertices, which can turn the carve difference into a
+                # degenerate GeometryCollection instead of a clean polygon.
+                slit = self._wall_slit(wall, 0.9, width)
+                if slit is not None and not slit.is_empty and slit.area > 1e-9:
+                    slit_polys.append(slit)
+
+        if not slit_polys:
+            return
+
+        # Union all slits once, same reasoning as the mesophyll rhombi: carving
+        # the cells and building the air-space cells from the same geometry
+        # keeps the shared boundaries vertex-for-vertex identical.
+        slit_union = GeometryProcessor.union_polygons(slit_polys)
+
+        if isinstance(slit_union, MultiPolygon):
+            slit_faces = [g for g in slit_union.geoms if not g.is_empty and g.area > 1e-9]
+        elif not slit_union.is_empty and slit_union.area > 1e-9:
+            slit_faces = [slit_union]
+        else:
+            return
+
+        # protect_topology keeps each slit's straight sides as distinct walls
+        # so the neighbouring palisade cell keeps the matching notch instead
+        # of being straightened across it.
+        seat_air_spaces(
+            self.all_cells, palisade_cells, slit_union, slit_faces,
+            protect_topology=True,
+        )
+
     @staticmethod
     def _iter_wall_segments(shared) -> List[LineString]:
         """Yield the 1-D wall segments from a cell/cell intersection geometry.
@@ -1101,6 +1235,46 @@ class NeedleAnatomy(Organ):
             c + half_minor * perp,    # tip across the wall (+)
             c - half_major * unit,    # tip along the wall (-)
             c - half_minor * perp,    # tip across the wall (-)
+        ]
+        return Polygon([tuple(v) for v in verts])
+
+    @staticmethod
+    def _wall_slit(wall: LineString, length_fraction: float, width: float) -> Optional[Polygon]:
+        """Build a thin rectangle centred on ``wall`` and aligned with it.
+
+        Same local frame as :meth:`_wall_rhombus` (wall midpoint, ``unit`` along
+        the wall, ``perp`` across it), but returns a **rectangle** rather than a
+        diamond: the four corners are ``c +- half_major*unit +- half_minor*perp``.
+        ``length_fraction`` ~1.0 gives a full-height slit ("height = the
+        mesophyll"); ``width`` is an absolute (not wall-relative) tangential
+        size. Returns ``None`` for degenerate/too-short walls, matching
+        :meth:`_wall_rhombus`'s contract.
+        """
+        length = wall.length
+        if length <= 1e-9:
+            return None
+
+        mid = wall.interpolate(0.5, normalized=True)
+        p0 = np.asarray(wall.coords[0])
+        p1 = np.asarray(wall.coords[-1])
+        direction = p1 - p0
+        norm = np.hypot(direction[0], direction[1])
+        if norm <= 1e-12:
+            return None
+        unit = direction / norm                       # along the wall
+        perp = np.array([-unit[1], unit[0]])          # perpendicular to the wall
+
+        half_major = 0.5 * length * length_fraction    # along the wall
+        half_minor = 0.5 * width                       # across the wall (absolute)
+        if half_major <= 1e-9 or half_minor <= 1e-9:
+            return None
+
+        c = np.array([mid.x, mid.y])
+        verts = [
+            c + half_major * unit + half_minor * perp,
+            c + half_major * unit - half_minor * perp,
+            c - half_major * unit - half_minor * perp,
+            c - half_major * unit + half_minor * perp,
         ]
         return Polygon([tuple(v) for v in verts])
 
@@ -1336,9 +1510,13 @@ class NeedleAnatomy(Organ):
         by comparing each candidate group's centroid distance from the organ
         centre (set to the origin by ``recenter_cells`` at the top of
         ``add_stomata``) against the chamber centroid's distance from that
-        same centre. This is automatically satisfied by any point inside the
-        column (which starts at the chamber's own inner edge), and kept here
-        as an explicit, cheap safety net.
+        same centre. This check is still needed even with the column probe:
+        ``_inward_column``'s padding (see ``_STOMA_HYPODERMIS_PAD_FACTOR``)
+        pulls the column's start back past the chamber's own inner edge --
+        and, for a shallow chamber, potentially back past the chamber
+        centroid itself -- to reach hypodermis cells that sit a bit outside
+        the chamber's raw silhouette, so it can no longer be assumed that
+        everything inside the column is inward of the centroid.
         """
         chamber_clearance = float(sp.get("chamber_clearance", 0.0) or 0.0)
         if chamber_clearance <= 0.0:
@@ -1366,7 +1544,8 @@ class NeedleAnatomy(Organ):
             if chamber is None:
                 continue
             gc1, gc2 = geom[1], geom[2]
-            region = self._inward_column(chamber, gc1, gc2, depth, pad=1.5 * hypo_diam)
+            region = self._inward_column(chamber, gc1, gc2, depth,
+                                          pad=_STOMA_HYPODERMIS_PAD_FACTOR * hypo_diam)
             if region is None:
                 continue
             chamber_radius = np.hypot(chamber.centroid.x, chamber.centroid.y)

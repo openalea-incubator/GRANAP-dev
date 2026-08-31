@@ -135,7 +135,7 @@ def build_pinaster():
 
     return [
         {"name": "planttype", "value": 3, "organ": "needle",
-         "width": 2.132, "thickness": 1.29},
+         "width": 2.232, "thickness": 1.29},
         # Half-ellipse central cylinder (schema default; "ellipse" would
         # morph it via reshape_layers, not wanted here). vascular_width/
         # height are the two vascular bundles' major/minor axes; overall
@@ -209,15 +209,29 @@ def build_pinaster():
          "sheath_cell_diameter": 0.018, "sheath_cell_width": 0.023},
         # Directional, corner-excluded stomata: 11 abaxial (domed/top), 6
         # adaxial (flat/bottom) -- see docstring diagram above.
-        # chamber_clearance=1.0: delete the innermost hypodermis cell under each
-        # sub-stomatal chamber (1 hypodermis-cell-diameter clearance) so palisade
-        # mesophyll can extend up to the chamber, matching the sunken-stoma anatomy.
+        # chamber_clearance=2.0: delete the hypodermis cell(s) directly inward of
+        # each sub-stomatal chamber (2 hypodermis-cell-diameters of reach, via an
+        # oriented column under the chamber -- see NeedleAnatomy._inward_column)
+        # so palisade mesophyll can extend up to the chamber, matching the
+        # sunken-stoma anatomy. Trade-off (tune_clearance.py ray-cast sweep): this
+        # opens 14/18 stomata at ~3.6 hypodermis cells removed per stoma on
+        # average (449 -> 384 total); the remaining ~4 sit against the corner
+        # hypodermis_corner nodules (up to 5 layers there vs. 2 elsewhere) and
+        # would need disproportionately more reach -- costly everywhere else --
+        # to also clear, so 16/18 was not reachable within a ~3/stoma budget.
         {"name": "stomata", "n_adaxial": 8, "n_abaxial": 11, "edge_margin": 0.1,
-         "width": 0.025, "depth": 0.08, "sub_chamber": 0.04, "chamber_clearance": 1.0},
+        # sunken=True splits each guard cell into its outer rectangle and the
+        # ellipse below it: the ellipse stays the guard cell, sunk into a pit,
+        # and the rectangle becomes an epidermal cell arching over it -- the
+        # sunken stoma of "Pine needle stoma cuticle hypodermis.jpg".
+         "width": 0.025, "depth": 0.07, "sub_chamber": 0.05, "chamber_clearance": 2.0,
+         "sunken": True},
         # Rhombic wall-centred air spaces for the "loose" spongy mesophyll
         # (NeedleAnatomy._apply_mesophyll_wall_rhombi covers both mesophyll
-        # rings).
-        {"name": "inter_cellular_spaces", "tissue": ["mesophyll"], "smoothness": [0.3]},
+        # rings), plus thin full-height air slits carved every two palisade
+        # cells (NeedleAnatomy._apply_palisade_wall_slits).
+        {"name": "inter_cellular_spaces", "tissue": ["mesophyll", "palisade"],
+         "smoothness": [0.3, 0.0], "slit_width": [0, 0.002], "slit_every": [0, 2]},
     ]
 
 def main(show=True):

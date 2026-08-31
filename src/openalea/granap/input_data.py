@@ -762,6 +762,8 @@ class NeedleInterCellularSpacesParams(BaseParams):
     name      : str             = "inter_cellular_spaces"
     tissue    : List[str]       = Field(default=["mesophyll", "endodermis"], title="Tissue", description="One or more tissue names to apply intercellular spaces to. Adjacent tissues in the list will have spaces generated at their shared boundary.")
     smoothness: Union[float, List[float]] = Field(default=[0.01, 0.01], title="Smoothness", description="Smoothness per tissue (0-1). Provide a single float applied to all tissues, or a list with one value per tissue.")
+    slit_width: Union[float, List[float]] = Field(default=0.0, title="Slit Width", description="tissue='palisade' only: absolute width (mm) of the thin, full-height air slit carved across every slit_every-th wall between angularly-adjacent cells; 0 disables. Provide a single float applied to all tissues, or a list with one value per tissue.")
+    slit_every: Union[int, List[int]] = Field(default=0, title="Slit Every", description="tissue='palisade' only: carve a slit on every Nth wall between angularly-adjacent cells (e.g. 2 = one slit per pair of cells); values below 2 disable slits. Provide a single int applied to all tissues, or a list with one value per tissue.")
 
     @model_validator(mode="after")
     def _check_smoothness_length(self) -> "NeedleInterCellularSpacesParams":
@@ -771,6 +773,16 @@ class NeedleInterCellularSpacesParams(BaseParams):
                     f"smoothness has {len(self.smoothness)} value(s) but tissue has {len(self.tissue)} entry/entries — "
                     "lengths must match, or provide a single float applied to all tissues."
                 )
+        if isinstance(self.slit_width, list) and len(self.slit_width) != len(self.tissue):
+            raise ValueError(
+                f"slit_width has {len(self.slit_width)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                "lengths must match, or provide a single float applied to all tissues."
+            )
+        if isinstance(self.slit_every, list) and len(self.slit_every) != len(self.tissue):
+            raise ValueError(
+                f"slit_every has {len(self.slit_every)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                "lengths must match, or provide a single int applied to all tissues."
+            )
         return self
 
 
