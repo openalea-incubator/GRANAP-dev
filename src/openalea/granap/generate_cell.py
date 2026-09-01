@@ -750,6 +750,8 @@ class CellGenerator:
         id_groups = [cell.id_group for cell in cells]
         id_groups = np.unique(id_groups)
         cell = cells[0] # template cell
+        guard_cell_diameter = stomata_setting.get("guard_cell_diameter") or cell.width
+        guard_cell_aspect = stomata_setting.get("guard_cell_aspect", 0.5)
 
         triplet = CellManager()
         triplet.cells = cells
@@ -793,14 +795,14 @@ class CellGenerator:
             return local_to_global_poly(pts)
     
         # Create guard cells
-        gc_rx = cell.width / 2
-        gc_ry = cell.width / 2
+        gc_rx = guard_cell_diameter / 2
+        gc_ry = guard_cell_diameter / 2
         gc1_x = -width / 2
         gc2_x = width / 2
         gc_y = depth
-    
-        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry/2)
-        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry/2)
+
+        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
+        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
     
         rect_w = cell.width * 0.6
         rect_h = depth

@@ -211,6 +211,27 @@ class NeedleAnatomy(Organ):
         corner_neg = np.degrees(np.arctan2(-y_c, -a)) % 360.0    # near 180 side
         return float(adaxial_pole), float(abaxial_pole), float(corner_pos), float(corner_neg)
 
+    @staticmethod
+    def corner_bump_profile(peaks, floor=0.15):
+        """Build a circular (angle_deg, multiplier) thickness_profile from a list
+        of (center_angle_deg, half_width_deg, peak_multiplier) nodules.
+
+        Each nodule is a rise/peak/fall triangle over a `floor` baseline
+        elsewhere (angles wrap circularly, see
+        ``NeedleAnatomy._angular_multiplier``); keep nodules well separated so
+        adjacent triangles don't overlap.
+
+        `floor` must stay nonzero: at floor=0 a ring's boundary coincides with
+        its outer neighbor's, producing near-coincident Voronoi seeds and wildly
+        oversized (numerically unstable) cell polygons at the valley nodules.
+        """
+        pts = [(0.0, floor), (360.0, floor)]
+        for center, half_width, mult in peaks:
+            pts.append((center - half_width, floor))
+            pts.append((center, mult))
+            pts.append((center + half_width, floor))
+        return sorted(pts)
+
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
         When "central_cylinder" has shape="ellipse", interpolate each layer

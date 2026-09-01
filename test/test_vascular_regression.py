@@ -23,11 +23,13 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(".."))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "example", "needle"))
 
 from openalea.granap.root_class import RootAnatomy
 from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.input_data import OrganInputData
+from gallery_needle_features import build_gallery_needle_data
 
 SEED = 0
 
@@ -63,10 +65,14 @@ def needle_default() -> NeedleAnatomy:
 
 
 def needle_features() -> NeedleAnatomy:
-    """Needle with extra resin ducts and stomata (matches ``test_needle``)."""
-    data = OrganInputData.for_needle()
-    data.set_value("resin_duct", "n_files", 2)
-    data.set_value("stomata", "n_files", 10)
+    """The feature-showcase needle from ``example/needle/gallery_needle_features.py``.
+
+    Calls that gallery's own ``build_gallery_needle_data`` directly (rather
+    than a hand-copied duplicate of its config) so this golden fixture can
+    never silently drift from what the gallery actually demonstrates -- see
+    that function's docstring for why.
+    """
+    data = build_gallery_needle_data()
     return NeedleAnatomy(data, seed=SEED)
 
 
@@ -105,10 +111,12 @@ GOLDEN = {
         "resin duct": 42, "transfusion": 103, "xylem": 270,
     }),
     "needle_features": (needle_features, {
-        "Strasburger cell": 38, "air space": 494, "cambium": 58, "duct": 2,
-        "endodermis": 49, "epidermis": 219, "guard cell": 20, "hypodermis": 366,
-        "mesophyll": 230, "parenchyma": 244, "phloem": 310, "pore": 10,
-        "resin duct": 28, "transfusion": 103, "xylem": 270,
+        "Str. Interstitial cell": 90, "Strasburger cell": 26, "air space": 503,
+        "cambium": 32, "duct": 2, "endodermis": 45, "epidermis": 239,
+        "guard cell": 20, "hypodermis": 355, "hypodermis_corner": 29,
+        "mesophyll": 231, "parenchyma": 76, "phloem": 164, "pore": 10,
+        "resin duct epithelium": 20, "resin duct sheath": 36,
+        "transfusion parenchyma": 43, "transfusion tracheid": 125, "xylem": 202,
     }),
     "dicot_stem": (dicot_stem, {
         "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,

@@ -706,9 +706,17 @@ class CentralCylinderParams(BaseParams):
     cell_diameter   : float = Field(default=0.02,  ge=0.00001, title = "Cell Diameter", description = "Diameter of the central cylinder cells")
     layer_thickness : float = Field(default=0.43,  ge=0.00001, title = "Layer Thickness", description = "Thickness of the central cylinder layers")
     layer_length    : float = Field(default=1.05,  ge=0.00001, title = "Layer Length", description = "Length of the central cylinder layers")
-    vascular_width  : float = Field(default=0.15,  ge=0.00001, title = "Vascular Width", description = "Width of the vascular bundles")
-    vascular_height : float = Field(default=0.2,   ge=0.00001, title = "Vascular Height", description = "Height of the vascular bundles")
-    vascular_angle  : Optional[float] = Field(default=None, title = "Vascular Angle", description = "Explicit rotation (degrees) for the vascular ellipses; None auto-detects orientation from the local polygon shape")
+    # width > height so the vascular ellipse's major axis starts tangential
+    # (corner-to-corner) before vascular_angle rotates it -- ellipse_to_polygon
+    # scales a unit circle by (rx=width/2, ry=height/2) *before* rotating, so
+    # whichever of the two is larger decides where the major axis starts; a
+    # width < height default (as before) makes the major axis start radial
+    # (adaxial-abaxial), and rotating by a modest angle (0-30 deg) then only
+    # tilts that already-vertical axis instead of reorienting it. Matches the
+    # width>height convention example/needle/pinus_pinaster.py already uses.
+    vascular_width  : float = Field(default=0.2,   ge=0.00001, title = "Vascular Width", description = "Width of the vascular bundles")
+    vascular_height : float = Field(default=0.15,  ge=0.00001, title = "Vascular Height", description = "Height of the vascular bundles")
+    vascular_angle  : float = Field(default=20, title = "Vascular Angle", description = "Explicit rotation (degrees) for the vascular ellipses; None auto-detects orientation from the local polygon shape. Must not be exactly 90 (or 270): at that singular angle vascular_elements_in_ellipses's sin_a<0 polarity guard has sin_a~=0 rather than a clear sign, and can leave phloem on the adaxial side of one bundle.")
 
 
 class TransfusionTissueParams(BaseParams):
@@ -804,7 +812,9 @@ class StomataParams(BaseParams):
     n_abaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (abaxial)", description = "Number of stomata on the lower (abaxial) side. If set together with n_adaxial, overrides n_files with a directional, corner-excluded placement.")
     edge_margin: float = Field(default=0.12, ge=0.0, le=0.5, title = "Edge Margin", description = "Fraction of each adaxial/abaxial epidermis run skipped at both ends (where the two sides meet, i.e. the corners) when n_adaxial/n_abaxial are set.")
     chamber_clearance: float = Field(default=0.0, ge=0.0, title = "Chamber Clearance", description = "Radius (multiples of the hypodermis cell diameter) around each sub-stomatal chamber within which the innermost hypodermis cell seed is deleted before tessellation, so palisade mesophyll can extend up to the chamber. 0 = feature off (no cells removed).")
-    sunken     : bool  = Field(default=False, title = "Sunken Stomata", description = "Split each guard cell into its outer rectangle and the ellipse below it: the ellipse stays the guard cell (sunk into a pit) and the rectangle becomes an epidermal cell arching over it, as in conifer needles. False = one fused guard cell flush with the surface.")
+    sunken     : bool  = Field(default=True, title = "Sunken Stomata", description = "Split each guard cell into its outer rectangle and the ellipse below it: the ellipse stays the guard cell (sunk into a pit) and the rectangle becomes an epidermal cell arching over it, as in conifer needles. Default True: needle stomata are sunken by default, matching gymnosperm anatomy. False = one fused guard cell flush with the surface.")
+    guard_cell_diameter: Optional[float] = Field(default=None, gt=0, title = "Guard Cell Diameter", description = "Base diameter used to size each guard cell's ellipse (gc_rx = gc_ry = diameter / 2). Defaults to the epidermis cell's own width when unset, so existing configs are unchanged.")
+    guard_cell_aspect: float = Field(default=0.5, gt=0, le=1.0, title = "Guard Cell Aspect", description = "Vertical-to-horizontal radius ratio of each guard cell's ellipse (effective vertical radius = guard_cell_diameter/2 * guard_cell_aspect). Lower values flatten/sink the guard cell more; 0.5 reproduces the previous hardcoded shape.")
 
 
 NeedleEndodermisParams = _layer_params("NeedleEndodermisParams", "endodermis", "endodermal", cell_diameter=0.02,   cell_width=0.05,  n_layers=1, shift=0.5, order=3)

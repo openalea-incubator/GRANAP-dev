@@ -69,25 +69,6 @@ sys.path.append(os.path.abspath(".."))
 
 from openalea.granap.needle_class import NeedleAnatomy
 
-def _bump_profile(peaks, floor=0.15):
-    """Build a circular (angle_deg, multiplier) thickness_profile from a list
-    of (center_angle_deg, half_width_deg, peak_multiplier) nodules.
-
-    Each nodule is a rise/peak/fall triangle over a `floor` baseline
-    elsewhere (angles wrap circularly, see NeedleAnatomy._angular_multiplier);
-    keep nodules well separated so adjacent triangles don't overlap.
-
-    `floor` must stay nonzero: at floor=0 a ring's boundary coincides with
-    its outer neighbor's, producing near-coincident Voronoi seeds and wildly
-    oversized (numerically unstable) cell polygons at the valley nodules.
-    """
-    pts = [(0.0, floor), (360.0, floor)]
-    for center, half_width, mult in peaks:
-        pts.append((center - half_width, floor))
-        pts.append((center, mult))
-        pts.append((center + half_width, floor))
-    return sorted(pts)
-
 
 def build_pinaster():
     WIDTH, THICKNESS = 2.232, 1.29
@@ -124,7 +105,7 @@ def build_pinaster():
     # at the adaxial pole, where this ring sits right at the floor with no
     # corner nodule to widen it). 0.85 keeps margin, same as MESOPHYLL_FLOOR.
     HYPODERMIS_FLOOR = 0.85
-    NODULE_PROFILE = _bump_profile(
+    NODULE_PROFILE = NeedleAnatomy.corner_bump_profile(
         [(CORNER_POS, 10.0, 1.0), (CORNER_NEG, 10.0, 1.0)],
         floor=HYPODERMIS_FLOOR,
     )
@@ -224,7 +205,12 @@ def build_pinaster():
         # ellipse below it: the ellipse stays the guard cell, sunk into a pit,
         # and the rectangle becomes an epidermal cell arching over it -- the
         # sunken stoma of "Pine needle stoma cuticle hypodermis.jpg".
-         "width": 0.025, "depth": 0.07, "sub_chamber": 0.05, "chamber_clearance": 2.0,
+         "width": 0.021, "depth": 0.08, "sub_chamber": 0.06, "chamber_clearance": 2.0,
+        # guard_cell_diameter/guard_cell_aspect flatten the guard-cell ellipse
+        # from the previous round default (cell.width, aspect 0.5) into a
+        # wider, lower lens shape -- closer to a real guard cell's outline
+        # than a round blob.
+         "guard_cell_diameter": 0.02, "guard_cell_aspect": 0.7,
          "sunken": True},
         # Rhombic wall-centred air spaces for the "loose" spongy mesophyll
         # (NeedleAnatomy._apply_mesophyll_wall_rhombi covers both mesophyll
