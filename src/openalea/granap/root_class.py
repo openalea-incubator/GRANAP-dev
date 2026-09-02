@@ -148,6 +148,9 @@ class RootAnatomy(Organ):
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
+            # Out-of-plane (longitudinal) stele-cell extent for the 3D pipeline —
+            # see ROOT_3D_PLAN. None = no 3D axial subdivision configured.
+            "axial_height":             stele.get("axial_height"),
         }
 
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
@@ -235,6 +238,7 @@ class RootAnatomy(Organ):
                 polygon=current_polygon,
                 cell_diameter=cell_diameter,
                 id_layer=i_layer + 1,
+                axial_height=self.vascular_params.get("axial_height"),
             ))
             i_layer += 1
 

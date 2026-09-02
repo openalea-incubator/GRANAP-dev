@@ -24,7 +24,8 @@ class BaseParams(BaseModel):
 
 def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
                   n_layers: int, shift: float, order: int,
-                  cell_width: Optional[float] = None):
+                  cell_width: Optional[float] = None,
+                  axial_height: Optional[float] = None):
     """An ordered 'layer' tissue: a ring of cells peeled inward by ``n_layers``.
 
     Shared by every peeled layer (epidermis / exodermis / cortex / endodermis /
@@ -32,6 +33,9 @@ def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
     mesophyll / hypodermis / ...).  ``label`` is woven into the field descriptions
     (e.g. "Diameter of the cortical cells").  ``cell_width=None`` omits the width
     field (the needle epidermis / hypodermis have no separate tangential width).
+    ``axial_height`` is the out-of-plane (longitudinal) cell extent for the 3D
+    pipeline (see ROOT_3D_PLAN); left unset (None) it has no effect on 2D
+    generation.
     """
     fields: Dict[str, Any] = {
         "name": (str, name),
@@ -47,6 +51,8 @@ def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
         title="Shift", description=f"Shift of the {label} cells from 0 to 1"))
     fields["order"] = (int, Field(default=order, ge=0,
         title="Order", description=f"Order of the {label} cells"))
+    fields["axial_height"] = (Optional[float], Field(default=axial_height, ge=0.00001,
+        title="Axial Height", description=f"Out-of-plane (longitudinal) extent of the {label} cells, used by the 3D pipeline. Unset (None) = 2D-only generation."))
     return create_model(clsname, __base__=BaseParams, **fields)
 
 
@@ -80,6 +86,8 @@ def _ground_region_params(clsname: str, name: str, *, thickness: float,
         title="Size Gradient Steepness", description="Hill coefficient — sharpness of the size transition. Used by five_pl."))
     fields["size_gradient_asymmetry"] = (float, Field(default=1.0, ge=0.1,
         title="Size Gradient Asymmetry", description="Asymmetry exponent of the size gradient. Used by five_pl."))
+    fields["axial_height"] = (Optional[float], Field(default=None, ge=0.00001,
+        title="Axial Height", description="Out-of-plane (longitudinal) extent of this region's cells, used by the 3D pipeline. Unset (None) = 2D-only generation."))
     return create_model(clsname, __base__=BaseParams, **fields)
 
 
@@ -94,6 +102,9 @@ class LayerDefaultParams(BaseParams):
     shift_default       : float = Field(default=0.0,   ge=0.0, le=1.0)
     n_layers_default    : int   = Field(default=1,     ge=1) # No upper limit
     order_default       : int   = Field(default=0,     ge=0) # No upper limit
+    # Out-of-plane (longitudinal) cell extent for the 3D pipeline — see
+    # ROOT_3D_PLAN. None = no 3D axial subdivision configured (2D behaviour).
+    axial_height_default: Optional[float] = Field(default=None, ge=0.00001)
 
 
 # ===========================================================================

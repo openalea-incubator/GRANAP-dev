@@ -13,7 +13,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -83,7 +84,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -91,7 +93,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 5
+   "order": 5,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -99,7 +102,8 @@
    "cell_width": 0.04,
    "n_layers": 5,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -107,7 +111,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -115,7 +120,8 @@
    "cell_width": 0.009,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 2
+   "order": 2,
+   "axial_height": null
   }
  ],
  "for_dicot_root": [
@@ -132,7 +138,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -260,7 +267,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -268,7 +276,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 5
+   "order": 5,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -276,7 +285,8 @@
    "cell_width": 0.04,
    "n_layers": 5,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -284,7 +294,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -292,7 +303,8 @@
    "cell_width": 0.009,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 2
+   "order": 2,
+   "axial_height": null
   }
  ],
  "for_woody_dicot": [
@@ -309,7 +321,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -418,7 +431,8 @@
    "cell_width": 0.025,
    "n_layers": 3,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   },
   {
    "name": "phellogen",
@@ -426,7 +440,8 @@
    "cell_width": 0.02,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "phelloderm",
@@ -434,7 +449,8 @@
    "cell_width": 0.015,
    "n_layers": 4,
    "shift": 0.0,
-   "order": 2
+   "order": 2,
+   "axial_height": null
   },
   {
    "name": "medullar_rays",
@@ -462,7 +478,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -590,7 +607,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -598,7 +616,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 5
+   "order": 5,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -606,7 +625,8 @@
    "cell_width": 0.04,
    "n_layers": 5,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -614,7 +634,8 @@
    "cell_width": 0.03,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -622,7 +643,8 @@
    "cell_width": 0.009,
    "n_layers": 1,
    "shift": 0.0,
-   "order": 2
+   "order": 2,
+   "axial_height": null
   }
  ],
  "for_monocot_stem": [
@@ -640,7 +662,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -762,7 +785,8 @@
    "cell_width": 0.008,
    "n_layers": 2,
    "shift": 0.0,
-   "order": 5
+   "order": 5,
+   "axial_height": null
   },
   {
    "name": "inter_cellular_spaces",
@@ -785,7 +809,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -793,7 +818,8 @@
    "cell_width": 0.04,
    "n_layers": 5,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   }
  ],
  "for_dicot_stem": [
@@ -811,7 +837,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -1017,7 +1044,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -1025,7 +1053,8 @@
    "cell_width": 0.04,
    "n_layers": 3,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   }
  ],
  "for_dicot_stem_continuous": [
@@ -1043,7 +1072,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -1204,7 +1234,8 @@
    "cell_width": 0.015,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -1212,7 +1243,8 @@
    "cell_width": 0.04,
    "n_layers": 3,
    "shift": 0.0,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   }
  ],
  "for_needle": [
@@ -1302,7 +1334,8 @@
    "cell_width": 0.05,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "mesophyll",
@@ -1310,21 +1343,24 @@
    "cell_width": 0.045,
    "n_layers": 3,
    "shift": 0.5,
-   "order": 4
+   "order": 4,
+   "axial_height": null
   },
   {
    "name": "hypodermis",
    "cell_diameter": 0.0225,
    "n_layers": 2,
    "shift": 0.5,
-   "order": 5
+   "order": 5,
+   "axial_height": null
   },
   {
    "name": "epidermis",
    "cell_diameter": 0.02,
    "n_layers": 1,
    "shift": 0.5,
-   "order": 6
+   "order": 6,
+   "axial_height": null
   }
  ],
  "for_monocot_leaf": [
@@ -1347,7 +1383,8 @@
    "cell_width": 0.035,
    "n_layers": 1,
    "shift": 0.3,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "mesophyll",
@@ -1453,7 +1490,8 @@
    "cell_width": 0.035,
    "n_layers": 1,
    "shift": 0.3,
-   "order": 3
+   "order": 3,
+   "axial_height": null
   },
   {
    "name": "palisade",
@@ -1596,7 +1634,8 @@
    "cell_width_default": 0.01,
    "shift_default": 0.0,
    "n_layers_default": 1,
-   "order_default": 0
+   "order_default": 0,
+   "axial_height_default": null
   }
  ]
 }

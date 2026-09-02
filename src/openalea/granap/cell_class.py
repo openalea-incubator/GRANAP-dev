@@ -7,13 +7,19 @@ class Cell:
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
                 angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None,
-                protect_topology: bool = False, protect_shape: bool = False, track_id=None):
+                protect_topology: bool = False, protect_shape: bool = False, track_id=None,
+                z: float = 0.0, axial_height: float = None):
 
         self.x = x
         self.y = y
         self.diameter = diameter
         self.width = width if width != 0 else diameter
         self.height = height if height != 0 else diameter
+        # Out-of-plane (longitudinal/axial, Z) extent — see ROOT_3D_PLAN. Distinct
+        # from `height` above, which is an in-plane axis kept for 2D back-compat.
+        # None means "no 3D axial subdivision configured" (2D behaviour).
+        self.z = z
+        self.axial_height = axial_height
         self.type = type
         self.id_cell = id_cell
         self.id_layer = id_layer
@@ -33,7 +39,7 @@ class Cell:
     @classmethod
     def radial(cls, type: str, x: float, y: float, diameter: float,
                id_group: int, center, *, id_cell: int = None, id_layer: int = -1,
-               track_id=None) -> "Cell":
+               track_id=None, z: float = 0.0, axial_height: float = None) -> "Cell":
         """Build a seed cell whose ``angle``/``radius`` are measured from ``center``.
 
         This is the ubiquitous seeding idiom — a cell placed at ``(x, y)`` with its
@@ -42,6 +48,8 @@ class Cell:
         ``diameter`` (as everywhere it is used); ``id_cell`` defaults to
         ``id_group`` (one seed per Voronoi group) unless an explicit running id is
         given.  ``track_id`` tags a persistent tracked vessel (default None).
+        ``z``/``axial_height`` are the out-of-plane counterparts, unused until a
+        3D pipeline places seeds along the organ's longitudinal axis.
         """
         cx, cy = (center.x, center.y) if hasattr(center, "x") else center
         return cls(
@@ -50,6 +58,7 @@ class Cell:
             id_layer=id_layer, id_group=id_group, track_id=track_id,
             angle=np.arctan2(y - cy, x - cx),
             radius=np.sqrt((x - cx) ** 2 + (y - cy) ** 2),
+            z=z, axial_height=axial_height,
         )
 
     @property
@@ -70,10 +79,11 @@ class Cell:
             self.radius = np.sqrt(self.x**2 + self.y**2)
 
     def cell_to_dict(self):
-        return {"type": self.type, "x": self.x, "y": self.y, 
+        return {"type": self.type, "x": self.x, "y": self.y, "z": self.z,
                 "cell_diameter": self.diameter,
                 "cell_width": self.width,
                 "cell_height": self.height,
+                "axial_height": self.axial_height,
                 "id_cell": self.id_cell,
                 "id_layer": self.id_layer,
                 "id_group": self.id_group,
