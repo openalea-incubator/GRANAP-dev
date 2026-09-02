@@ -27,6 +27,7 @@ from openalea.granap.cell_manager import CellManager
 from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.tissue_class import TissueRecipe, retag_tissue
+from openalea.granap.generate_cell_3d import generate_cells_3d as _generate_cells_3d, Cells3DResult
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -231,6 +232,7 @@ class Organ(AbstractNetwork, ABC):
                 id_layer=i_layer + 1,
                 cell_width=layer["cell_width"],
                 shift=layer["shift"],
+                axial_height=layer.get("axial_height"),
             ))
         
         # Add central layers (vascular, parenchyma, etc.)
@@ -330,6 +332,33 @@ class Organ(AbstractNetwork, ABC):
             log.info("GeoDataFrame export:     %.3fs", time.time() - t_start)
         
         return self._cells_gdf
+
+    def generate_cells_3d(self, n_axial_repeats: float = 8.0,
+                          default_axial_height: Optional[float] = None,
+                          seed: Optional[int] = None) -> Cells3DResult:
+        """Build a 3D model of this organ by extruding its 2D cross-section.
+
+        Generates a fresh 2D cross-section — *ordinary* intercellular space
+        disabled (3D intercellular space isn't modelled yet), aerenchyma left
+        as configured (it's real tissue cells retyped "air space", not a
+        separate feature, so it extrudes like any other cell) — and stacks
+        literal copies of each cell's real 2D polygon along Z at its own
+        tissue-type height; vessels get one extrusion spanning the whole
+        segment. See :mod:`generate_cell_3d` for the full mechanics and the
+        reasoning behind this design (it replaced an earlier 3D-Voronoi
+        approach that proved too fragile/expensive).
+
+        Args:
+            n_axial_repeats: segment length as a multiple of the tallest
+                ordinary tissue's own axial height.
+            default_axial_height: override for any tissue whose own
+                ``axial_height`` isn't explicitly configured (else each
+                falls back to ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``).
+            seed: RNG seed for the per-cell axial phase shift; defaults to
+                this organ's own seeded ``self.rng``.
+        """
+        return _generate_cells_3d(self, n_axial_repeats=n_axial_repeats,
+                                  default_axial_height=default_axial_height, seed=seed)
 
     def retag_cells(self, old_tag: str, new_tag: str) -> int:
         """Rename every cell tagged ``old_tag`` to ``new_tag``.

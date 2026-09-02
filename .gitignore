@@ -5,3 +5,6 @@
 IMPLEMENTATION_GUIDE.md
 LEAF_PLAN.md
 ROOT_SERIES_PLAN.md
+
+# Generated example renders
+example/*/output/
