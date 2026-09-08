@@ -47,6 +47,26 @@ def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
         title="Shift", description=f"Shift of the {label} cells from 0 to 1"))
     fields["order"] = (int, Field(default=order, ge=0,
         title="Order", description=f"Order of the {label} cells"))
+    fields["n_points"] = (Optional[int], Field(default=None, ge=3,
+        title="Cell Border Points",
+        description=(f"Voronoi seed points per {label} cell's border ellipse "
+                      "(CellGenerator.cell_border). Raising it rounds the cell "
+                      "(more seeds tracking the ellipse more closely -> pinched "
+                      "point-contacts instead of flat shared walls), at the cost "
+                      "of more seeds and slower tessellation. Unset (default) "
+                      "reproduces the historical fixed rule: 15 points for an "
+                      "anisotropic cell (cell_width != cell_diameter), 10 for an "
+                      "isotropic one.")))
+    fields["protect_shape"] = (bool, Field(default=False,
+        title="Protect Shape",
+        description=(f"Keep every boundary vertex of a fused {label} cell "
+                      "instead of collapsing it to one vertex per neighbour-group "
+                      "junction (CellGenerator.simplify_cells). Needed for "
+                      "n_points to have a visible rounding effect -- "
+                      "simplification otherwise discards the extra border seeds' "
+                      "vertices right after tessellation. Costs more vertices "
+                      "per cell in every geometry export (AnatomyWriter/network) "
+                      "for this layer's cells.")))
     return create_model(clsname, __base__=BaseParams, **fields)
 
 
@@ -729,6 +749,8 @@ class TransfusionTissueParams(BaseParams):
     pack_circles                : bool  = Field(default=False, title = "Pack Circles", description = "If True, fill the transfusion zone by circle-packing (irregular, densely-packed cells) instead of one row of ring cells per layer. Uses diameter_max/proportion below instead of tracheids_diameter/parenchyma_diameter.")
     diameter_max                : float = Field(default=0.05, ge=0.00001, title = "Max Cell Diameter", description = "Target circle diameter for packed transfusion cells (only used when pack_circles is True)")
     proportion                  : float = Field(default=0.6,  ge=0.0, le=1.0, title = "Fill Proportion", description = "Target packed area fraction of the transfusion zone (only used when pack_circles is True)")
+    bridge_radius                : Optional[float] = Field(default=None, ge=0.0, title = "Bridge Radius", description = "Max boundary-to-boundary gap for a transfusion-parenchyma network bridge across an intervening tracheid (None falls back to parenchyma_diameter)")
+    bridge_max_links             : int   = Field(default=4, ge=0, title = "Bridge Max Links", description = "Fan-out cap: maximum number of accepted transfusion-tissue network bridge paths per source AND per target cell (shortest gaps preferred). Independent of node sharing -- several accepted paths that cross the same tracheid still reuse that tracheid's one virtual node")
 
 
 class XylemParams(BaseParams):
@@ -764,6 +786,9 @@ class ResinDuctParams(BaseParams):
     cell_width           : float = Field(default=0,     ge=0.0,     title = "Epithelium Cell Width", description = "Tangential (along-the-ring) size of the epithelium cells; 0 = isotropic, falls back to cell_diameter")
     sheath_cell_diameter : float = Field(default=0.02,  ge=0.00001, title = "Sheath Cell Diameter", description = "Radial (ring-thickness) size of the sheath cells -- the outer ring surrounding the epithelium")
     sheath_cell_width    : float = Field(default=0,     ge=0.0,     title = "Sheath Cell Width", description = "Tangential (along-the-ring) size of the sheath cells; 0 = isotropic, falls back to sheath_cell_diameter")
+    positions            : List[Tuple[float, float]] = Field(default_factory=list, title = "Duct Positions", description = "Explicit placement: one duct per (x, y) point in the model frame (the same un-recentred frame the layer polygons live in), each sized by THIS param block. The most direct placement mode -- no bearing/wedge conversion -- so it is the right choice for a duct whose position was measured directly (e.g. digitised from a micrograph). Takes priority over angles when both are given on the same block. n_files is ignored for a block that sets positions.")
+    angles               : List[float] = Field(default_factory=list, title = "Duct Angles", description = "Explicit placement: one duct per polar angle (degrees, NeedleAnatomy.pole_and_corner_angles' convention -- e.g. the two corners and the abaxial pole), each sized by THIS param block, converted to a target point and seated the same way as positions. Empty (default, with positions also empty) places n_files ducts at fixed pizza-slice positions instead. Give several resin_duct blocks to mix duct sizes across chosen positions/bearings; n_files is ignored for a block that sets angles.")
+    wedge                : float = Field(default=10.0, gt=0, le=180, title = "Duct Wedge Half-Width", description = "positions/angles only: half-width (degrees) used solely by the point-seating's own fallback search, when the requested point/bearing cannot hold the duct anywhere in the home zone (rare -- see NeedleAnatomy._duct_zone_data). Has no effect on normal seating, which is by exact point, not by wedge.")
 
 
 class NeedleInterCellularSpacesParams(BaseParams):

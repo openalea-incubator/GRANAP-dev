@@ -61,6 +61,15 @@ class Organ(AbstractNetwork, ABC):
     #: wall_air network nodes.  False for root/stem; leaves override this True.
     PROTECT_AIR_TOPOLOGY: bool = False
 
+    #: Cell types that must NEVER carry a symplastic (plasmodesmata) edge,
+    #: even when they legitimately flank a real two-cell wall -- apoplastic-only
+    #: pathways (e.g. a dead conduit with no living cytoplasm to connect
+    #: through). Enforced generically in ``NetworkExporter.export``'s Phase-6
+    #: symplastic block; membrane/wall edges are always left untouched. Empty
+    #: for every organ by default; ``NeedleAnatomy`` sets
+    #: ``("transfusion tracheid",)``.
+    APOPLASTIC_ONLY_TYPES: tuple = ()
+
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
         Initialize the anatomy structure.
@@ -234,6 +243,8 @@ class Organ(AbstractNetwork, ABC):
                 id_layer=i_layer + 1,
                 cell_width=layer["cell_width"],
                 shift=layer["shift"],
+                n_points=layer.get("n_points"),
+                protect_shape=layer.get("protect_shape", False),
             ))
         
         # Add central layers (vascular, parenchyma, etc.)
@@ -1281,7 +1292,34 @@ class Organ(AbstractNetwork, ABC):
         return plot_tissues(self, ax=ax, show=show, labels=labels,
                             show_effective=show_effective, fuse=fuse)
 
-    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None) -> lil_matrix:
+    def network_bridge_specs(self) -> List[Dict[str, Any]]:
+        """Extra plasmodesmata/membrane network bridges beyond real shared walls.
+
+        Each spec describes a NODE bridge (see ``NetworkExporter.export``'s
+        Phase 9, and the reference diagram
+        ``example/needle/Transfusion_tissue_network.png``): for a
+        ``source_types`` cell A close to a ``target_types`` cell B with only
+        one or more ``blocker_types`` cells geometrically between them (A-B
+        straight line covered by A U B U blockers), a virtual NODE V_T is
+        created per distinct blocker T actually crossed -- standing in for a
+        real, out-of-plane third cell -- and chained
+        ``A <-> V_T1 <-> ... <-> V_Tn <-> B`` via ``plasmodesmata`` edges,
+        with ``membrane`` edges from the two end nodes to the EXISTING wall
+        each already shares with its neighbouring blocker
+        (``wall(A, T1)``/``wall(Tn, B)``). No new wall or junction is ever
+        created, and the virtual node carries no polygon -- just a position
+        (the blocker's own centroid) and a nominal area. One virtual node is
+        shared per blocker across every path that crosses it. A spec dict
+        has the keys ``name``, ``source_types``, ``target_types``,
+        ``blocker_types``, ``bridge_type``, ``radius`` and ``max_links``
+        (a fan-out cap: at most this many accepted bridge paths per source
+        AND per target cell, shortest gaps preferred -- independent of node
+        sharing); see ``NeedleAnatomy.network_bridge_specs`` for a concrete
+        example. Default: no bridges for any organ.
+        """
+        return []
+
+    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> lil_matrix:
         """
         Build the hydraulic network from cell geometry and return
         the sparse adjacency matrix.
@@ -1290,6 +1328,10 @@ class Organ(AbstractNetwork, ABC):
         that distance of each other but aren't directly adjacent (see
         ``NetworkExporter.export``); ``None`` uses its own default.
 
+        ``**exporter_kwargs`` (e.g. ``bridges: bool``, ``bridge_radius:
+        float``) are forwarded to ``NetworkExporter.export`` — see that
+        method's docstring for the full set.
+
         Returns
         -------
         lil_matrix
@@ -1297,18 +1339,18 @@ class Organ(AbstractNetwork, ABC):
         """
         # Ensure cells are generated before building the network
         self.generate_cells()
-        return super().export_to_adjencymatrix(air_link_radius=air_link_radius)
+        return super().export_to_adjencymatrix(air_link_radius=air_link_radius, **exporter_kwargs)
 
     # ------------------------------------------------------------------
     # Network construction from Voronoi cell geometry
     # ------------------------------------------------------------------
-    def _build_anatnetwork(self, air_link_radius: Optional[float] = None) -> None:
+    def _build_anatnetwork(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> None:
         """
         Populate ``self.graph`` from the cell GeoDataFrame.
         Delegated to AnatomyWriter's NetworkExporter.
         """
         from openalea.granap.anatomy_writer import NetworkExporter
-        NetworkExporter(self).export(self, air_link_radius=air_link_radius)
+        NetworkExporter(self).export(self, air_link_radius=air_link_radius, **exporter_kwargs)
 
     
     def get_statistics(self) -> Dict[str, Any]:

@@ -3,10 +3,11 @@ Needle anatomy implementation.
 """
 
 import dataclasses
+import warnings
 import numpy as np
 from typing import List, Dict, Any, Optional
 from shapely.geometry import Polygon, Point, LineString, MultiLineString, MultiPolygon, GeometryCollection
-from shapely.ops import unary_union
+from shapely.ops import unary_union, nearest_points
 from shapely.strtree import STRtree
 
 from openalea.granap.organ_class import Organ
@@ -27,8 +28,14 @@ import matplotlib.pyplot as plt
 # Number of epidermis border-point cells to skip at the start of the boundary
 _STOMATA_SKIP_BORDER_PTS: int = 300
 
-# The mesophyll ring used for duct placement is the outer annulus whose inner
-# edge is 1.2x duct diameters from the mesophyll boundary.
+# A resin duct's home zone -- see _is_duct_home_layer -- and its subhypodermal
+# *preference* band within that zone are two different things. This factor
+# sizes the preference band only: the outer shell of the home zone, measured
+# inward from the home zone's own outer limit (normally the hypodermis's
+# inner edge), 1.2x a duct's own built diameter deep. A duct is tried there
+# first (real conifer ducts sit subhypodermally), but the home zone itself --
+# not this band -- is the hard constraint; see _duct_zone_data's escalating
+# search (_seat_duct).
 _DUCT_RING_BUFFER_FACTOR: float = 1.2
 
 # Small outward safety margin (as a fraction of the outermost ring's own
@@ -37,18 +44,96 @@ _DUCT_RING_BUFFER_FACTOR: float = 1.2
 # no hairline sliver of tissue is left uncut at the boundary.
 _DUCT_CARVE_MARGIN_FRACTION: float = 0.15
 
-# Fixed placement order for resin ducts within the 7 mesophyll slices.
-# Positions 3 and 6 are the edge positions (placed first, as in real anatomy);
-# the rest fill in around the ring in an evenly distributed pattern.
+# Fixed placement order for resin ducts within the 7 mesophyll slices. Only
+# used for 1 or 3+ slice-placed ducts now -- exactly 2 are corner-anchored
+# instead (see _duct_zone_data). Positions 3 and 6 used to be treated as "the
+# edge positions" for exactly this reason, but slice 3 is centred on 180 deg,
+# not on either of the needle's true corners (pinaster: 203.2/336.8 deg;
+# nigra: 206.9/333.1 deg) -- systematically ~23 deg off on the -x side. Kept
+# for the 1-/3+-duct fallback (no real config in this repo exercises it: both
+# pinaster and the gallery preset use n_files=2, which now takes the corner
+# path, and nigra places all 4 of its ducts by explicit angle) rather than
+# deleted, since a 3-duct config is a plausible future need.
 _DUCT_PLACEMENT_ORDER: list = [3, 6, 0, 2, 4, 1, 5]
 
-# A duct's sheath ring gets an outer transition ring of intermediate-sized
-# filler cells only when the surrounding host tissue's cells are more than
-# this factor coarser than the sheath cell -- otherwise the sheath and host
-# already match closely enough that no filler is needed. Mirrors
-# vascular_bundle.py's _SHEATH_MIN_RATIO guard for the identical failure
-# mode (a small ring stretching out into coarse tissue as a radial sunburst).
-_DUCT_SHEATH_MIN_RATIO: float = 4.0
+# A resin duct's home zone -- the tissue it may occupy -- is palisade plus
+# every mesophyll-family layer (plain "mesophyll" and any "mesophyll_*"
+# variant, e.g. the adaxial-only extra ring): palisade *is* palisade
+# mesophyll, biologically the same tissue family, so a duct may carve it same
+# as ordinary mesophyll. Hypodermis and endodermis are deliberately excluded
+# -- they are the two boundaries a duct must never touch (see
+# _duct_zone_data's zone construction, which additionally buffers the home
+# region away from both by their own cell_diameter).
+def _is_duct_home_layer(name: str) -> bool:
+    return name == "palisade" or name == "mesophyll" or name.startswith("mesophyll_")
+
+
+def _duct_assembly_radius(sizes: dict, built_diameter: float, host_cell_diameter: float) -> float:
+    """Unscaled radius of a duct's whole assembly -- built core (canal +
+    epithelium + sheath) plus the transition ring plus the carve safety
+    margin, all computed from the UNSCALED sizes (before any scale-to-fit).
+
+    This is the room a placement must guarantee before a duct can be seated
+    at its full, measured size. Shared by ``_build_duct`` (which needs it to
+    know what radius to fit) and by ``_duct_zone_data``'s position-based
+    seating (which needs it *before* calling ``_build_duct``, to shrink the
+    home zone into a region of centres that are guaranteed feasible -- see
+    ``_seat_duct_at_point``). Keeping one formula in one place means the two
+    can never drift out of sync with each other.
+    """
+    built_radius = built_diameter / 2
+    if host_cell_diameter > 0 and sizes["sheath_cell_diameter"] > 0:
+        unscaled_transition = float(np.sqrt(sizes["sheath_cell_diameter"] * host_cell_diameter))
+    else:
+        unscaled_transition = 0.0
+    outermost_unscaled = unscaled_transition if unscaled_transition > 0 else sizes["sheath_cell_diameter"]
+    carve_margin_unscaled = outermost_unscaled * _DUCT_CARVE_MARGIN_FRACTION / 2
+    return built_radius + unscaled_transition + carve_margin_unscaled
+
+
+# Stepwise half-widths (degrees) tried when a duct can't reach its full,
+# measured size on its requested bearing even after the home zone's band
+# preference is dropped (see _duct_zone_data._seat_duct, stage 3 of the
+# escalating fit search). Capped at 180/7 = 25.7 deg -- one legacy
+# _DUCT_PLACEMENT_ORDER slice's own half-width -- so a duct can drift no
+# further off its requested bearing than the old fixed pizza-slice scheme
+# ever allowed; only past this cap does a duct actually shrink
+# (_build_duct's proportional scale-to-fit, the true last resort).
+_DUCT_WEDGE_WIDEN_STEPS: tuple = (10.0, 15.0, 20.0, 180.0 / 7.0)
+
+# Default half-width (degrees) of the wedge an explicitly-placed duct
+# ("angles" on a resin_duct param dict) is fitted into. Per-duct override:
+# "wedge". Also the starting half-width for the corner-anchored default (see
+# _duct_zone_data) -- both are seated by the same escalating search
+# (_seat_duct).
+#
+# Deliberately much tighter than one _DUCT_PLACEMENT_ORDER slice (180/7 =
+# 25.7 deg): the whole point of naming an angle is to put the duct *there*,
+# and fit_inner_ellipse seats it at the widest inscribed circle of the wedge,
+# which inside a 25.7 deg wedge can drift a dozen degrees off the requested
+# bearing (a measured 15.5 deg duct landed at 3.3 deg). 10 deg keeps the
+# drift small while still leaving room to find a slot; _seat_duct widens it
+# in stages (_DUCT_WEDGE_WIDEN_STEPS) only if the duct can't reach full size
+# at this width.
+_DUCT_WEDGE_HALF_WIDTH: float = 10.0
+
+# Every duct's sheath ring gets an outer transition ring of host-tissue
+# ("mesophyll") cells, so a duct is always fully surrounded by mesophyll
+# rather than abutting the palisade/hypodermis it happens to sit next to.
+# Sized as the geometric mean of the sheath cell and the host cell (see
+# _build_duct), which doubles as the fix for the "radial sunburst" failure
+# mode vascular_bundle.py's _SHEATH_MIN_RATIO guards against -- a small ring
+# bordering coarse tissue directly and ballooning out to meet it.
+#
+# This used to be conditional on the host being _DUCT_SHEATH_MIN_RATIO = 4x
+# coarser than the sheath, on the reasoning that closely-matched sizes need
+# no filler. That left ducts in a fine-celled mesophyll (e.g.
+# example/needle/pinus_nigra.py, ratio 0.052/0.018 = 2.9) with their sheath
+# bordering palisade directly and its cells ballooning to ~2.7x their
+# intended area. The ring is now unconditional: where the sizes already
+# match, the geometric mean simply lands near both and the ring is an
+# ordinary ring of mesophyll cells, which is what "surrounded by mesophyll"
+# means anyway.
 
 # Fixed tangential/radial slack (multiples of the hypodermis cell diameter,
 # independent of chamber_clearance) added to the sub-stomatal-chamber removal
@@ -72,6 +157,12 @@ class NeedleAnatomy(Organ):
     Implements the specific structure of gymnosperm needle leaves,
     including transfusion tissue and resin ducts.
     """
+
+    #: Transfusion tracheids are dead, apoplastic-only conduits (see
+    #: example/needle/Transfusion_network.md) -- they must never carry a
+    #: symplastic (plasmodesmata) edge, only membrane/wall. Xylem and every
+    #: other organ's network are untouched.
+    APOPLASTIC_ONLY_TYPES = ("transfusion tracheid",)
 
     def __init__(self, input_data: Any = None, seed: Optional[int] = None):
         """
@@ -234,13 +325,39 @@ class NeedleAnatomy(Organ):
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
-        When "central_cylinder" has shape="ellipse", interpolate each layer
-        polygon between the outer half-ellipse (t=0) and a full ellipse
-        aligned with the endodermis layer (t=1).
+        When "central_cylinder" has shape="ellipse", morph the layer polygons
+        between the outer half-ellipse (t=0) and a full ellipse aligned with
+        the endodermis layer (t=1). Layers inward from the endodermis
+        (transfusion, parenchyma ...) are fully changed to fit inside the
+        ellipse.
 
-        Layers from the outside down to the endodermis are gradually morphed.
-        Layers inward from the endodermis (transfusion, parenchyma ...) are
-        fully changed to fit inside the ellipse.
+        **Which layers get morphed, and by how much.** The two are grouped by
+        what actually governs their shape in a real needle:
+
+        - The **surface tissues** -- epidermis, hypodermis, palisade,
+          everything outside the mesophyll -- follow the *global* outline.
+          They are left exactly as ``_offset_layer_polygon`` peeled them, so
+          each keeps its own measured thickness and stays parallel to the
+          needle's outer shape.
+        - The **mesophyll family** (``mesophyll`` and any ``mesophyll_*``
+          ring) plus the endodermis carry the whole transition to the
+          *central cylinder*: the morph runs across just these rings, from
+          the innermost surface tissue's boundary (t=0) to the target ellipse
+          (t=1). Mesophyll is the accommodating tissue -- it is thick where
+          the domed outline stands off the cylinder and thin where the flat
+          adaxial face comes close to it, which is what the sections show.
+
+        Within that morphed group each ring is placed at its own measured
+        share of the distance (the cumulative sum of the rings'
+        ``cell_diameter``, normalised) rather than at an equal 1/n step, so a
+        thick mesophyll ring stays thick relative to a thin endodermis. The
+        group as a whole is scaled to whatever radial room is actually left
+        between the surface tissues and the cylinder, so the measured
+        proportions are honoured even when the total does not fit exactly.
+
+        Falls back to morphing every ring from the outside inward (the
+        original behaviour) when the config has no mesophyll-family layer at
+        all.
         """
         if self.central_cylinder_params.get("shape") != "ellipse":
             return layers_polygons
@@ -262,26 +379,44 @@ class NeedleAnatomy(Organ):
             0, smooth_factor=0.0
         )
 
-        # --- find the index of the endodermis layer --------------------------
+        # --- pick the span of rings that carries the morph -------------------
         layer_names = [lp["name"] for lp in layers_polygons]
-        
+
         endo_idx = layer_names.index("endodermis")
 
-        # outside polygon (index 0) is the reference half-ellipse shape; we
-        # keep it as-is (t=0) and warp everything inward up to endo_idx (t=1).
-        outer_poly = layers_polygons[0]["polygon"]
+        # The mesophyll family + endodermis absorb the transition; everything
+        # outside them keeps its measured offset of the global outline. With
+        # no mesophyll at all, fall back to morphing from index 1 (the
+        # original behaviour) so such a config still produces a closed
+        # cylinder.
+        mesophyll_first = next((i for i, n in enumerate(layer_names)
+                                if i < endo_idx and (n == "mesophyll" or n.startswith("mesophyll_"))),
+                               None)
+        first_morphed = mesophyll_first if mesophyll_first is not None else 1
 
-        # Pre-compute one interpolator between the outer shape and the ellipse.
+        # t=0 is the boundary the morph starts from: the innermost surface
+        # tissue's own polygon (index 0, "outside", when morphing everything).
+        source_poly = layers_polygons[first_morphed - 1]["polygon"]
+
+        # Pre-compute one interpolator between that boundary and the ellipse.
         try:
-            interp = PolygonInterpolator(outer_poly, target_ellipse)
+            interp = PolygonInterpolator(source_poly, target_ellipse)
         except Exception:
             # If PolygonInterpolator fails (degenerate geometry), skip reshape.
             return layers_polygons
 
-        n_to_morph = endo_idx + 1  # indices 0 ... endo_idx inclusive
-        
-        for i in range(1, n_to_morph):          # skip index 0 (outside)
-            t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1
+        # Each morphed ring lands at its own measured share of the distance
+        # (cumulative cell_diameter, normalised), so the last one is exactly
+        # t=1 (the ellipse) and the ones before it keep their relative
+        # thicknesses instead of every ring getting an equal 1/n step.
+        span = range(first_morphed, endo_idx + 1)
+        depths = [max(float(layers_polygons[i].get("cell_diameter", 0.0) or 0.0), 1e-9) for i in span]
+        total_depth = sum(depths)
+
+        cumulative = 0.0
+        for k, i in enumerate(span):
+            cumulative += depths[k]
+            t = cumulative / total_depth      # 0 < t <= 1, ==1 on the endodermis
             try:
                 new_poly = interp.fast_interpolate(t)
                 if not new_poly.is_empty and new_poly.is_valid:
@@ -356,7 +491,30 @@ class NeedleAnatomy(Organ):
             # method's docstring.
             nominal_diameter = self.transfusion_params.get("diameter_max", 0.05)
             transfusion_depth = transfusion_layers_remaining * nominal_diameter
+
+            # Hold the zone off the endodermis by half an endodermis cell --
+            # the same `cell_diameter / 2` gap this file uses everywhere else
+            # between a ring's boundary and the next thing seeded against it.
+            # `current_polygon` is the endodermis's own boundary, so packing
+            # right up to it (as this did) puts transfusion seeds flush
+            # against the endodermis ring, and the global Voronoi then splits
+            # that boundary in the packed cells' favour: the endodermis
+            # rendered at ~58% of the area its measured cell size implies,
+            # and got progressively thinner the finer tracheids_diameter was
+            # set, because finer cells crowd the boundary with more seeds.
+            # Only the zone's outer edge moves; `shrunk` (and so the
+            # parenchyma/vascular region inward of it) is unchanged.
+            endodermis_params = next((p for p in self.params if p["name"] == "endodermis"), {})
+            endodermis_clearance = float(endodermis_params.get("cell_diameter", 0.0) or 0.0) / 2
+
             transfusion_outer = current_polygon
+            if endodermis_clearance > 0:
+                held_off = GeometryProcessor.buffer_polygon(
+                    current_polygon, -endodermis_clearance, smooth_factor=0.6
+                )
+                if not held_off.is_empty and held_off.is_valid and held_off.area > 0:
+                    transfusion_outer = held_off
+
             if transfusion_depth > 0:
                 shrunk = GeometryProcessor.buffer_polygon(
                     current_polygon, -space_increment - transfusion_depth, smooth_factor=0.6
@@ -706,6 +864,45 @@ class NeedleAnatomy(Organ):
         recipe.special("layer-count zoning", self._restrict_zoned_layers)
         return recipe
 
+    def network_bridge_specs(self) -> List[Dict[str, Any]]:
+        """Bridge transfusion parenchyma across an intervening tracheid.
+
+        Round parenchyma ellipses (``Transfusion_tissue.png``) sit
+        individually embedded in the tracheid matrix, so stripping
+        tracheids of their symplastic edges (``APOPLASTIC_ONLY_TYPES``)
+        would otherwise leave many of them as isolated symplastic islands
+        instead of staying continuous from the endodermis inward to the
+        Strasburger cells / phloem (see
+        ``example/needle/Transfusion_network.md``). Each bridge stands in
+        for a real, out-of-plane third cell.
+
+        The inner ``"parenchyma"`` layer is a valid bridge target: it maps
+        to cgroup 5, and MECHA's ``(5, 17)`` interface is a live symplastic
+        connection (only ``(5, 18)`` -- tracheid -- is zeroed), so bridging
+        onto it is exactly as physiologically sound as bridging onto another
+        transfusion parenchyma cell.
+
+        The bridge is a NODE, not a cell with a polygon (matches the
+        reference diagram ``example/needle/Transfusion_tissue_network.png``):
+        one virtual, out-of-plane node is created per distinct tracheid
+        actually crossed, and shared across every source->target path that
+        crosses that same tracheid -- not one virtual cell per pair, and no
+        separate geometry is fabricated for it. ``max_links`` is a fan-out
+        cap (at most this many accepted bridge paths per source AND per
+        target cell, shortest gaps preferred), independent of that sharing.
+        """
+        tp = self.transfusion_params
+        return [{
+            "name": "transfusion",
+            "source_types": ("transfusion parenchyma",),
+            "target_types": ("transfusion parenchyma", "parenchyma",
+                             "Strasburger cell", "endodermis", "phloem"),
+            "blocker_types": ("transfusion tracheid",),
+            "bridge_type": "transfusion parenchyma",   # -> cgroup 17, so (17,17)=8.0e5 applies
+            "radius": tp.get("bridge_radius") or tp["parenchyma_diameter"],
+            "max_links": tp.get("bridge_max_links", 4),
+        }]
+
     # ------------------------------------------------------------------
     # Geometry helpers — pure computation, no cell placement
     # ------------------------------------------------------------------
@@ -721,10 +918,13 @@ class NeedleAnatomy(Organ):
         secretory), itself surrounded by an outer layer of larger sheath cells
         (Sh, thicker-walled), embedded in the mesophyll (M).
 
-        A fourth, optional "transition ring" of ordinary mesophyll-tagged
-        filler cells is added just outside the sheath (see
-        _DUCT_SHEATH_MIN_RATIO below, and special_tissues.place_resin_duct's
-        own _DUCT_SHEATH_MIN_CELLS) -- without it, carve_and_insert removes
+        A fourth "transition ring" of ordinary mesophyll-tagged filler cells
+        is always added just outside the sheath, so every duct ends up
+        surrounded by mesophyll rather than abutting whichever tissue its
+        slot borders (see the module-level note where
+        _DUCT_SHEATH_MIN_RATIO used to gate this, and
+        special_tissues.place_resin_duct's own _DUCT_SHEATH_MIN_CELLS)
+        -- without it, carve_and_insert removes
         every host seed under the sheath's footprint, so the sheath ring borders the
         mesophyll's own coarse cells directly and its Voronoi region
         balloons out to meet them (the same "radial sunburst" failure
@@ -736,8 +936,9 @@ class NeedleAnatomy(Organ):
 
         Sizing is inside-out and additive -- nothing here ever shrinks the
         canal or epithelium to make room for the sheath -- with one exception:
-        if a duct's pizza slice is too narrow to hold the full requested size
-        at its Chebyshev center, every measurement for THAT duct is scaled
+        if a duct's placement region (band, home zone, or wedge -- see
+        _seat_duct) is too narrow to hold the full requested size at its
+        Chebyshev center, every measurement for THAT duct is scaled
         down together (preserving lumen : epithelium : sheath proportions)
         rather than letting the duct overflow into neighbouring tissue. See
         the scale-to-fit step below.
@@ -753,18 +954,22 @@ class NeedleAnatomy(Organ):
           - The overall built diameter (lumen + both wall layers, doubled) is
             *derived* -- lumen_diameter + 2*cell_diameter + 2*sheath_cell_diameter
             -- and drives both where a duct's slot is searched for
-            (fit_inner_ellipse) and how far in from the mesophyll's own edge
-            that search is confined to (_DUCT_RING_BUFFER_FACTOR). There is no
+            (fit_inner_ellipse) and how far in from the home zone's own outer
+            edge that search prefers (_DUCT_RING_BUFFER_FACTOR). There is no
             independent "diameter" knob that could drift out of sync with the
             real cell-size measurements.
           - Scale-to-fit: fit_inner_ellipse shrinks its requested radius
-            (shrink-to-fit) when a duct's slice can't hold a circle of the
-            full built radius at the Chebyshev center. Each duct compares its
-            own achieved fit radius against the requested built radius and,
-            if smaller, scales lumen_diameter/cell_diameter/cell_width/
-            sheath_cell_diameter/sheath_cell_width down by that same factor --
-            so a duct squeezed into a tight spot shrinks as a whole instead of
-            silently overflowing (and getting corrupted/dropped downstream).
+            (shrink-to-fit) when a duct's slot can't hold a circle of the
+            full assembly radius (built core + transition ring + carve
+            margin, from the unscaled sizes -- see _build_duct) at the
+            Chebyshev center. Each duct compares its own achieved fit radius
+            against the requested assembly radius and, if smaller, scales
+            lumen_diameter/cell_diameter/cell_width/sheath_cell_diameter/
+            sheath_cell_width down by that same factor -- so a duct squeezed
+            into a tight spot shrinks as a whole instead of silently
+            overflowing its slot (and getting corrupted/dropped downstream).
+            _seat_duct (below) tries progressively looser slots before
+            accepting a shrink at all -- see "Placement".
 
         Returns (duct_data, rdp) where duct_data is a list of per-duct dicts:
           - "carve":            outer mask polygon used to remove existing
@@ -777,9 +982,10 @@ class NeedleAnatomy(Organ):
                                  sheath ring's inner reference; also used for
                                  visualization)
           - "epithelium_ring":   epithelium ring cell-placement curve
-          - "transition_ring":   transition-ring cell-placement curve, or
-                                 None when host_cell_diameter / sheath_cell
-                                 didn't clear _DUCT_SHEATH_MIN_RATIO
+          - "transition_ring":   transition-ring cell-placement curve; None
+                                 only when there is no host tissue to blend
+                                 into (no "mesophyll" params) or the sheath
+                                 is degenerate
           - "canal":             lumen boundary / cell-placement curve
           - "center":            shared center point for the canal and both rings
           - "lumen_diameter" / "cell_diameter" / "cell_width" /
@@ -790,8 +996,86 @@ class NeedleAnatomy(Organ):
             (sqrt(sheath_cell_diameter * host_cell_diameter), computed from
             the already-scaled sheath_cell_diameter), or 0 when no
             transition ring was added.
-        rdp is the resin_duct parameter dict.
+        rdp is the first resin_duct parameter dict (both callers discard it).
         Returns ([], None) when there are no resin_duct params or no mesophyll layer.
+
+        **Home zone.** Every duct's slot is searched for inside the *home
+        zone*: palisade plus every mesophyll-family layer (plain
+        "mesophyll" and any "mesophyll_*" variant -- see
+        ``_is_duct_home_layer``), buffered away from the hypodermis and the
+        endodermis by each neighbour's own ``cell_diameter`` (its radial
+        cell height). A duct may freely carve palisade -- it *is* palisade
+        mesophyll -- but must never touch either of those two boundaries.
+        See the zone-construction block below for the exact buffer formula.
+
+        **Placement.** Three ways to say where the ducts go, and a config
+        may mix them freely (every ``resin_duct`` dict in ``self.params``
+        is read, not just the first):
+
+        - *Slice placement* (the default): a dict with no ``"positions"``
+          or ``"angles"`` key contributes ``n_files`` ducts. Exactly **2**
+          such ducts go to the needle's two true corner bearings
+          (``pole_and_corner_angles``), seated by point (below) -- this is
+          what keeps a 2-duct config (pinaster, the gallery preset)
+          anchored at its real anatomical corners rather than at the
+          historical ``_DUCT_PLACEMENT_ORDER`` slice boundaries, which are
+          centred ~23 deg off on the -x side for these needles' aspect
+          ratios. **1 or 3+** slice-placed ducts keep the legacy fixed
+          pizza-slice positions from ``_DUCT_PLACEMENT_ORDER`` (no real
+          config in this repo currently uses either count; kept for a
+          plausible future 3-duct config).
+        - *Explicit position*: a dict carrying ``"positions"`` (a list of
+          ``(x, y)`` points in the model frame -- the same un-recentred
+          frame ``layers_polygons`` itself lives in) contributes one duct
+          per point, each sized by *that* dict, seated as close to that
+          exact point as the hypodermis/endodermis buffers allow. This is
+          the most direct mode: no bearing/wedge conversion at all, so it
+          is the right choice when a duct's position was measured directly
+          (e.g. digitised from a micrograph -- see
+          ``example/needle/pinus_nigra.py``).
+        - *Explicit bearing*: a dict carrying ``"angles"`` (a list of polar
+          angles in degrees, ``pole_and_corner_angles``' convention)
+          contributes one duct per angle, converted to a target point on
+          that bearing (``_bearing_target_point``) and seated the same way
+          as ``"positions"``. Give several dicts to get ducts of different
+          sizes at chosen bearings/positions. ``n_files`` is ignored for a
+          dict carrying either ``"positions"`` or ``"angles"``; the
+          list length is the count. Optional ``"wedge"`` sets the wedge
+          half-width used only by the point-seating's own fallback (below),
+          not the normal seating path.
+
+        **Point-based seating** (``_seat_duct_at_point``). Both
+        ``"positions"``/``"angles"`` ducts and the corner-anchored default
+        are seated at an explicit target POINT, not at a wedge's widest-
+        inscribed-circle centre: ``fit_inner_ellipse`` (the wedge-based
+        approach) finds the deepest point of whatever sub-region it is
+        handed, which is not necessarily anywhere near the requested
+        bearing/position -- a measured duct was observed to drift ~0.06mm
+        (~6% of needle thickness) off its requested spot, in the direction
+        the wedge happened to be locally widest. Seating instead checks
+        whether the target lies in ``F = zone.buffer(-assembly_radius)``
+        (every centre from which the whole assembly -- built core +
+        transition ring + carve margin -- clears the home zone at full,
+        measured size); if so the point is used verbatim (scale 1.0,
+        exactly on target), otherwise the nearest point of ``F`` is used
+        -- but ONLY when that point is within one ``assembly_radius`` of
+        the target (a nudge, not a relocation: ``F`` need not be one
+        contiguous blob around the target -- e.g. nigra's abaxial pole has
+        zero room anywhere nearby for its large duct's full assembly, while
+        ``F`` still exists ~0.63mm away at the two corners, and silently
+        snapping that far would defeat the whole point of seating by
+        position). Falls back to the older wedge-based escalating search
+        (``_seat_duct``: band -> full zone -> widened wedge up to
+        ``_DUCT_WEDGE_WIDEN_STEPS``' 180/7 deg cap, then
+        ``_build_duct``'s proportional scale-to-fit with a
+        ``warnings.warn`` naming the bearing and achieved scale) whenever
+        ``F`` is empty, or has no point close enough to the target -- shrink
+        in place near the requested bearing/position, not a distant
+        full-size relocation. The 1-/3+-duct ``_DUCT_PLACEMENT_ORDER`` fallback
+        still uses the older band/zone pizza-slice search directly (no
+        wedge-widening: a fixed pizza slice is already at its full angular
+        allotment, and widening it would have to steal room from a
+        neighbouring duct's own slice).
         """
         rdp_list = [p for p in self.params if p["name"] == "resin_duct"]
         if not rdp_list:
@@ -799,28 +1083,55 @@ class NeedleAnatomy(Organ):
         rdp = rdp_list[0]
 
         layer_names = [l["name"] for l in layers_polygons]
-        # Match every mesophyll-family layer (plain "mesophyll" plus any
-        # "mesophyll_*" variant, e.g. the adaxial-only extra ring), not just
-        # the single literal "mesophyll" entry -- ducts should sit inside the
-        # full combined mesophyll region. layers_polygons is ordered
-        # outer-to-inner, so the first match bounds the combined zone and the
-        # last match is its inner edge.
-        mesophyll_idx = [i for i, n in enumerate(layer_names) if n == "mesophyll" or n.startswith("mesophyll_")]
-        if not mesophyll_idx:
+
+        # --- home zone: palisade + every mesophyll-family layer, buffered
+        # off the hypodermis and the endodermis ------------------------------
+        # layers_polygons is outer-to-inner and each entry's polygon is that
+        # layer's own *inner* edge (see _is_duct_home_layer's docstring note
+        # and the module docstring). The home block is contiguous by
+        # construction (palisade/mesophyll/mesophyll_* are always seeded
+        # adjacent in the layer stack), so the first match's outer neighbour
+        # bounds the zone on one side and the last match's own polygon
+        # bounds it on the other.
+        home_idx = [i for i, n in enumerate(layer_names) if _is_duct_home_layer(n)]
+        if not home_idx:
             return [], None
+        home_idx.sort()   # defensive; already ascending given layer order
 
-        mesophyll_polys = [layers_polygons[i]["polygon"] for i in mesophyll_idx]
-        polygon_for_duct = mesophyll_polys[0].difference(mesophyll_polys[-1]) if len(mesophyll_polys) > 1 else mesophyll_polys[0]
+        outer_idx = home_idx[0] - 1
+        home_outer = (layers_polygons[outer_idx]["polygon"] if outer_idx >= 0
+                     else layers_polygons[home_idx[0]]["polygon"])
+        # home_inner is the innermost home layer's own polygon -- per the
+        # "polygon == that layer's inner edge" convention this is the
+        # mesophyll's inner boundary, i.e. the endodermis's *outer* edge.
+        home_inner = layers_polygons[home_idx[-1]]["polygon"]
 
-        # Defensive .get() fallbacks: a raw param-list caller (e.g.
-        # example/needle/pinus_pinaster.py's plain list-of-dicts style)
-        # bypasses pydantic defaulting entirely, so bare indexing would
-        # KeyError for it.
-        lumen_diameter        = rdp.get("lumen_diameter", 0.037)
-        cell_diameter          = rdp["cell_diameter"]
-        cell_width              = rdp.get("cell_width") or cell_diameter
-        sheath_cell_diameter   = rdp.get("sheath_cell_diameter", cell_diameter)
-        sheath_cell_width      = rdp.get("sheath_cell_width") or sheath_cell_diameter
+        # Buffers: one full radial cell height of each forbidden neighbour,
+        # looked up directly from self.params (same idiom as the
+        # host_cell_diameter lookup just below). Missing a layer (e.g. no
+        # hypodermis in some hypothetical config) degrades gracefully to a
+        # zero buffer on that side rather than erroring.
+        hypodermis_params    = next((p for p in self.params if p["name"] == "hypodermis"), {})
+        hypodermis_clearance = float(hypodermis_params.get("cell_diameter", 0.0) or 0.0)
+        endodermis_params    = next((p for p in self.params if p["name"] == "endodermis"), {})
+        endodermis_clearance = float(endodermis_params.get("cell_diameter", 0.0) or 0.0)
+
+        zone = GeometryProcessor.buffer_polygon(home_outer, -hypodermis_clearance, 0)
+        inner_barrier = GeometryProcessor.buffer_polygon(home_inner, endodermis_clearance, 0)
+        zone = zone.difference(inner_barrier)
+        if zone.is_empty:
+            # The clearance buffers ate the whole home band -- a config too
+            # tight for the rule (none of the three real configs in this
+            # repo hit this; see the headroom check in the approved plan).
+            # Warn loudly and fall back to the unbuffered band rather than
+            # silently placing ducts against a forbidden boundary or
+            # dropping them entirely.
+            warnings.warn(
+                "resin duct home zone collapsed after hypodermis/endodermis "
+                "clearance buffers; falling back to the unbuffered band -- "
+                "ducts may sit closer to a boundary than intended"
+            )
+            zone = home_outer.difference(home_inner)
 
         # Local host-tissue cell size the transition ring blends the sheath
         # into. The duct sits in the mesophyll layer per add_canal, so the
@@ -831,116 +1142,478 @@ class NeedleAnatomy(Organ):
         mesophyll_params    = next((p for p in self.params if p["name"] == "mesophyll"), {})
         host_cell_diameter  = mesophyll_params.get("cell_diameter", 0.0)
 
-        # Derived, not a stored/tunable field -- see docstring.
-        built_diameter = lumen_diameter + 2 * cell_diameter + 2 * sheath_cell_diameter
-        built_radius   = built_diameter / 2
+        # --- one placement request per duct -------------------------------
+        # Each request pairs one duct's sizes with where to look for it:
+        # a literal (x, y) point (measured "positions"), a bearing in
+        # degrees ("angles"), or neither (slice placement, resolved below in
+        # _DUCT_PLACEMENT_ORDER). See the docstring.
+        requests = []      # (sizes, mode, value, wedge_half_width)
+        for p in rdp_list:
+            # Defensive .get() fallbacks: a raw param-list caller (e.g.
+            # example/needle/pinus_pinaster.py's plain list-of-dicts style)
+            # bypasses pydantic defaulting entirely, so bare indexing would
+            # KeyError for it.
+            lumen_diameter       = p.get("lumen_diameter", 0.037)
+            cell_diameter        = p["cell_diameter"]
+            sheath_cell_diameter = p.get("sheath_cell_diameter", cell_diameter)
+            sizes = {
+                "lumen_diameter":       lumen_diameter,
+                "cell_diameter":        cell_diameter,
+                "cell_width":           p.get("cell_width") or cell_diameter,
+                "sheath_cell_diameter": sheath_cell_diameter,
+                "sheath_cell_width":    p.get("sheath_cell_width") or sheath_cell_diameter,
+            }
+            positions = p.get("positions")
+            angles = p.get("angles")
+            if positions:
+                # Literal (x, y) points in the model frame (the same
+                # un-recentred frame layers_polygons lives in) -- the most
+                # direct placement mode, seated exactly (subject to the
+                # hypodermis/endodermis buffers) rather than converted
+                # through any bearing/wedge math at all. wedge is unused for
+                # this mode except as the fallback search's starting width
+                # if the point turns out infeasible everywhere.
+                requests.extend((sizes, "point", (float(x), float(y)), _DUCT_WEDGE_HALF_WIDTH)
+                                 for x, y in positions)
+            elif angles:
+                wedge = float(p.get("wedge", _DUCT_WEDGE_HALF_WIDTH))
+                requests.extend((sizes, "angle", float(a), wedge) for a in angles)
+            else:
+                requests.extend((sizes, "slice", None, 0.0) for _ in range(int(p["n_files"])))
 
-        polygon_for_duct = polygon_for_duct.difference(
-            GeometryProcessor.buffer_polygon(polygon_for_duct, -built_diameter * _DUCT_RING_BUFFER_FACTOR, 0)
-        )
+        # --- subhypodermal preference band ---------------------------------
+        # A duct is tried here first (real conifer ducts sit subhypodermally)
+        # before the home zone's full depth is offered -- see _seat_duct.
+        # Depends on the duct's own built size (_DUCT_RING_BUFFER_FACTOR), so
+        # it is computed per distinct size and cached -- the buffer is the
+        # expensive operation here.
+        band_cache = {}
 
-        n_canal = rdp["n_files"]
-        if n_canal < 7:
-            n_regions = 7
-            add_duct = _DUCT_PLACEMENT_ORDER[:n_canal]
-        else:
-            n_regions = n_canal
-            add_duct = list(range(n_regions))
+        def _band(built_diameter):
+            """The outer shell of the home zone a duct of this size prefers.
+
+            Measured inward from the home zone's own outer limit
+            (``home_outer`` -- normally the hypodermis's inner edge, or the
+            palisade's inner edge when the config has a hypodermis but the
+            zone's outer bound is still the hypodermis; see the zone
+            construction above), then clipped back to ``zone`` so a shell
+            wider than the local home depth still respects both clearance
+            buffers. This is a *preference*, not the hard constraint --
+            ``zone`` already has the hypodermis/endodermis buffers baked in,
+            so a duct that doesn't fit this shell falls through to the full
+            zone in ``_seat_duct`` rather than being rejected.
+            """
+            key = round(built_diameter, 9)
+            if key not in band_cache:
+                shell = home_outer.difference(
+                    GeometryProcessor.buffer_polygon(home_outer, -built_diameter * _DUCT_RING_BUFFER_FACTOR, 0)
+                )
+                band_cache[key] = shell.intersection(zone)
+            return band_cache[key]
+
+        def _seat_duct(angle_deg, start_half_width, sizes, built_diameter):
+            """Escalating placement search for one duct centred on ``angle_deg``.
+
+            Tries, in order, and accepts the first candidate that seats the
+            duct at its full (scale 1.0) measured size:
+              1. the subhypodermal band, at ``start_half_width``;
+              2. the full home zone (band preference dropped), same width;
+              3. the full home zone, wedge widened stepwise up to
+                 ``_DUCT_WEDGE_WIDEN_STEPS``' cap.
+            Falls back to the best (widest achieved) candidate and warns,
+            naming the bearing and the achieved scale, when even the widest
+            wedge in the full zone falls short -- ``_build_duct``'s own
+            proportional scale-to-fit is the actual last resort; this
+            function never scales anything itself.
+            """
+            candidates = [
+                self._duct_wedge(_band(built_diameter), angle_deg, start_half_width),
+                self._duct_wedge(zone, angle_deg, start_half_width),
+            ]
+            for half_width in _DUCT_WEDGE_WIDEN_STEPS:
+                if half_width > start_half_width:
+                    candidates.append(self._duct_wedge(zone, angle_deg, half_width))
+
+            best = None
+            for region in candidates:
+                if region is None or region.is_empty:
+                    continue
+                duct = self._build_duct(region, sizes, built_diameter, host_cell_diameter)
+                if duct is None:
+                    continue
+                if best is None or duct["cell_diameter"] > best["cell_diameter"]:
+                    best = duct
+                if sizes["cell_diameter"] <= 0 or duct["cell_diameter"] >= sizes["cell_diameter"] * 0.999:
+                    return duct
+            if best is not None and sizes["cell_diameter"] > 0:
+                achieved_scale = best["cell_diameter"] / sizes["cell_diameter"]
+                if achieved_scale < 0.999:
+                    warnings.warn(
+                        f"resin duct at bearing {angle_deg:.1f} deg could not reach "
+                        f"full size in the available home zone; scaled to "
+                        f"{achieved_scale:.3f}"
+                    )
+            return best
+
+        # --- position-based seating -----------------------------------
+        # The primary seating strategy for both "positions" and "angles"
+        # (and the corner-anchored default, which is just two computed
+        # bearings): seat the duct at an explicit target POINT rather than
+        # at a wedge's widest-inscribed-circle centre. fit_inner_ellipse
+        # (what _seat_duct above uses) finds the deepest point of whatever
+        # sub-region it is handed, which is not necessarily anywhere near
+        # the requested bearing/position -- a measured duct could and did
+        # drift ~0.06mm (~6% of needle thickness) off its requested spot,
+        # in the direction the wedge happened to be locally widest. Seating
+        # by point removes that drift entirely for an already-feasible
+        # point, and bounds it to the minimal corrective move for one that
+        # isn't.
+        width, thickness = self._resolved_dimensions()
+        origin = Point(0.0, 3.5 * thickness / (3.0 * np.pi))   # pole_and_corner_angles' origin
+
+        def _bearing_target_point(angle_deg, depth):
+            """A point on ``angle_deg``'s ray from ``origin``, ``depth``
+            inward from where the ray first crosses the home zone's outer
+            limit (``home_outer``). Converts a bearing into a literal point
+            so ``_seat_duct_at_point`` can seat it exactly like a measured
+            ``positions`` entry.
+
+            ``depth`` should be the duct's own ``assembly_radius`` (not,
+            say, a fraction of ``built_diameter``): that is precisely how
+            far ``F = zone.buffer(-assembly_radius)`` sits inward of
+            ``home_outer`` in the radial direction, so a target built this
+            way lands as close as a straight radial offset can get it to
+            ``F``'s own boundary -- minimizing (ideally, eliminating) the
+            lateral snap ``_seat_duct_at_point`` would otherwise need to
+            find a feasible point, which is what left the corner-anchored
+            pair measurably off-bearing when this used a shallower,
+            built-diameter-based depth instead.
+            """
+            minx, miny, maxx, maxy = home_outer.bounds
+            max_r = max(maxx - minx, maxy - miny) * 2
+            theta = np.radians(angle_deg)
+            dx, dy = np.cos(theta), np.sin(theta)
+            ray = LineString([(origin.x, origin.y), (origin.x + max_r * dx, origin.y + max_r * dy)])
+            inter = home_outer.boundary.intersection(ray)
+            candidates = []
+            if not inter.is_empty:
+                geoms = inter.geoms if hasattr(inter, "geoms") else [inter]
+                candidates = [g for g in geoms if g.geom_type == "Point"]
+            if not candidates:
+                # Degenerate (tangent ray, or origin outside home_outer):
+                # fall back to origin itself -- _seat_duct_at_point's own
+                # feasibility/snapping still keeps the duct off the
+                # forbidden boundaries.
+                return Point(origin.x, origin.y)
+            nearest = min(candidates, key=lambda pt: (pt.x - origin.x) ** 2 + (pt.y - origin.y) ** 2)
+            return Point(nearest.x - depth * dx, nearest.y - depth * dy)
+
+        def _seat_duct_at_point(target, sizes, built_diameter, fallback_angle_deg, fallback_wedge=_DUCT_WEDGE_HALF_WIDTH):
+            """Seat a duct at (or as close as possible to) ``target``.
+
+            The feasible region ``F = zone.buffer(-assembly_radius)`` is
+            exactly the set of centres whose whole assembly (built core +
+            transition ring + carve margin) stays inside the home zone --
+            i.e. off the hypodermis and endodermis by their required
+            buffers. If ``target`` is already in ``F`` it is used verbatim.
+
+            If not, ``F`` is checked for a LOCAL correction: the nearest
+            point of ``F`` is accepted only when it is within one
+            ``assembly_radius`` of ``target`` -- a nudge, not a
+            relocation. ``F`` is not always one contiguous blob around the
+            target; nigra's abaxial pole, for instance, has zero room
+            anywhere nearby for its large duct's full assembly (mesophyll
+            too thin there once buffered off both the hypodermis and the
+            palisade band it also occupies), while ``F`` still exists
+            further away, at the two corners -- roughly 0.63mm off, on a
+            0.955mm-thick needle. Snapping there unconditionally would
+            silently relocate the duct across the needle instead of seating
+            it near its measured position, which is exactly what this
+            method must not do. So: an out-of-range nearest point is
+            treated the same as no feasible point at all, and the search
+            falls back to the older wedge-based ``_seat_duct`` -- shrink in
+            place at (or very near) the requested bearing/position, with a
+            ``warnings.warn`` naming the achieved scale, rather than a
+            distant full-size relocation.
+            """
+            assembly_radius = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+            feasible = GeometryProcessor.buffer_polygon(zone, -assembly_radius, 0)
+            center = None
+            if not feasible.is_empty:
+                if feasible.contains(target):
+                    center = target
+                else:
+                    candidate, _tp = nearest_points(feasible, target)
+                    if candidate.distance(target) <= assembly_radius:
+                        center = candidate
+            if center is not None:
+                return self._build_duct(None, sizes, built_diameter, host_cell_diameter, center=center)
+            return _seat_duct(fallback_angle_deg, fallback_wedge, sizes, built_diameter)
+
+        sliced     = [(sizes, None, 0.0) for sizes, mode, _v, _w in requests if mode == "slice"]
+        explicit   = [(sizes, angle, wedge) for sizes, mode, angle, wedge in requests if mode == "angle"]
+        positioned = [(sizes, xy, wedge) for sizes, mode, xy, wedge in requests if mode == "point"]
+
+        n_sliced = len(sliced)
 
         duct_data = []
-        for slice_id, slice_polygon in enumerate(GeometryProcessor.pizza_slice(polygon_for_duct, n_regions)):
-            if slice_id not in add_duct:
-                continue
 
-            # Slot-finding: positions the duct within its pizza slice at the
-            # true built scale. fit_inner_ellipse *shrinks* its requested
-            # radius (shrink-to-fit) when the slice is too narrow to hold a
-            # circle that big at the Chebyshev center -- ``axes[0]`` is
-            # whatever radius it actually achieved, which can be smaller
-            # than ``built_radius``.
-            duct_poly     = GeometryProcessor.fit_inner_ellipse(slice_polygon, built_radius)
-            center        = duct_poly["polygon"].centroid
+        def _built(sizes):
+            return (sizes["lumen_diameter"]
+                    + 2 * sizes["cell_diameter"]
+                    + 2 * sizes["sheath_cell_diameter"])   # derived -- see docstring
 
-            # Scale-to-fit: axes[0] is the radius fit_inner_ellipse actually
-            # achieved at this slice's Chebyshev center, which shrink-to-fit
-            # can leave smaller than the requested built_radius. Scale every
-            # size for THIS duct down by that same ratio so it shrinks as a
-            # whole (preserving lumen : epithelium : sheath proportions)
-            # instead of overflowing its slice.
-            scale = min(1.0, duct_poly["axes"][0] / built_radius) if built_radius > 0 else 1.0
+        if n_sliced == 2:
+            # Corner-anchored default: the needle's two true corners
+            # (pole_and_corner_angles), not pizza slices 3/6 -- see the
+            # module comment on _DUCT_PLACEMENT_ORDER and the docstring's
+            # "Placement" section above. Order (corner_neg then corner_pos)
+            # mirrors the historical slice-3-then-6 emission order, since
+            # duct_data's order feeds cell placement order downstream.
+            # Seated by point (via _bearing_target_point), same as an
+            # explicit "angles" bearing -- a corner IS just a computed
+            # bearing.
+            _adax, _abax, corner_pos, corner_neg = self.pole_and_corner_angles(width, thickness)
+            for (sizes, _a, _w), bearing in zip(sliced, (corner_neg, corner_pos)):
+                built_diameter = _built(sizes)
+                depth = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+                target = _bearing_target_point(bearing, depth)
+                duct = _seat_duct_at_point(target, sizes, built_diameter, bearing)
+                if duct is not None:
+                    duct_data.append(duct)
+        elif n_sliced > 0:
+            # 1 or 3+ slice-placed ducts: legacy fixed pizza-slice positions
+            # (_DUCT_PLACEMENT_ORDER), built on the new home zone/band. Gets
+            # the band -> zone preference (tier 1/2 of _seat_duct) but not
+            # the wedge-widening (tier 3): a pizza slice is already at its
+            # full angular allotment, and widening it would have to steal
+            # room from a neighbouring duct's own slice. No real config in
+            # this repo exercises this branch -- see the module comment on
+            # _DUCT_PLACEMENT_ORDER.
+            if n_sliced < 7:
+                n_regions = 7
+                add_duct = _DUCT_PLACEMENT_ORDER[:n_sliced]
+            else:
+                n_regions = n_sliced
+                add_duct = list(range(n_regions))
 
-            d_lumen_diameter    = lumen_diameter * scale
-            d_cell_diameter     = cell_diameter * scale
-            d_cell_width        = cell_width * scale
-            d_sheath_diameter   = sheath_cell_diameter * scale
-            d_sheath_width      = sheath_cell_width * scale
+            # Slice-placed ducts are emitted in ascending slice order -- the order
+            # the historical single-pass ``enumerate(pizza_slice(...))`` produced,
+            # kept because duct_data order feeds cell placement order downstream.
+            slice_plan = sorted(zip(add_duct, sliced), key=lambda kv: kv[0])
 
-            # Stage 1 -- the lumen: a literal circle at the (possibly
-            # scaled) measured diameter.
-            canal = GeometryProcessor.buffer_polygon(center, d_lumen_diameter / 2, 0)
+            band_slices_cache = {}
+            zone_slices_cache = {}
+            for slice_id, (sizes, _a, _w) in slice_plan:
+                built_diameter = _built(sizes)
+                key = round(built_diameter, 9)
+                if key not in band_slices_cache:
+                    band_slices_cache[key] = GeometryProcessor.pizza_slice(_band(built_diameter), n_regions)
+                    zone_slices_cache[key] = GeometryProcessor.pizza_slice(zone, n_regions)
+                band_slices = band_slices_cache[key]
+                zone_slices = zone_slices_cache[key]
 
-            # Stage 2 -- epithelium ring, grown outward from the canal by its
-            # own radial thickness. Seeded at the band's radial midpoint so
-            # its own bulge (+-d_cell_diameter/2) exactly spans
-            # canal -> epithelium_outer.
-            epithelium_ring  = GeometryProcessor.buffer_polygon(canal, d_cell_diameter / 2, 0)
-            epithelium_outer = GeometryProcessor.buffer_polygon(canal, d_cell_diameter, 0)
+                duct = None
+                if slice_id < len(band_slices):
+                    duct = self._build_duct(band_slices[slice_id], sizes, built_diameter, host_cell_diameter)
+                if slice_id < len(zone_slices) and (
+                    duct is None or duct["cell_diameter"] < sizes["cell_diameter"] * 0.999
+                ):
+                    zone_duct = self._build_duct(zone_slices[slice_id], sizes, built_diameter, host_cell_diameter)
+                    if zone_duct is not None and (duct is None or zone_duct["cell_diameter"] > duct["cell_diameter"]):
+                        duct = zone_duct
+                if duct is not None:
+                    duct_data.append(duct)
 
-            # Stage 3 -- sheath ring, grown outward from the epithelium's own
-            # outer edge by its own radial thickness -- additive, never
-            # encroaching on the epithelium/canal built above.
-            sheath_ring  = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter / 2, 0)
-            sheath_outer = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter, 0)
+        for sizes, angle, wedge in explicit:
+            built_diameter = _built(sizes)
+            depth = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+            target = _bearing_target_point(angle, depth)
+            duct = _seat_duct_at_point(target, sizes, built_diameter, angle, fallback_wedge=wedge)
+            if duct is not None:
+                duct_data.append(duct)
 
-            # Stage 4 -- optional transition ring, grown outward from the
-            # sheath's own outer edge by an intermediate cell size (the
-            # geometric mean of the sheath cell and the host mesophyll
-            # cell). Bounds the sheath's Voronoi region against a
-            # size-matched neighbour instead of leaving it to fan out into
-            # the coarse mesophyll/palisade as a radial sunburst -- only
-            # added when that size gap actually clears
-            # _DUCT_SHEATH_MIN_RATIO (below it the sheath and host already
-            # match closely enough).
-            transition_ring       = None
-            transition_outer      = sheath_outer
-            transition_cell_size  = 0.0
-            if host_cell_diameter > 0 and d_sheath_diameter > 0 and \
-                    host_cell_diameter / d_sheath_diameter > _DUCT_SHEATH_MIN_RATIO:
-                transition_cell_size = float(np.sqrt(d_sheath_diameter * host_cell_diameter))
-                transition_ring  = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size / 2, 0)
-                transition_outer = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size, 0)
-
-            # Small outward safety margin beyond the outermost ring's true
-            # outer edge (the transition ring's, when one is added, else the
-            # sheath's) so the carve mask fully clears that ring's cells'
-            # own bulge (mirrors the old code's incidental margin, scaled
-            # off the outermost ring's own radial size).
-            outermost_diameter = transition_cell_size if transition_ring is not None else d_sheath_diameter
-            carve = GeometryProcessor.buffer_polygon(
-                transition_outer, outermost_diameter * _DUCT_CARVE_MARGIN_FRACTION / 2, 0
-            )
-
-            duct_data.append({
-                "carve":             carve,
-                "sheath_ring":       sheath_ring,
-                "epithelium_outer":  epithelium_outer,
-                "epithelium_ring":   epithelium_ring,
-                "transition_ring":       transition_ring,
-                "transition_cell_size":  transition_cell_size,
-                "canal":             canal,
-                "center":            center,
-                # Per-duct, already-scaled sizes -- place_resin_duct reads
-                # these directly instead of the shared, unscaled rdp values,
-                # so a duct that had to shrink to fit still gets cells sized
-                # to match its own (smaller) rings.
-                "lumen_diameter":       d_lumen_diameter,
-                "cell_diameter":        d_cell_diameter,
-                "cell_width":           d_cell_width,
-                "sheath_cell_diameter": d_sheath_diameter,
-                "sheath_cell_width":    d_sheath_width,
-            })
+        for sizes, xy, wedge in positioned:
+            built_diameter = _built(sizes)
+            target = Point(xy[0], xy[1])
+            fallback_angle = float(np.degrees(np.arctan2(xy[1] - origin.y, xy[0] - origin.x)) % 360.0)
+            duct = _seat_duct_at_point(target, sizes, built_diameter, fallback_angle, fallback_wedge=wedge)
+            if duct is not None:
+                duct_data.append(duct)
 
         return duct_data, rdp
+
+    @staticmethod
+    def _duct_wedge(annulus, angle_deg, half_width_deg):
+        """The part of ``annulus`` on a given bearing -- the explicit-placement
+        counterpart of one ``GeometryProcessor.pizza_slice`` wedge.
+
+        Cut as a wedge of +-``half_width_deg`` about ``angle_deg``, measured
+        around the annulus centroid in ``pole_and_corner_angles``' convention
+        (the same origin ``pizza_slice`` uses, so the two placement modes
+        share one angular frame). Returns the largest piece when the wedge
+        crosses the annulus in more than one part, or None when it misses it
+        entirely.
+        """
+        if annulus is None or annulus.is_empty:
+            return None
+        cx, cy = annulus.centroid.x, annulus.centroid.y
+        minx, miny, maxx, maxy = annulus.bounds
+        radius = max(maxx - minx, maxy - miny) * 2
+
+        a0 = np.radians(angle_deg - half_width_deg)
+        a1 = np.radians(angle_deg + half_width_deg)
+        # A few intermediate vertices so the wedge's outer arc stays outside
+        # the annulus for wide half-widths instead of cutting across it.
+        arc = np.linspace(a0, a1, max(3, int(2 * half_width_deg / 5) + 2))
+        wedge = Polygon([(cx, cy)] + [(cx + radius * np.cos(t), cy + radius * np.sin(t)) for t in arc])
+
+        piece = annulus.intersection(wedge)
+        if piece.is_empty:
+            return None
+        if piece.geom_type == "MultiPolygon":
+            piece = max(piece.geoms, key=lambda g: g.area)
+        return piece if piece.geom_type == "Polygon" else None
+
+    @staticmethod
+    def _build_duct(placement, sizes, built_diameter, host_cell_diameter, center=None):
+        """Build one duct's concentric geometry, either at an explicit
+        ``center`` or (when ``center`` is None) at the widest-inscribed-
+        circle seat ``fit_inner_ellipse`` finds inside ``placement``.
+
+        The two modes serve different placement strategies (see
+        ``_duct_zone_data``): ``center`` is how a duct gets seated at an
+        exact target point (measured ``positions``, or an ``angles``
+        bearing converted to a point -- ``_seat_duct_at_point``) rather than
+        wherever a wedge happens to be locally widest, which can drift the
+        centre well off the requested bearing/position (a duct's whole
+        assembly still has to fit -- callers seating this way are
+        responsible for guaranteeing that, typically via
+        ``zone.buffer(-assembly_radius)``, so this function does not
+        re-derive a scale in that case). ``placement`` (the ``center is
+        None`` path) is the older wedge/pizza-slice search, kept as the
+        fallback when no feasible point exists anywhere (see
+        ``_seat_duct_at_point``) and for the legacy ``_DUCT_PLACEMENT_ORDER``
+        fallback (1 or 3+ slice-placed ducts) -- there, ``scale`` can still
+        come out below 1.0 and the duct shrinks as a whole.
+
+        Returns the per-duct dict described in ``_duct_zone_data``'s
+        docstring.
+        """
+        built_radius = built_diameter / 2
+
+        # The reserved radius is the WHOLE assembly -- built core (canal +
+        # epithelium + sheath) *plus* the transition ring and the carve
+        # safety margin -- not just the built core. Bounding a duct's search
+        # region (the home zone/band/wedge in _duct_zone_data) is not
+        # sufficient on its own: the transition ring and carve margin are
+        # added *outside* built_radius (stage 4 below), so a duct seated
+        # right at the edge of a correctly-bounded region would still
+        # overshoot it by transition_cell_size + margin if only built_radius
+        # were reserved here -- which is exactly how a duct could still end
+        # up touching the hypodermis/endodermis even with a correctly
+        # buffered home zone. Computed from the UNSCALED sizes (mirrors
+        # stage 4's formula, which recomputes the same thing from the
+        # already-scaled sizes once `scale` is known below) so the reserved
+        # radius matches the duct's true, un-shrunk footprint.
+        assembly_radius = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+
+        if center is not None:
+            # Seated at an explicit point: the caller (_seat_duct_at_point)
+            # guarantees `center` lies inside zone.buffer(-assembly_radius),
+            # so the whole assembly is already known to fit here at full
+            # (scale 1.0) size -- no Chebyshev-centre search needed, and
+            # none of `placement`'s wedge/slice geometry is consulted.
+            scale = 1.0
+        else:
+            # Slot-finding: positions the duct within its sub-region at the
+            # true assembly scale. fit_inner_ellipse *shrinks* its requested
+            # radius (shrink-to-fit) when the region is too narrow to hold a
+            # circle that big at the Chebyshev center -- ``axes[0]`` is
+            # whatever radius it actually achieved, which can be smaller
+            # than ``assembly_radius``.
+            duct_poly = GeometryProcessor.fit_inner_ellipse(placement, assembly_radius)
+            center    = duct_poly["polygon"].centroid
+
+            # Scale-to-fit: axes[0] is the radius fit_inner_ellipse actually
+            # achieved at this region's Chebyshev center, which shrink-to-fit
+            # can leave smaller than the requested assembly_radius. Scale
+            # every size for THIS duct down by that same ratio so it shrinks
+            # as a whole (preserving lumen : epithelium : sheath
+            # proportions) instead of overflowing its region. This is the
+            # only place a duct's size is ever scaled.
+            scale = min(1.0, duct_poly["axes"][0] / assembly_radius) if assembly_radius > 0 else 1.0
+
+        d_lumen_diameter    = sizes["lumen_diameter"] * scale
+        d_cell_diameter     = sizes["cell_diameter"] * scale
+        d_cell_width        = sizes["cell_width"] * scale
+        d_sheath_diameter   = sizes["sheath_cell_diameter"] * scale
+        d_sheath_width      = sizes["sheath_cell_width"] * scale
+
+        # Stage 1 -- the lumen: a literal circle at the (possibly
+        # scaled) measured diameter.
+        canal = GeometryProcessor.buffer_polygon(center, d_lumen_diameter / 2, 0)
+
+        # Stage 2 -- epithelium ring, grown outward from the canal by its
+        # own radial thickness. Seeded at the band's radial midpoint so
+        # its own bulge (+-d_cell_diameter/2) exactly spans
+        # canal -> epithelium_outer.
+        epithelium_ring  = GeometryProcessor.buffer_polygon(canal, d_cell_diameter / 2, 0)
+        epithelium_outer = GeometryProcessor.buffer_polygon(canal, d_cell_diameter, 0)
+
+        # Stage 3 -- sheath ring, grown outward from the epithelium's own
+        # outer edge by its own radial thickness -- additive, never
+        # encroaching on the epithelium/canal built above.
+        sheath_ring  = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter / 2, 0)
+        sheath_outer = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter, 0)
+
+        # Stage 4 -- transition ring, grown outward from the sheath's own
+        # outer edge by an intermediate cell size (the geometric mean of the
+        # sheath cell and the host mesophyll cell). This is what makes a duct
+        # sit *surrounded by mesophyll* instead of against whatever tissue
+        # its slot borders, and it bounds the sheath's Voronoi region against
+        # a size-matched neighbour rather than letting it fan out into the
+        # coarse mesophyll/palisade as a radial sunburst. Unconditional --
+        # see _DUCT_SHEATH_MIN_RATIO's removal note at the top of this module.
+        # The only thing that can skip it is a config with no host tissue to
+        # blend into (no "mesophyll" params) or a degenerate sheath.
+        transition_ring       = None
+        transition_outer      = sheath_outer
+        transition_cell_size  = 0.0
+        if host_cell_diameter > 0 and d_sheath_diameter > 0:
+            transition_cell_size = float(np.sqrt(d_sheath_diameter * host_cell_diameter))
+            transition_ring  = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size / 2, 0)
+            transition_outer = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size, 0)
+
+        # Small outward safety margin beyond the outermost ring's true
+        # outer edge (the transition ring's, when one is added, else the
+        # sheath's) so the carve mask fully clears that ring's cells'
+        # own bulge (mirrors the old code's incidental margin, scaled
+        # off the outermost ring's own radial size).
+        outermost_diameter = transition_cell_size if transition_ring is not None else d_sheath_diameter
+        carve = GeometryProcessor.buffer_polygon(
+            transition_outer, outermost_diameter * _DUCT_CARVE_MARGIN_FRACTION / 2, 0
+        )
+
+        return {
+            "carve":             carve,
+            "sheath_ring":       sheath_ring,
+            "epithelium_outer":  epithelium_outer,
+            "epithelium_ring":   epithelium_ring,
+            "transition_ring":       transition_ring,
+            "transition_cell_size":  transition_cell_size,
+            "canal":             canal,
+            "center":            center,
+            # Per-duct, already-scaled sizes -- place_resin_duct reads
+            # these directly instead of the shared, unscaled rdp values,
+            # so a duct that had to shrink to fit still gets cells sized
+            # to match its own (smaller) rings.
+            "lumen_diameter":       d_lumen_diameter,
+            "cell_diameter":        d_cell_diameter,
+            "cell_width":           d_cell_width,
+            "sheath_cell_diameter": d_sheath_diameter,
+            "sheath_cell_width":    d_sheath_width,
+        }
 
     @staticmethod
     def _stomata_carve_polygons(triplet_centers, sp, cell_diam):

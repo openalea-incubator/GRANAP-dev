@@ -22,7 +22,7 @@ class AbstractNetwork(ABC):
     """
     Abstract base class for hydraulic network graph construction.
 
-    Subclasses must implement ``_build_network`` which populates
+    Subclasses must implement ``_build_anatnetwork`` which populates
     ``self.graph`` with nodes and edges.
 
     After the graph is built, ``export_to_adjencymatrix`` converts it to
@@ -49,7 +49,7 @@ class AbstractNetwork(ABC):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def _build_anatnetwork(self, air_link_radius: Optional[float] = None) -> None:
+    def _build_anatnetwork(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> None:
         """
         Populate ``self.graph`` with wall, junction and cell nodes,
         and connect them with the appropriate edges.
@@ -61,6 +61,12 @@ class AbstractNetwork(ABC):
         ``NetworkExporter.export``) that lie within that distance of each
         other but aren't directly adjacent; ``None`` uses that method's
         own default (3x the median wall length).
+
+        ``**exporter_kwargs`` is forwarded verbatim to
+        ``NetworkExporter.export`` (e.g. ``bridges``/``bridge_radius`` —
+        see that method for the full, evolving set of knobs), so this
+        signature never has to grow another positional parameter every
+        time the exporter gains one.
         """
         ...
 
@@ -71,12 +77,14 @@ class AbstractNetwork(ABC):
     def n_total(self) -> int:
         return self.n_walls + self.n_junctions + self.n_cells
 
-    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None) -> lil_matrix:
+    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> lil_matrix:
         """
         Build the network (if needed) and return the sparse adjacency matrix.
 
-        ``air_link_radius`` is forwarded to ``_build_anatnetwork`` (only used
-        the first time the graph is built — it has no effect once cached).
+        ``air_link_radius`` and ``**exporter_kwargs`` (e.g.
+        ``bridges``/``bridge_radius``) are forwarded to ``_build_anatnetwork``
+        — only used the first time the graph is built, since it has no
+        effect once cached.
 
         Returns
         -------
@@ -91,7 +99,7 @@ class AbstractNetwork(ABC):
 
         # Ensure the graph is built
         if self.graph.number_of_nodes() == 0:
-            self._build_anatnetwork(air_link_radius=air_link_radius)
+            self._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
 
         n = self.n_total
         mat = lil_matrix((n, n))
@@ -119,9 +127,13 @@ class AbstractNetwork(ABC):
             Hydraulic conductivity value to assign.
         label : str
             Path type to target.  One of:
-                * ``"apoplastic"``   - wall-node <-> junction edges
-                * ``"transmembrane"`` - cell <-> wall-node edges
-                * ``"symplastic"``   - cell <-> cell edges
+                * ``"apoplastic"``     - wall-node <-> junction edges (``path="wall"``)
+                * ``"transmembrane"``  - cell <-> wall-node edges (``path="membrane"``)
+                * ``"symplastic"``     - cell <-> cell edges (``path="plasmodesmata"``)
+                * ``"apoplastic_air"`` - cell <-> wall-node edges for protected
+                  air-space cells (``path="wall_air"``)
+                * ``"air_link"``       - direct air-space cell <-> cell edges
+                  (``path="air_link"``)
         cell_type : str
             Tissue type filter.  Rules:
 
@@ -150,7 +162,7 @@ class AbstractNetwork(ABC):
         else:
             type_a, type_b = parts[0], parts[1]
 
-        valid_labels = {"apoplastic", "transmembrane", "symplastic"}
+        valid_labels = {"apoplastic", "transmembrane", "symplastic", "apoplastic_air", "air_link"}
         if label not in valid_labels:
             raise ValueError(
                 f"Unknown label '{label}'. Must be one of {valid_labels}."
@@ -181,6 +193,21 @@ class AbstractNetwork(ABC):
                 cell_b = v
                 type_u = self.graph.nodes[cell_a].get("cell_type", "")
                 type_v = self.graph.nodes[cell_b].get("cell_type", "")
+                if self._types_match(type_u, type_v, type_a, type_b):
+                    self._matrix[u, v] = K
+                    self._matrix[v, u] = K
+
+            elif label == "apoplastic_air" and path == "wall_air":
+                # u or v is a wall node; check if it is in matching_walls
+                wall_node = u if u < self.n_walls else (v if v < self.n_walls else None)
+                if wall_node is not None and wall_node in matching_walls:
+                    self._matrix[u, v] = K
+                    self._matrix[v, u] = K
+
+            elif label == "air_link" and path == "air_link":
+                # Both u and v are (air-space) cell nodes
+                type_u = self.graph.nodes[u].get("cell_type", "")
+                type_v = self.graph.nodes[v].get("cell_type", "")
                 if self._types_match(type_u, type_v, type_a, type_b):
                     self._matrix[u, v] = K
                     self._matrix[v, u] = K
@@ -240,32 +267,45 @@ class AbstractNetwork(ABC):
 
     def plot_network(self, show:bool = True, ax = None, **kwargs):
         position = kwargs.get('position', nx.get_node_attributes(self.graph, 'position'))
-        node_types = kwargs.get('node_types', nx.get_node_attributes(self.graph, 'cell_type'))
-    
+        # Node kind ('apo' for wall/junction nodes, 'cell' for cell nodes) —
+        # previously this read the ``cell_type`` attribute (only ever set on
+        # cell nodes, to the actual tissue name, e.g. "cortex") against a
+        # map keyed 'apo'/'sym': wall/junction nodes (which carry no
+        # ``cell_type`` at all) always fell back to the 'sym' default, and
+        # cell nodes' real tissue-name values never matched either key — so
+        # every wall/junction rendered the same dead-default colour and the
+        # map did nothing. Reading the ``type`` attribute (set to 'apo' for
+        # every wall/junction node, 'cell' for every cell node) makes the map
+        # meaningful again.
+        node_types = kwargs.get('node_types', nx.get_node_attributes(self.graph, 'type'))
+
         # Default color map
-        default_color_map = {'apo': 'red', 'sym': 'yellow'}
+        default_color_map = {'apo': 'red', 'cell': 'gold'}
         node_color_map = kwargs.get('node_color_map', default_color_map)
-    
-        default_edge_color_map = {'wall': 'purple', 'membrane': 'green', 'plasmodesmata': 'gray'}
+
+        default_edge_color_map = {
+            'wall': 'purple', 'membrane': 'green', 'plasmodesmata': 'gray',
+            'wall_air': 'orange', 'air_link': 'cyan',
+        }
         edge_color_map = kwargs.get('edge_color_map', default_edge_color_map)
-    
+
         # Determine node colors
         node_colors = []
         for node in self.graph.nodes():
-            node_type = node_types.get(node, 'sym')  # Default to 'sym' if type is not found
+            node_type = node_types.get(node, 'cell')  # Default to 'cell' if type is not found
             node_colors.append(node_color_map.get(node_type, 'blue'))  # Default to 'blue' if color not found
-    
+
             # Determine edge colors
         edge_colors = []
         for u, v, edge_attrs in self.graph.edges(data=True):
             edge_type = edge_attrs.get('path', 'wall')  # Default to 'wall' if path is not found
             edge_colors.append(edge_color_map.get(edge_type, 'purple'))
-    
+
         # Draw the network
         fig = None
         if ax is None:
             fig, ax = plt.subplots(figsize=kwargs.get('figsize', (10, 10)))
-    
+
         nx.draw(
             self.graph,
             position,
@@ -277,10 +317,10 @@ class AbstractNetwork(ABC):
             width=kwargs.get('width', 1),
             alpha=kwargs.get('alpha', 0.7)
         )
-    
-        # ax.set_title(kwargs.get('title', 'Network Visualization'))
+
+        ax.set_title(kwargs.get('title', 'Network Visualization'))
         ax.set_aspect('equal', adjustable='box')
-        
+
         if (fig is not None) and show:
             plt.tight_layout()
             plt.show()

@@ -25,9 +25,9 @@ here being <=0.09 mm; a literal 0.6 mm cell width left the mesophyll ring with o
     first into the full zone
   - transfusion tracheid, smaller and more numerous, packed second into the residual gaps around
     the parenchyma
-  the two share the 85% occupancy target evenly ("in same quantities"), but because the second
-  pass packs into a gap-constrained residue it under-fills, so the realized split is ~63/37 by
-  area in the parenchyma's favour
+  the two share the 85% occupancy target evenly ("in same quantities"), and now realize that
+  measurement closely: ~50/50 by area (it used to come out ~63/37 in the parenchyma's favour,
+  before the transfusion zone was held off the endodermis -- see the transfusion_tissue note below)
 
 
 2 vascular ellipses (major 0.32, minor 0.2; Angle 30°) ~0.055mm²; the 30° orientation is set
@@ -157,14 +157,20 @@ def build_pinaster():
         # first, then tracheids (small, 0.022 diameter, more numerous) into
         # what's left -- rather than the ring seeder. transfusion_tracheids
         # _ratio=1.0 is the docstring's "in same quantities" (a 50/50 split of
-        # the packed occupancy target). The *realized* areas are not 50/50
-        # though: the first pass nearly reaches its target while the second
-        # packs into a gap-constrained residue and under-fills, so 1.0 lands
-        # at ~63% parenchyma / ~37% tracheid -- parenchyma reads as the
-        # dominant element with tracheids as a fine matrix between them,
-        # matching Transfusion_tissue.png. (Measured sweep: ratio 0.6 -> 78%
-        # parenchyma, too dominant, tracheids reduced to slivers; 1.5 -> 49%,
-        # back to parenchyma not occupying enough.)
+        # the packed occupancy target), and it now realizes ~50/50 by area
+        # too. That is a change: it used to land at ~63% parenchyma / ~37%
+        # tracheid, because the first pass nearly reaches its target while
+        # the second packs into a gap-constrained residue and under-fills.
+        # _create_central_layers now holds the transfusion zone half an
+        # endodermis cell off the endodermis boundary (so packed cells stop
+        # stealing endodermis Voronoi territory -- this needle's endodermis
+        # gained ~12% cell area), and the slightly thinner zone suits the
+        # large 0.045 parenchyma discs less well, moving the realized split
+        # onto the measured even one. Parenchyma still reads as the dominant
+        # element by cell size (mean 0.053 vs 0.032 across) with tracheids a
+        # finer matrix between them, matching Transfusion_tissue.png.
+        # (Earlier sweep, before that change: ratio 0.6 -> 78% parenchyma,
+        # too dominant; 1.5 -> 49%.)
         {"name": "transfusion_tissue", "n_layers": 2, "pack_circles": True,
          "diameter_max": 0.05, "proportion": 0.85,
          "parenchyma_diameter": 0.045, "tracheids_diameter": 0.022,
