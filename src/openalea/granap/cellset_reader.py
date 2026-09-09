@@ -32,8 +32,7 @@ edges at all.)
 
 A cell whose walls assemble into more than one closed ring is **annular**: the
 extra rings are holes punched by cells drawn inside it.  MECHA cannot handle such
-a cell, which is the whole motivation for ``cellset_organ.CellSetOrgan`` — see
-``Andrea/Mixing_CellSet_GRANAP.md``.
+a cell, which is the whole motivation for ``cellset_organ.CellSetOrgan``.
 
 CellSet's ``group`` integers are the same integers MECHA calls ``cgroup``
 (``anatomy_writer.CGROUP_MAP`` / MECHA's ``hydraulic_cell.CGROUP_TO_TYPE``), so

@@ -1,7 +1,7 @@
 """Hybrid anatomy: real CellSet segmentation + a GRANAP-generated stele.
 
-Why this exists (``Andrea/Mixing_CellSet_GRANAP.md``): a CellSet-digitized root
-section carries everything MECHA needs *except* a resolved stele.  Segmenting
+Why this exists: a CellSet-digitized root section carries everything MECHA
+needs *except* a resolved stele.  Segmenting
 individual pericycle / phloem / companion cells by hand is not worth the effort,
 so the interior of the endodermis is usually drawn as **one annular cell** with
 the few visible vessels punched out as holes.  MECHA cannot handle a cell with
@@ -41,7 +41,7 @@ Units: CellSet writes micrometres, GRANAP works in millimetres and MECHA's
 
 Typical use::
 
-    organ = CellSetOrgan("041825_At_Ctr2_xsec3.xml", seed=0)
+    organ = CellSetOrgan("partial_CellSet_brasicaceae.xml", seed=0)
     organ.generate_cells()
     AnatomyWriter(organ).write_to_xml("hybrid.xml")
     # then, in MECHA:  InData(cellset_file="hybrid.xml")
