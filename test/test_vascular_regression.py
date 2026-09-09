@@ -23,13 +23,12 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(".."))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "example", "needle"))
 
 from openalea.granap.root_class import RootAnatomy
 from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.input_data import OrganInputData
-from gallery_needle_features import build_gallery_needle_data
+from needle_configs import build_gallery_needle_data
 
 SEED = 0
 

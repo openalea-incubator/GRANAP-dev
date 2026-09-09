@@ -3,7 +3,8 @@
 See ``example/needle/Transfusion_network.md`` for the physiological
 requirements and ``example/needle/transfusion_network.py`` for the visual
 deliverable. All tests use the measured Pinus pinaster needle
-(``example/needle/pinus_pinaster.py::build_pinaster``, ``pack_circles=True``)
+(``needle_configs.py::build_pinaster``, duplicated from
+``example/needle/pinus_pinaster.py``, ``pack_circles=True``)
 at a fixed ``seed=0`` so transfusion parenchyma/tracheid actually get
 differentiated cell types (the default needle preset does not pack circles
 and never produces "transfusion parenchyma"/"transfusion tracheid" — only a
@@ -17,12 +18,11 @@ import networkx as nx
 import pytest
 
 sys.path.append(os.path.abspath(".."))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "example", "needle"))
 
 from openalea.granap.needle_class import NeedleAnatomy
 from openalea.granap.anatomy_writer import NetworkExporter
 
-from pinus_pinaster import build_pinaster
+from needle_configs import build_pinaster
 
 SEED = 0
 

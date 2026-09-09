@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 
 sys.path.append(os.path.abspath(".."))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "example", "needle"))
 
 from openalea.granap.needle_class import NeedleAnatomy, _DUCT_PLACEMENT_ORDER
 
@@ -402,7 +401,7 @@ def _assert_real_config_ducts(organ, require_full_size=True, min_scale=0.0):
 
 
 def test_pinaster_ducts_clear_boundaries_and_keep_full_size():
-    from pinus_pinaster import build_pinaster
+    from needle_configs import build_pinaster
     organ = NeedleAnatomy(build_pinaster(), seed=0)
     ducts = _assert_real_config_ducts(organ)
     assert len(ducts) == 2
@@ -418,14 +417,14 @@ def test_nigra_ducts_clear_boundaries_and_stay_near_full_size():
     ~0.96 achieved when this test was written -- report the exact achieved
     scale rather than tightening this further if it moves.
     """
-    from pinus_nigra import build_nigra
+    from needle_configs import build_nigra
     organ = NeedleAnatomy(build_nigra(), seed=0)
     ducts = _assert_real_config_ducts(organ, require_full_size=False, min_scale=0.95)
     assert len(ducts) == 4
 
 
 def test_gallery_ducts_clear_boundaries_and_keep_full_size():
-    from gallery_needle_features import build_gallery_needle_data
+    from needle_configs import build_gallery_needle_data
     organ = NeedleAnatomy(build_gallery_needle_data(), seed=0)
     ducts = _assert_real_config_ducts(organ)
     assert len(ducts) == 2
@@ -440,7 +439,7 @@ def test_two_slice_placed_ducts_land_on_the_true_corners():
     requested bearing before ``_build_duct`` would shrink it instead of
     seating it further off-bearing.
     """
-    from pinus_pinaster import build_pinaster
+    from needle_configs import build_pinaster
     organ = NeedleAnatomy(build_pinaster(), seed=0)
     lps = organ.generate_layer_polygons()
     ducts, _rdp = organ._duct_zone_data(lps)
