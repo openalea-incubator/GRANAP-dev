@@ -17,6 +17,16 @@ GEOS resolves at the last bit — a 1e-9 nudge flipped 2 of 8 bundles from 3 xyl
 files to 2.  With the cutter left unclipped all 8 bundles split as parameterised
 and the census is stable to ~1e-4.  Counts here are stable across GEOS 3.13/3.14
 and py3.13/3.14; the geometry stack is pinned in ``pyproject.toml``.
+
+A related, still-open instance: a native Windows conda build of this same pinned
+``geos==3.14.1``/``shapely==2.1.2`` disagrees with a Linux build at the identical
+version numbers on ``dicot_stem`` (``parenchyma`` off by 1) and ``monocot_stem``
+(``air space``/``cortex``/``parenchyma`` off by up to ~11) — a few cells' worth
+of the same last-bit GEOS boundary sensitivity described above, just not (yet)
+traced to a specific unclipped-cutter-style fix. Confirmed via WSL Ubuntu (same
+pinned versions, checked directly) matching this golden data exactly while a
+native Windows run of the identical checkout does not. Validate this suite
+under Linux/WSL, not a native Windows Python, if you hit only these two.
 """
 
 import os
@@ -104,18 +114,19 @@ GOLDEN = {
         "phloem": 108, "stele": 1056, "xylem": 50,
     }),
     "needle_default": (needle_default, {
-        "Strasburger cell": 38, "air space": 476, "cambium": 58, "duct": 3,
-        "endodermis": 49, "epidermis": 231, "guard cell": 8, "hypodermis": 387,
-        "mesophyll": 228, "parenchyma": 244, "phloem": 310, "pore": 4,
-        "resin duct": 42, "transfusion": 103, "xylem": 270,
+        "Str. Interstitial cell": 96, "Strasburger cell": 53, "air space": 538,
+        "cambium": 58, "duct": 3, "endodermis": 49, "epidermis": 239,
+        "guard cell": 8, "hypodermis": 387, "mesophyll": 252, "parenchyma": 197,
+        "phloem": 316, "pore": 4, "resin duct epithelium": 30,
+        "resin duct sheath": 42, "transfusion": 103, "xylem": 394,
     }),
     "needle_features": (needle_features, {
-        "Str. Interstitial cell": 90, "Strasburger cell": 26, "air space": 503,
+        "Str. Interstitial cell": 90, "Strasburger cell": 26, "air space": 499,
         "cambium": 32, "duct": 2, "endodermis": 45, "epidermis": 239,
-        "guard cell": 20, "hypodermis": 355, "hypodermis_corner": 29,
+        "guard cell": 20, "hypodermis": 355, "hypodermis_corner": 27,
         "mesophyll": 231, "parenchyma": 76, "phloem": 164, "pore": 10,
         "resin duct epithelium": 20, "resin duct sheath": 36,
-        "transfusion parenchyma": 43, "transfusion tracheid": 125, "xylem": 202,
+        "transfusion parenchyma": 37, "transfusion tracheid": 112, "xylem": 202,
     }),
     "dicot_stem": (dicot_stem, {
         "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,
