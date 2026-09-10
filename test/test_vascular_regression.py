@@ -18,15 +18,28 @@ files to 2.  With the cutter left unclipped all 8 bundles split as parameterised
 and the census is stable to ~1e-4.  Counts here are stable across GEOS 3.13/3.14
 and py3.13/3.14; the geometry stack is pinned in ``pyproject.toml``.
 
-A related, still-open instance: a native Windows conda build of this same pinned
-``geos==3.14.1``/``shapely==2.1.2`` disagrees with a Linux build at the identical
-version numbers on ``dicot_stem`` (``parenchyma`` off by 1) and ``monocot_stem``
-(``air space``/``cortex``/``parenchyma`` off by up to ~11) — a few cells' worth
-of the same last-bit GEOS boundary sensitivity described above, just not (yet)
-traced to a specific unclipped-cutter-style fix. Confirmed via WSL Ubuntu (same
-pinned versions, checked directly) matching this golden data exactly while a
-native Windows run of the identical checkout does not. Validate this suite
-under Linux/WSL, not a native Windows Python, if you hit only these two.
+Two more instances of the same family were traced and fixed, which is why the
+stem entries here moved.  Both were **exact ties** decided by the last bits of
+coordinates, which glibc and UCRT ``sin``/``cos``/``arctan2`` compute
+differently:
+
+* ``GeometryProcessor._chebyshev_center`` fed an unsnapped polygon to
+  ``shapely.maximum_inscribed_circle``.  A zone symmetric about an axis has two
+  tied optimal centres — ``dicot_stem``'s 3-o'clock bundle sits exactly on the
+  x-axis — and the noise chose between them, so the whole Apollonian packing
+  followed a different branch.  The polygon is now snapped first.
+* ``_grow_bundle_sheath`` asked ``env.contains(b)`` for points ``b`` on the
+  bundle *footprint*'s boundary, to tell "this point sits on a fibre cap" from
+  "this point is on the envelope".  But the footprint is the envelope plus the
+  caps, from the same coordinates through the same transform, so a non-cap point
+  lies exactly *on* ``env``'s boundary (and in the arc-bundle path ``foot`` *is*
+  ``env``) — a coin flip that sized each sheath cell from either the fibre or the
+  parenchyma and cascaded through the march.  The test is now tolerant.
+
+With those two in place ``dicot_stem`` and ``monocot_stem`` are **bit-identical**
+between a native Windows build and a WSL Ubuntu build of the same pinned
+``geos==3.14.1``/``shapely==2.1.2``: equal seed counts in every
+``(tissue, id_layer)`` bucket, and every cell centroid matching to <1e-14.
 """
 
 import os
@@ -99,7 +112,7 @@ def monocot_stem() -> StemAnatomy:
 
 GOLDEN = {
     "monocot_default": (monocot_default, {
-        "air space": 367, "cortex": 206, "endodermis": 32, "epidermis": 168,
+        "air space": 368, "cortex": 206, "endodermis": 32, "epidermis": 168,
         "exodermis": 79, "metaxylem": 5, "pericycle": 97, "phloem": 10,
         "protoxylem": 10, "stele": 410,
     }),
@@ -111,7 +124,7 @@ GOLDEN = {
     "dicot_secondary": (dicot_secondary, {
         "air space": 574, "cambium": 99, "companion_cell": 55, "cortex": 332,
         "endodermis": 51, "epidermis": 248, "exodermis": 119, "pericycle": 139,
-        "phloem": 108, "stele": 1056, "xylem": 50,
+        "phloem": 108, "stele": 1057, "xylem": 50,
     }),
     "needle_default": (needle_default, {
         "Str. Interstitial cell": 96, "Strasburger cell": 53, "air space": 538,
@@ -130,11 +143,11 @@ GOLDEN = {
     }),
     "dicot_stem": (dicot_stem, {
         "air space": 150, "cambium": 66, "companion cell": 71, "cortex": 188,
-        "epidermis": 220, "parenchyma": 3963, "sieve element": 71, "xylem": 72,
+        "epidermis": 220, "parenchyma": 3962, "sieve element": 71, "xylem": 72,
     }),
     "monocot_stem": (monocot_stem, {
-        "air space": 543, "companion cell": 159, "cortex": 470, "epidermis": 261,
-        "parenchyma": 3853, "sclerenchyma": 2137, "sieve element": 159, "xylem": 39,
+        "air space": 549, "companion cell": 159, "cortex": 455, "epidermis": 261,
+        "parenchyma": 3830, "sclerenchyma": 2137, "sieve element": 159, "xylem": 39,
     }),
 }
 

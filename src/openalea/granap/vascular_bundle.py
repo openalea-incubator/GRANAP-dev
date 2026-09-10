@@ -162,6 +162,15 @@ def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
 #: differ by more than this size ratio; below it the neighbours already match.
 _SHEATH_MIN_RATIO = 4.0
 
+#: Tolerance for "does this footprint boundary point sit on a fibre cap?" (see
+#: :func:`_grow_bundle_sheath`).  The footprint is the envelope *plus* the caps,
+#: built from the same local coordinates and placed by the same transform, so a
+#: boundary point that is not on a cap lies exactly *on* the envelope's boundary —
+#: an exact tie for a strict ``contains``, which platform libm last-bit differences
+#: then decide either way.  A cap protrudes by about a fibre diameter (~1e-2), so
+#: anything within this distance of the envelope is treated as on it.
+_ENV_ON_BOUNDARY_TOL = 1e-9
+
 
 def _place_ring(cells: CellManager, pcx: float, pcy: float, r_draw: float,
                 tag: str, angle_center, n_border: int = 12) -> None:
@@ -218,7 +227,20 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     fibre = float(bp.get("sclerenchyma_cell_diameter", 0.008))
     # A cap sticks out past the envelope, so a boundary point outside ``env`` sits on
     # fibres; size the sheath from the fibre there, else from the parenchyma.
-    in_env = prep(env).contains if env is not None else (lambda p: True)
+    # The test must be *tolerant*: a footprint boundary point that is not on a cap
+    # lies exactly on ``env``'s boundary (and in the arc-bundle path ``foot`` IS
+    # ``env``), so a strict ``contains`` is an exact tie there and resolves
+    # differently per platform — which flips ``x`` between the fibre and parenchyma
+    # size and cascades through the whole march.  Only a point protruding past the
+    # envelope by a real margin — a cap — reads as outside.
+    if env is not None:
+        _env_contains = prep(env).contains
+
+        def in_env(p):
+            return _env_contains(p) or env.distance(p) <= _ENV_ON_BOUNDARY_TOL
+    else:
+        def in_env(p):
+            return True
     inside = prep(outline).contains if outline is not None else (lambda p: True)
 
     # Sample the footprint boundary very finely with outward normals, then *march*

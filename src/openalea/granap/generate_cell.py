@@ -16,6 +16,64 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
 
 
+#: Grid the seed coordinates are snapped to before hashing them into a jitter
+#: value (see :func:`_positional_jitter`).  Far below any anatomical length here
+#: (cell diameters are ~1e-2 mm) and far above the ~1e-16 last-bit differences
+#: between platform libm implementations, so the same seed hashes identically
+#: everywhere while two genuinely distinct seeds keep distinct jitter.
+_JITTER_GRID = 1e-9
+
+_SM64_ADD = np.uint64(0x9E3779B97F4A7C15)
+_SM64_M1 = np.uint64(0xBF58476D1CE4E5B9)
+_SM64_M2 = np.uint64(0x94D049BB133111EB)
+_JITTER_STREAM_Y = np.uint64(0xD1B54A32D192ED03)
+
+
+def _splitmix64(x: np.ndarray) -> np.ndarray:
+    """Vectorised SplitMix64 finaliser: uint64 -> well-mixed uint64.
+
+    Pure wrapping integer arithmetic, so it is bit-identical on every platform —
+    which is the whole point of using it instead of a float RNG here.
+    """
+    with np.errstate(over="ignore"):
+        z = x + _SM64_ADD
+        z = (z ^ (z >> np.uint64(30))) * _SM64_M1
+        z = (z ^ (z >> np.uint64(27))) * _SM64_M2
+        return z ^ (z >> np.uint64(31))
+
+
+def _positional_jitter(xs: np.ndarray, ys: np.ndarray, shift: float, rng):
+    """Per-seed jitter in ``[-shift, shift)``, derived from the seed's own position.
+
+    The obvious implementation — one ``rng.uniform(size=(n, 2))`` block indexed by
+    list position — makes every seed's jitter depend on *how many seeds precede it*,
+    so inserting or removing a single seed perturbs every later cell.  Measured on
+    ``monocot_stem`` while two platforms disagreed by 4 sheath cells: 6188 of 7623
+    cells came out non-identical, though nearly all only by the jitter's own scale
+    (median centroid shift 9e-7 mm, i.e. ~1e-4 of a cell) — so the effect is mostly
+    to destroy any local reasoning about the output, not to move the anatomy.
+
+    Hashing the seed's snapped coordinates instead makes each seed's jitter depend
+    on nothing but itself, so a local difference stays local and a diff of two runs
+    points at what actually changed.  One scalar draw from ``rng`` keys the hash, so
+    the organ's ``seed`` still selects a different tessellation.
+    """
+    try:
+        key = np.uint64(int(rng.integers(0, 2 ** 63)))
+    except AttributeError:                      # legacy np.random module / RandomState
+        key = np.uint64(int(rng.randint(0, 2 ** 63)))
+
+    ix = np.rint(np.asarray(xs, float) / _JITTER_GRID).astype(np.int64).view(np.uint64)
+    iy = np.rint(np.asarray(ys, float) / _JITTER_GRID).astype(np.int64).view(np.uint64)
+    base = _splitmix64(_splitmix64(ix ^ key) ^ iy)
+
+    # 53-bit mantissa -> [0, 1), the same construction numpy uses for random().
+    scale = 1.0 / float(1 << 53)
+    u_x = (_splitmix64(base) >> np.uint64(11)).astype(np.float64) * scale
+    u_y = (_splitmix64(base ^ _JITTER_STREAM_Y) >> np.uint64(11)).astype(np.float64) * scale
+    return 2.0 * shift * u_x - shift, 2.0 * shift * u_y - shift
+
+
 class CellGenerator:
     """
     Generates plant cells using Voronoi tessellation.
@@ -374,6 +432,12 @@ class CellGenerator:
 
     @staticmethod
     def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
+        """Jitter every seed slightly, then tessellate.
+
+        The jitter breaks the exact co-circularity of the analytic border rings,
+        which Qhull would otherwise resolve arbitrarily.  It is drawn *per seed
+        position*, not per list index — see :func:`_positional_jitter`.
+        """
         cells = all_cells.cells
         n = len(cells)
         if n == 0:
@@ -383,9 +447,9 @@ class CellGenerator:
         xs    = np.fromiter((c.x for c in cells),        float, n)
         ys    = np.fromiter((c.y for c in cells),        float, n)
         diams = np.fromiter((c.diameter for c in cells), float, n)
-        draws = _rng.uniform(-shift, shift, size=(n, 2))
-        xs = xs + draws[:, 0] * diams
-        ys = ys + draws[:, 1] * diams
+        jx, jy = _positional_jitter(xs, ys, shift, _rng)
+        xs = xs + jx * diams
+        ys = ys + jy * diams
         angles = np.arctan2(ys, xs)
         radii  = np.sqrt(xs ** 2 + ys ** 2)
         for c, x, y, a, r in zip(cells, xs, ys, angles, radii):

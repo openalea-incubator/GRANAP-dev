@@ -15,6 +15,14 @@ from shapely.ops import unary_union
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
 
 
+#: Grid the polygon fed to :func:`shapely.maximum_inscribed_circle` is snapped to
+#: in :meth:`GeometryProcessor._chebyshev_center`.  Coarse enough (~1e6x) to swamp
+#: the ~1e-16 last-bit differences between platform libm implementations, which
+#: otherwise decide the inscribed-circle tie in a symmetric zone; fine enough to be
+#: far below any anatomical length in the model (cell diameters are ~1e-2 mm).
+_MIC_SNAP_GRID = 1e-9
+
+
 class GeometryProcessor:
     """
     Handles all geometric operations for anatomy generation.
@@ -826,6 +834,18 @@ class GeometryProcessor:
 
         minx, miny, maxx, maxy = polygon.bounds
         tolerance = max(maxx - minx, maxy - miny) * 1e-4 or 1e-6
+        # A zone that is symmetric about an axis has *two* tied optimal centres and
+        # GEOS' branch-and-bound picks one of them; with unsnapped input the choice
+        # is made by the last bits of the vertices, which differ between platform
+        # libm implementations (dicot_stem's 3-o'clock bundle sits exactly on the
+        # x-axis and did precisely this).  Snapping to a common grid makes both
+        # platforms feed GEOS bit-identical input, so the tie resolves the same way.
+        try:
+            snapped = sp.set_precision(polygon, _MIC_SNAP_GRID)
+            if not snapped.is_empty and snapped.area > 0.0:
+                polygon = snapped
+        except Exception:
+            pass
         try:
             line = sp.maximum_inscribed_circle(polygon, tolerance=tolerance)
             (cx, cy), _boundary_pt = line.coords
