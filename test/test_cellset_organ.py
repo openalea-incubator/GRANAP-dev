@@ -301,27 +301,52 @@ def test_xylem_plate_follows_the_measured_vessel_axis(organ):
     assert math.cos(math.radians(2 * (angle - measured))) == pytest.approx(1.0, abs=1e-6)
 
 
-def test_a_broken_interface_is_not_silent():
-    """Option sets that don't weld cleanly must say so.
+def test_a_broken_interface_is_not_silent(organ):
+    """A single-reference interior wall must be *reported*, never swallowed.
 
-    ``overshoot=0`` grows no donor past the region rim, so the tessellation's
-    outer ring is straightened into chords that cut the corners of the wiggly
-    real outline: it leaves genuine geometric gaps (coverage ~0.994), not a
-    vertex-sharing mismatch, and no amount of welding can close them.  The point
-    of this test is that such a case warns instead of quietly handing MECHA a
-    network with gas-space boundaries in the middle of the tissue.
+    Asserted on injected data, not on a deliberately-misconfigured build, and
+    that is the whole point.  This test used to pick an option set that happens
+    to break (``recenter=False``, then ``overshoot=0``) and assert it warns —
+    which couples the guarantee to how badly that option set breaks *on this
+    platform*.  It does not survive contact with one: ``overshoot=0`` leaves
+    only 3 interior border walls out of thousands on x86, and on macOS/arm64
+    those 3 close up and nothing warns at all.  Chasing that with a third
+    option set would just re-arm the same trap.
 
-    This used to use ``recenter=False``, which no longer breaks: that case was
-    failing for the vertex-asymmetry reason fixed in
-    ``test_no_interior_border_walls_at_any_seed``, and now tiles cleanly.
+    So test the property directly: hand ``topology_report`` one wall with a
+    single flanking cell whose tag is *not* on the outer surface, and it must
+    warn and report it.  The default graft is clean, so the same organ also
+    pins the converse — no false alarm on a sound network.
+    """
+    rep = organ.topology_report()               # clean: must not cry wolf
+    assert rep["interior_border_walls"] == {}
+
+    # A wall id that cannot collide with a real one, owned by a stele cell --
+    # interior by definition, so it must not be excused as outer surface.
+    idx = next(i for i, c in enumerate(organ.all_cells.cells) if c.type == "stele")
+    node = idx + organ.n_walls + organ.n_junctions
+    fake = max(organ._wall_to_cells) + 1
+    organ._wall_to_cells[fake] = [node]
+    try:
+        with pytest.warns(UserWarning, match="not fully shared"):
+            rep = organ.topology_report()
+    finally:
+        del organ._wall_to_cells[fake]          # leave the module fixture clean
+    assert rep["interior_border_walls"] == {"stele": 1}
+
+
+def test_overshoot_zero_leaves_real_rim_gaps():
+    """``overshoot=0`` is a geometric failure, not a welding one.
+
+    Without growing the donor past the region rim, the tessellation's outer ring
+    is straightened into chords that cut the corners of the wiggly real outline.
+    No amount of vertex welding can close that, which is why the donor is grown
+    and clipped back.  Coverage is the robust signal (~0.994 on x86); the count
+    of resulting border walls is not, so it is deliberately not asserted here.
     """
     organ = CellSetOrgan(CELLSET, seed=SEED, overshoot=0.0)
     organ.generate_cells()
-    organ.export_to_adjencymatrix()
-    with pytest.warns(UserWarning, match="not fully shared"):
-        rep = organ.topology_report()
-    assert rep["interior_border_walls"]
-    assert organ.graft_report[0]["coverage"] < 1.0    # real gaps, not a weld failure
+    assert organ.graft_report[0]["coverage"] < 0.999
 
 
 # ---------------------------------------------------------------- export

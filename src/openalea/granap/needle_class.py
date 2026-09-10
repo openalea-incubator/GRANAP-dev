@@ -150,6 +150,15 @@ _DUCT_WEDGE_HALF_WIDTH: float = 10.0
 # disproportionately larger pad -- costly everywhere else -- to also clear.
 _STOMA_HYPODERMIS_PAD_FACTOR: float = 1.75
 
+# How close to the corner-parenchyma pocket's edge a seed may sit and still
+# count as inside it (see retag_corner_parenchyma). The pocket is cut out of the
+# layer polygon, so it inherits that outline -- and the layer's border seeds lie
+# exactly *on* it, which makes a bare `contains` test a coin flip on the last
+# bit and drifted the needle census between x86 and arm64. Not a tuned value:
+# the boundary cases measure within 5.3e-17 and the nearest true interior cell
+# is farther than 1e-6, so anything in that gap picks the same cells.
+_POCKET_ON_EDGE_TOL: float = 1e-9
+
 class NeedleAnatomy(Organ):
     """
     Needle cross-sectional anatomy.
@@ -683,12 +692,36 @@ class NeedleAnatomy(Organ):
         """Retag parenchyma cells in the corner pockets (see
         ``_corner_parenchyma_pockets``) to "Strasburger cell" -- a plain
         rename, existing cells kept at their existing size/position.
+
+        **A seed exactly on the pocket edge counts as inside.**  The pocket is
+        carved out of the layer polygon, so it inherits that polygon's own
+        outline -- and the layer's border seeds sit exactly *on* that outline.
+        ``zone.contains`` excludes the boundary, so for those cells the tag came
+        down to whether GEOS put them 1e-18 in or out, which differs by platform:
+        44 of the 250 parenchyma candidates here are boundary cases (30 of 102
+        for the gallery needle), and macOS/arm64 resolved 4 of them the other way
+        than x86, drifting the golden census.  Half the Strasburger cells were
+        decided by arithmetic noise rather than anatomy.
+
+        Including them is both the geometric and the biological reading: a seed
+        on the outline still gets a Voronoi body *inside* the region, and those
+        cells form the single-cell rim where the central cylinder meets the
+        transfusion tissue -- the contact albuminous cells exist to make.  The
+        alternative (excluding them) puts a parenchyma layer between the
+        Strasburger mantle and the transfusion tissue and, on the gallery
+        needle, shrinks the cluster to 10 cells.
+
+        The tolerance is not tuned: measured boundary cases sit within 5.3e-17
+        while the nearest genuine interior cell is farther than 1e-6, so any
+        value in that gap selects the identical set.
         """
         zone = getattr(self, "_parenchyma_pocket_zone", None)
         if zone is None or zone.is_empty:
             return
+        edge = zone.boundary
         for c in self.all_cells.get_cells_by_type("parenchyma"):
-            if zone.contains(Point(c.x, c.y)):
+            p = Point(c.x, c.y)
+            if zone.contains(p) or edge.distance(p) <= _POCKET_ON_EDGE_TOL:
                 c.type = "Strasburger cell"
 
 

@@ -739,10 +739,13 @@ class CellSetOrgan(Organ):
             warnings.warn(
                 "CellSetOrgan: the graft interface is not fully shared — "
                 + "; ".join(faults)
-                + ". This network is not physically sound. Only the default "
-                "option set is verified clean; overshoot=0, "
-                "keep_inner_cells=False, donor_xylem_tag=None and an explicit "
-                "star_orientation are known to produce this.",
+                + ". This network is not physically sound. Measured causes, "
+                "on x86: overshoot=0 (leaves real rim gaps no welding can "
+                "close), donor_xylem_tag=None and n_vascular_peak>=3 (both "
+                "pack the donor's vessels tighter than the stele can hold). "
+                "Which seeds and option sets trip this is platform-dependent — "
+                "it is an exact-tie effect — so treat the list as examples, "
+                "not an exhaustive set.",
                 stacklevel=2,
             )
         return {
