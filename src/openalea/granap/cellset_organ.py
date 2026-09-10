@@ -108,6 +108,11 @@ _PERICYCLE_FRAC: float = 0.26
 # Every tag the root recipes use for a vessel.
 _XYLEM_TAGS: Tuple[str, ...] = ("xylem", "metaxylem", "protoxylem")
 
+#: Area below which a carved remainder is a boolean-noise fragment rather than a
+#: cell.  Used as ``carve_cells``' floor in :meth:`CellSetOrgan._graft`, where
+#: dropping a *real* remainder opens a gap in an otherwise exact tiling.
+_DEGENERATE_AREA: float = 1e-14
+
 
 def default_stele_input(
     radius: float,
@@ -528,7 +533,16 @@ class CellSetOrgan(Organ):
         if inner_polys:
             mask = unary_union(inner_polys)
             if not mask.is_empty:
-                clipped = carve_cells(clipped, mask, min_area=min_area)
+                # Carve with a *degeneracy* floor, not the sliver floor used for
+                # clipping.  Dropping a carved remainder does not merely lose a
+                # small cell: it opens a gap that ``absorb_residual`` below then
+                # has to hand to a neighbour, and that merge is what puts three
+                # cells on one wall.  Measured on the Arabidopsis section, the
+                # clipped donor tiles the region *exactly* and carve is the only
+                # stage that opens a gap -- 0 at seed 0 but 1e-7..7e-7 at seeds
+                # 1/2/4, matching the residual absorb saw. Keeping the small
+                # remainder as a cell is strictly better than gapping the region.
+                clipped = carve_cells(clipped, mask, min_area=_DEGENERATE_AREA)
 
         # Tile the region exactly. Whatever the donor leaves uncovered is
         # boundary only one cell owns, and MECHA reads a one-cell wall inside the
@@ -549,12 +563,22 @@ class CellSetOrgan(Organ):
         # conform_boundaries writes the *same* coordinate into both rings, so the
         # match does not depend on the graft's cut points having landed exactly
         # on an edge -- which they only do for one particular configuration.
+        #
+        # The donor cells are conformed against *each other* as well as against
+        # the real neighbours.  ``absorb_residual`` above merges each uncovered
+        # patch into one host, which re-nodes that host's boundary along the walls
+        # it shares with the *other donor cells* around the patch -- and they do
+        # not gain the same vertices.  Conforming only donor -> real leaves that
+        # asymmetry in place, and each un-shared vertex splits one wall into
+        # three single-reference ones.  Measured on the Arabidopsis section: with
+        # donor->real alone, seed 0 happened to need no absorbing and passed while
+        # seeds 1-5 produced 22-49 interior border walls.
         neighbours = [
             c
             for c in self.all_cells.cells
             if c.polygon is not None and not c.polygon.disjoint(region)
         ]
-        conformed = conform_boundaries(neighbours, clipped)
+        conformed = conform_boundaries(neighbours + clipped, clipped)
         n_welded = conformed["welded"] + conformed["spliced"]
 
         # Append with explicit ids. CellManager.extend_cells re-bases id_cell and
@@ -694,15 +718,31 @@ class CellSetOrgan(Organ):
         surface = {"epidermis", "exodermis", "cortex"}
         interior = {t: n for t, n in border.items() if t not in surface}
         if interior or multi:
+            # Report whichever defect actually occurred.  They are different
+            # faults with different causes -- single-reference walls mean the
+            # interface is not shared, walls with 3+ flanking cells mean a ring
+            # came back invalid -- and a message that always leads with the
+            # single-reference count reads as "0 walls are wrong" when only the
+            # latter is present.
+            faults = []
+            if interior:
+                faults.append(
+                    f"{sum(interior.values())} wall(s) inside the tissue have a "
+                    f"single flanking cell {interior}; MECHA reads those as "
+                    "gas-space boundaries"
+                )
+            if multi:
+                faults.append(
+                    f"{multi} wall(s) have more than two flanking cells, which "
+                    "means a cell ring came back invalid"
+                )
             warnings.warn(
                 "CellSetOrgan: the graft interface is not fully shared — "
-                f"{sum(interior.values())} wall(s) inside the tissue have a single "
-                f"flanking cell {interior} and {multi} have more than two. MECHA reads "
-                "the former as gas-space boundaries, so this network is not "
-                "physically sound. Only the default option set is verified clean; "
-                "recenter=False, overshoot=0, keep_inner_cells=False, "
-                "donor_xylem_tag=None and an explicit star_orientation are known to "
-                "produce this.",
+                + "; ".join(faults)
+                + ". This network is not physically sound. Only the default "
+                "option set is verified clean; overshoot=0, "
+                "keep_inner_cells=False, donor_xylem_tag=None and an explicit "
+                "star_orientation are known to produce this.",
                 stacklevel=2,
             )
         return {

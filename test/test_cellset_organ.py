@@ -223,6 +223,41 @@ def test_no_interior_border_walls(organ):
     assert rep["multi_cell_walls"] == 0
 
 
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_no_interior_border_walls_at_any_seed(seed):
+    """No gas-space boundary mid-tissue, for *every* seed -- not just ``seed=0``.
+
+    This used to hold only at 0: seeds 1-5 produced 22-49 interior border walls.
+    Three separate causes, all of them silent:
+
+    * ``absorb_residual`` was handed the crowd of zero-area slivers that any
+      boolean ``difference`` returns (16-21 per seed, most exactly 0.0) because
+      ``_graft`` never passed it a ``min_area``.  Merging one closes nothing but
+      still inserts vertices into its host's ring.
+    * ``_graft`` conformed only donor -> real, so the vertices those merges added
+      along donor <-> donor walls were never shared, and each un-shared vertex
+      splits one wall into three single-reference ones.
+    * ``conform_boundaries`` spliced each cut point into just the *nearest* ring,
+      leaving any other ring it lay on keying a longer wall.
+
+    Seed 0 passed purely because it happened to need no absorbing at all, which
+    is what kept all three invisible on the one seed anyone ran.
+
+    ``multi_cell_walls`` is asserted only at seed 0 (see
+    ``test_no_interior_border_walls``): seeds 2 and 4 still produce exactly one
+    wall with three flanking cells, because ``carve_cells`` keeps only the
+    largest part when a real vessel splits a donor cell in two, and the
+    discarded part becomes a gap that ``absorb_residual`` hands to a neighbour.
+    That is a real but far milder defect -- and, unlike the above, it is not
+    silent: ``topology_report`` warns about it.
+    """
+    organ = CellSetOrgan(CELLSET, seed=seed)
+    organ.generate_cells()
+    organ.export_to_adjencymatrix()
+    rep = organ.topology_report()
+    assert rep["interior_border_walls"] == {}
+
+
 def test_interface_is_symplastically_connected(organ):
     """Plasmodesmata must cross both halves of the graft boundary."""
     pairs = organ.topology_report()["plasmodesmata_pairs"]
@@ -269,18 +304,24 @@ def test_xylem_plate_follows_the_measured_vessel_axis(organ):
 def test_a_broken_interface_is_not_silent():
     """Option sets that don't weld cleanly must say so.
 
-    Only the default configuration is verified to tile and weld exactly.
-    ``recenter=False`` leaves the section at its original image coordinates and
-    does *not* currently produce a shared interface — the point of this test is
-    that such a case warns instead of quietly handing MECHA a network full of
-    gas-space boundaries.
+    ``overshoot=0`` grows no donor past the region rim, so the tessellation's
+    outer ring is straightened into chords that cut the corners of the wiggly
+    real outline: it leaves genuine geometric gaps (coverage ~0.994), not a
+    vertex-sharing mismatch, and no amount of welding can close them.  The point
+    of this test is that such a case warns instead of quietly handing MECHA a
+    network with gas-space boundaries in the middle of the tissue.
+
+    This used to use ``recenter=False``, which no longer breaks: that case was
+    failing for the vertex-asymmetry reason fixed in
+    ``test_no_interior_border_walls_at_any_seed``, and now tiles cleanly.
     """
-    organ = CellSetOrgan(CELLSET, seed=SEED, recenter=False)
+    organ = CellSetOrgan(CELLSET, seed=SEED, overshoot=0.0)
     organ.generate_cells()
     organ.export_to_adjencymatrix()
     with pytest.warns(UserWarning, match="not fully shared"):
         rep = organ.topology_report()
     assert rep["interior_border_walls"]
+    assert organ.graft_report[0]["coverage"] < 1.0    # real gaps, not a weld failure
 
 
 # ---------------------------------------------------------------- export

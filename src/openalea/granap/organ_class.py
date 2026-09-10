@@ -611,7 +611,9 @@ class Organ(AbstractNetwork, ABC):
         """Return the recipe of organ-specific (post-fill) tissues.
 
         Default: empty (root organs have none).  Needle overrides it with resin
-        ducts + stomata.
+        ducts, transfusion tissue, the corner-parenchyma retag, stomata and
+        layer-count zoning -- in that order, which is load-bearing (see
+        ``NeedleAnatomy._organ_recipe``).
         """
         return TissueRecipe()
 

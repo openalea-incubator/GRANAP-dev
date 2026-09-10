@@ -128,7 +128,9 @@ growth, primary cambium) stay `recipe.special(...)`.
 `_vascular_recipe(polygon)` (one `special` step: the bespoke xylem/phloem/
 cambium/Strasburger ellipse grid) and `_organ_recipe()` (`special` steps for
 resin ducts + stomata, placed via `special_tissues`); `_create_vascular_tissue`
-and `_organ_specific_tissues` are just `recipe.build()`.
+and `_organ_specific_tissues` are just `recipe.build()`. (The needle organ
+recipe has since grown to five steps — transfusion tissue, the
+corner-parenchyma retag and layer-count zoning were added later.)
 
 ## The cells-first engine (unchanged, lives in `Organ.generate_cells`)
 

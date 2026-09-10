@@ -187,9 +187,12 @@ goldens + needle network test green).
   the axis/angle metadata for cosmetic churn + regression risk, the same lesson
   as secondary growth in `tissue_refactor.md`.
 - `NeedleAnatomy._organ_recipe()` added; `_organ_specific_tissues` is now
-  `recipe.build()` over two `special` steps — `"resin ducts"` (→ `add_canal` →
+  `recipe.build()` over `special` steps — `"resin ducts"` (→ `add_canal` →
   `place_resin_duct`) and `"stomata"` (→ `add_stomata` → `place_stomata`), the P2
-  vocabulary.
+  vocabulary. (Since this was written the recipe has grown to five steps:
+  `"transfusion tissue"`, `"corner parenchyma to strasburger"` and
+  `"layer-count zoning"` were added, and their order relative to `"stomata"` is
+  load-bearing.)
 - Inspectable: `test_needle_recipes_are_inspectable` in `test_recipe_vocabulary.py`.
 
 Deliverable: needle expressed as recipes; needle goldens hold. **Complete.**

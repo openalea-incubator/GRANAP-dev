@@ -381,10 +381,12 @@ class CellGenerator:
         seed perturbs every later cell.  Deriving it from each seed's own position
         instead was tried and reverted: it changed no golden census (so it fixed
         nothing measurable) while re-rolling the jitter realisation, which
-        ``CellSetOrgan``'s graft cannot survive — see
-        ``test_cellset_organ.test_no_interior_border_walls``, which holds only at
-        ``seed=0`` and reports 22-49 interior border walls at seeds 1-5 even on
-        unmodified code.  Fix that fragility before revisiting this.
+        ``CellSetOrgan``'s graft could not survive at the time -- it held only at
+        ``seed=0`` and produced 22-49 interior border walls at seeds 1-5 even on
+        unmodified code.  That graft fragility has since been fixed (see
+        ``test_no_interior_border_walls_at_any_seed``), so the blocker is gone;
+        revisiting this now costs a deliberate golden refreeze rather than a
+        correctness regression.
         """
         cells = all_cells.cells
         n = len(cells)

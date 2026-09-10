@@ -252,7 +252,8 @@ A = root.export_to_adjencymatrix()   # sparse hydraulic network (lil_matrix)
    removal yourself* — the base class does it once, so a recipe only has to
    place seeds and record its regions.
 5. **Organ‑specific post‑fill tissues** (`_organ_specific_tissues` →
-   `_organ_recipe().build()`) — e.g. needle resin ducts and stomata.
+   `_organ_recipe().build()`) — e.g. needle resin ducts, transfusion tissue and
+   stomata.
 6. **Voronoi** (`voronoi_diagram` → `process_voronoi_groups` → `simplify_cells`)
    — one global tessellation of all seeds; seeds sharing an `id_group` fuse into
    a single cell.
@@ -367,8 +368,10 @@ instantiate `StemAnatomy(data, seed=0)` directly.
 - **`NeedleAnatomy`** is the cleanest full example: a `_create_base_shape`
   (half‑ellipse), a `reshape_layers` that morphs toward an inner ellipse, a
   `_vascular_recipe` with a single bespoke `special` step (the xylem/phloem grid
-  packed into two ellipses), and an `_organ_recipe` with two `special` steps
-  (resin ducts, stomata).
+  packed into two ellipses), and an `_organ_recipe` with five `special` steps
+  (resin ducts, transfusion tissue, the corner-parenchyma→Strasburger retag,
+  stomata, layer-count zoning — the order is load-bearing, see that method's
+  docstring).
 - **`MonocotRootAnatomy` / `DicotRootAnatomy`** show declarative recipes that mix
   `fill` / `fill_each` (region → cells), `cleanup` (cell‑level fixups), and
   `special` (bespoke placements like the metaxylem sheath or secondary‑growth

@@ -377,6 +377,12 @@ def carve_cells(
     return survivors
 
 
+#: A residual piece smaller than this fraction of the median host cell area is
+#: boolean noise rather than a gap, and absorbing it does more harm than good
+#: (see :func:`absorb_residual`).
+_NOISE_AREA_RATIO = 1e-9
+
+
 def absorb_residual(
     host_cells: Sequence[Cell],
     region,
@@ -404,12 +410,29 @@ def absorb_residual(
 
     ``others`` are polygons that also count as covering the region (e.g. real
     cells kept inside it) but must not be absorbed into.  Returns a report.
+
+    A boolean ``difference`` of two tessellations always returns a crowd of
+    zero-area slivers alongside any genuine gap, and those must be left alone:
+    they close nothing, but merging one still inserts vertices into its host's
+    ring, and three cells meeting along such a sliver then emit the *same* wall
+    key -- a wall with three flanking cells, which is the very defect the
+    validity guard below is trying to avoid.  Measured on the Arabidopsis
+    section: every seed yields 16-21 pieces below 1e-14 (most exactly 0.0)
+    against 0-5 real ones of 1e-8..1e-7, so the two populations are 13 orders of
+    magnitude apart and a floor between them is unambiguous.  ``min_area`` is
+    therefore raised to at least :data:`_NOISE_AREA_RATIO` of the median host
+    cell area.
     """
     covered = [c.polygon for c in host_cells if c.polygon is not None]
     covered.extend(g for g in others if g is not None and not g.is_empty)
     if not covered:
         return {"n_pieces": 0, "absorbed_area": 0.0, "residual_area": region.area,
                 "n_unabsorbed": 0}
+
+    host_areas = [c.polygon.area for c in host_cells
+                  if c.polygon is not None and c.polygon.area > 0]
+    if host_areas:
+        min_area = max(min_area, _NOISE_AREA_RATIO * float(np.median(host_areas)))
 
     residual = region.difference(unary_union(covered))
     if residual.is_empty:
@@ -452,8 +475,26 @@ def absorb_residual(
     }
 
 
+#: An edge shorter than this fraction of the median edge is numerically
+#: degenerate -- two vertices that are the "same" point as far as the anatomy is
+#: concerned -- and must not be allowed to set a tolerance (see
+#: :func:`_ring_edge_stats`).
+_DEGENERATE_EDGE_RATIO = 1e-6
+
+
 def _ring_edge_stats(rings: List[np.ndarray]) -> float:
-    """Shortest non-zero edge across a set of rings (``inf`` if there is none)."""
+    """Shortest *non-degenerate* edge across a set of rings (``inf`` if none).
+
+    Not simply the shortest non-zero edge.  A Voronoi tessellation routinely
+    produces a pair of near-coincident vertices, and its minimum edge length is
+    therefore a random variable with a heavy tail toward zero: measured on the
+    ``CellSetOrgan`` donor, the shortest edge is ~1e-5 at most seeds but 1e-19 at
+    ``seed=1``.  Feeding that to :func:`conform_boundaries` collapses its
+    tolerance below the floating-point noise floor and silently disables the
+    whole weld/splice pass.  Edges that short are two copies of one point, so
+    they carry no information about the geometry's real scale -- discard them and
+    report the shortest edge that does.
+    """
     shortest = np.inf
     for ring in rings:
         if len(ring) < 2:
@@ -461,6 +502,9 @@ def _ring_edge_stats(rings: List[np.ndarray]) -> float:
         diffs = np.diff(ring, axis=0)
         lengths = np.hypot(diffs[:, 0], diffs[:, 1])
         lengths = lengths[lengths > 0]
+        if not lengths.size:
+            continue
+        lengths = lengths[lengths > _DEGENERATE_EDGE_RATIO * np.median(lengths)]
         if lengths.size:
             shortest = min(shortest, float(lengths.min()))
     return shortest
@@ -541,6 +585,13 @@ def conform_boundaries(
 
     for px, py in points:
         best = None                       # (distance, kind, target, seg, t, coord)
+        # Every target this point must be spliced into -- not just the nearest.
+        # A cut point routinely lies on the edge of *several* rings at once (two
+        # cells flanking the same interface, or the cells around a residual patch
+        # that ``absorb_residual`` merged away).  Splicing it into only one of
+        # them leaves the others keying a longer wall, which is precisely the
+        # single-reference wall this function exists to prevent.
+        splices: List[Tuple[int, int, float, Tuple[float, float]]] = []
         for ti, ring in enumerate(rings):
             # nearest existing vertex
             d_vert = np.hypot(ring[:, 0] - px, ring[:, 1] - py)
@@ -569,19 +620,23 @@ def conform_boundaries(
             ok = (t > margin) & (t < 1.0 - margin) & (d_seg <= tol)
             if ok.any():
                 idx = int(np.flatnonzero(ok)[np.argmin(d_seg[ok])])
+                coord = (float(foot_x[idx]), float(foot_y[idx]))
+                splices.append((ti, idx, float(t[idx]), coord))
                 if best is None or d_seg[idx] < best[0]:
-                    best = (float(d_seg[idx]), "splice", ti, idx, float(t[idx]),
-                            (float(foot_x[idx]), float(foot_y[idx])))
+                    best = (float(d_seg[idx]), "splice", ti, idx, float(t[idx]), coord)
 
         if best is None:
             continue
-        _dist, kind, ti, idx, t, coord = best
+        _dist, kind, _ti, _idx, _t, coord = best
         subst[(px, py)] = coord
         if kind == "weld":
             welded += 1
         else:
-            inserts.setdefault(ti, {}).setdefault(idx, []).append((t, coord))
             spliced += 1
+        # The foot is collinear with the edge it splits, so each insertion leaves
+        # that target's area unchanged however many rings the point lands on.
+        for ti, idx, t_at, foot in splices:
+            inserts.setdefault(ti, {}).setdefault(idx, []).append((t_at, foot))
 
     # Rebuild the target rings that gained vertices.
     moved_area = 0.0
