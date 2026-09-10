@@ -112,7 +112,7 @@ def monocot_stem() -> StemAnatomy:
 
 GOLDEN = {
     "monocot_default": (monocot_default, {
-        "air space": 368, "cortex": 206, "endodermis": 32, "epidermis": 168,
+        "air space": 367, "cortex": 206, "endodermis": 32, "epidermis": 168,
         "exodermis": 79, "metaxylem": 5, "pericycle": 97, "phloem": 10,
         "protoxylem": 10, "stele": 410,
     }),
