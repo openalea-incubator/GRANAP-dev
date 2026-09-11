@@ -47,6 +47,26 @@ def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
         title="Shift", description=f"Shift of the {label} cells from 0 to 1"))
     fields["order"] = (int, Field(default=order, ge=0,
         title="Order", description=f"Order of the {label} cells"))
+    fields["n_points"] = (Optional[int], Field(default=None, ge=3,
+        title="Cell Border Points",
+        description=(f"Voronoi seed points per {label} cell's border ellipse "
+                      "(CellGenerator.cell_border). Raising it rounds the cell "
+                      "(more seeds tracking the ellipse more closely -> pinched "
+                      "point-contacts instead of flat shared walls), at the cost "
+                      "of more seeds and slower tessellation. Unset (default) "
+                      "reproduces the historical fixed rule: 15 points for an "
+                      "anisotropic cell (cell_width != cell_diameter), 10 for an "
+                      "isotropic one.")))
+    fields["protect_shape"] = (bool, Field(default=False,
+        title="Protect Shape",
+        description=(f"Keep every boundary vertex of a fused {label} cell "
+                      "instead of collapsing it to one vertex per neighbour-group "
+                      "junction (CellGenerator.simplify_cells). Needed for "
+                      "n_points to have a visible rounding effect -- "
+                      "simplification otherwise discards the extra border seeds' "
+                      "vertices right after tessellation. Costs more vertices "
+                      "per cell in every geometry export (AnatomyWriter/network) "
+                      "for this layer's cells.")))
     return create_model(clsname, __base__=BaseParams, **fields)
 
 
@@ -706,8 +726,17 @@ class CentralCylinderParams(BaseParams):
     cell_diameter   : float = Field(default=0.02,  ge=0.00001, title = "Cell Diameter", description = "Diameter of the central cylinder cells")
     layer_thickness : float = Field(default=0.43,  ge=0.00001, title = "Layer Thickness", description = "Thickness of the central cylinder layers")
     layer_length    : float = Field(default=1.05,  ge=0.00001, title = "Layer Length", description = "Length of the central cylinder layers")
-    vascular_width  : float = Field(default=0.15,  ge=0.00001, title = "Vascular Width", description = "Width of the vascular bundles")
-    vascular_height : float = Field(default=0.2,   ge=0.00001, title = "Vascular Height", description = "Height of the vascular bundles")
+    # width > height so the vascular ellipse's major axis starts tangential
+    # (corner-to-corner) before vascular_angle rotates it -- ellipse_to_polygon
+    # scales a unit circle by (rx=width/2, ry=height/2) *before* rotating, so
+    # whichever of the two is larger decides where the major axis starts; a
+    # width < height default (as before) makes the major axis start radial
+    # (adaxial-abaxial), and rotating by a modest angle (0-30 deg) then only
+    # tilts that already-vertical axis instead of reorienting it. Matches the
+    # width>height convention example/needle/pinus_pinaster.py already uses.
+    vascular_width  : float = Field(default=0.2,   ge=0.00001, title = "Vascular Width", description = "Width of the vascular bundles")
+    vascular_height : float = Field(default=0.15,  ge=0.00001, title = "Vascular Height", description = "Height of the vascular bundles")
+    vascular_angle  : float = Field(default=20, title = "Vascular Angle", description = "Explicit rotation (degrees) for the vascular ellipses; None auto-detects orientation from the local polygon shape. Must not be exactly 90 (or 270): at that singular angle vascular_elements_in_ellipses's sin_a<0 polarity guard has sin_a~=0 rather than a clear sign, and can leave phloem on the adaxial side of one bundle.")
 
 
 class TransfusionTissueParams(BaseParams):
@@ -717,6 +746,11 @@ class TransfusionTissueParams(BaseParams):
     transfusion_tracheids_ratio : float = Field(default=0.5,  ge=0.0, title = "Transfusion Tracheids Ratio", description = "Ratio of transfusion tracheids to parenchyma cells")
     n_layers                    : int   = Field(default=2,    ge=1, title = "Number of Layers", description = "Number of transfusion tissue layers")
     transfusion_type            : bool  = Field(default=False, title = "Transfusion Type", description = "If True, differentiate into tracheids and parenchyma during tessellation using type-specific cell radii")
+    pack_circles                : bool  = Field(default=False, title = "Pack Circles", description = "If True, fill the transfusion zone by circle-packing (irregular, densely-packed cells) instead of one row of ring cells per layer. Uses diameter_max/proportion below instead of tracheids_diameter/parenchyma_diameter.")
+    diameter_max                : float = Field(default=0.05, ge=0.00001, title = "Max Cell Diameter", description = "Target circle diameter for packed transfusion cells (only used when pack_circles is True)")
+    proportion                  : float = Field(default=0.6,  ge=0.0, le=1.0, title = "Fill Proportion", description = "Target packed area fraction of the transfusion zone (only used when pack_circles is True)")
+    bridge_radius                : Optional[float] = Field(default=None, ge=0.0, title = "Bridge Radius", description = "Max boundary-to-boundary gap for a transfusion-parenchyma network bridge across an intervening tracheid (None falls back to parenchyma_diameter)")
+    bridge_max_links             : int   = Field(default=4, ge=0, title = "Bridge Max Links", description = "Fan-out cap: maximum number of accepted transfusion-tissue network bridge paths per source AND per target cell (shortest gaps preferred). Independent of node sharing -- several accepted paths that cross the same tracheid still reuse that tracheid's one virtual node")
 
 
 class XylemParams(BaseParams):
@@ -745,16 +779,24 @@ class StrasburgerCellsParams(BaseParams):
 
 
 class ResinDuctParams(BaseParams):
-    name         : str   = "resin_duct"
-    diameter     : float = Field(default=0.1,  ge=0.00001, title = "Diameter", description = "Diameter of the resin duct")
-    n_files      : int   = Field(default=3,    ge=1, title = "Number of Resin Ducts", description = "Number of resin ducts to generate")
-    cell_diameter: float = Field(default=0.02, ge=0.00001, title = "Cell Diameter", description = "Diameter of the resin duct cells")
+    name                 : str   = "resin_duct"
+    n_files              : int   = Field(default=3,     ge=1,       title = "Number of Resin Ducts", description = "Number of resin ducts to generate")
+    lumen_diameter       : float = Field(default=0.037, ge=0.00001, title = "Lumen Diameter", description = "Diameter of the open central lumen (canal) -- a direct measurement; the canal is built at this size")
+    cell_diameter        : float = Field(default=0.02,  ge=0.00001, title = "Epithelium Cell Diameter", description = "Radial (ring-thickness) size of the epithelium cells -- the ring directly bordering the lumen")
+    cell_width           : float = Field(default=0,     ge=0.0,     title = "Epithelium Cell Width", description = "Tangential (along-the-ring) size of the epithelium cells; 0 = isotropic, falls back to cell_diameter")
+    sheath_cell_diameter : float = Field(default=0.02,  ge=0.00001, title = "Sheath Cell Diameter", description = "Radial (ring-thickness) size of the sheath cells -- the outer ring surrounding the epithelium")
+    sheath_cell_width    : float = Field(default=0,     ge=0.0,     title = "Sheath Cell Width", description = "Tangential (along-the-ring) size of the sheath cells; 0 = isotropic, falls back to sheath_cell_diameter")
+    positions            : List[Tuple[float, float]] = Field(default_factory=list, title = "Duct Positions", description = "Explicit placement: one duct per (x, y) point in the model frame (the same un-recentred frame the layer polygons live in), each sized by THIS param block. The most direct placement mode -- no bearing/wedge conversion -- so it is the right choice for a duct whose position was measured directly (e.g. digitised from a micrograph). Takes priority over angles when both are given on the same block. n_files is ignored for a block that sets positions.")
+    angles               : List[float] = Field(default_factory=list, title = "Duct Angles", description = "Explicit placement: one duct per polar angle (degrees, NeedleAnatomy.pole_and_corner_angles' convention -- e.g. the two corners and the abaxial pole), each sized by THIS param block, converted to a target point and seated the same way as positions. Empty (default, with positions also empty) places n_files ducts at fixed pizza-slice positions instead. Give several resin_duct blocks to mix duct sizes across chosen positions/bearings; n_files is ignored for a block that sets angles.")
+    wedge                : float = Field(default=10.0, gt=0, le=180, title = "Duct Wedge Half-Width", description = "positions/angles only: half-width (degrees) used solely by the point-seating's own fallback search, when the requested point/bearing cannot hold the duct anywhere in the home zone (rare -- see NeedleAnatomy._duct_zone_data). Has no effect on normal seating, which is by exact point, not by wedge.")
 
 
 class NeedleInterCellularSpacesParams(BaseParams):
     name      : str             = "inter_cellular_spaces"
     tissue    : List[str]       = Field(default=["mesophyll", "endodermis"], title="Tissue", description="One or more tissue names to apply intercellular spaces to. Adjacent tissues in the list will have spaces generated at their shared boundary.")
     smoothness: Union[float, List[float]] = Field(default=[0.01, 0.01], title="Smoothness", description="Smoothness per tissue (0-1). Provide a single float applied to all tissues, or a list with one value per tissue.")
+    slit_width: Union[float, List[float]] = Field(default=0.0, title="Slit Width", description="tissue='palisade' only: absolute width (mm) of the thin, full-height air slit carved across every slit_every-th wall between angularly-adjacent cells; 0 disables. Provide a single float applied to all tissues, or a list with one value per tissue.")
+    slit_every: Union[int, List[int]] = Field(default=0, title="Slit Every", description="tissue='palisade' only: carve a slit on every Nth wall between angularly-adjacent cells (e.g. 2 = one slit per pair of cells); values below 2 disable slits. Provide a single int applied to all tissues, or a list with one value per tissue.")
 
     @model_validator(mode="after")
     def _check_smoothness_length(self) -> "NeedleInterCellularSpacesParams":
@@ -764,6 +806,16 @@ class NeedleInterCellularSpacesParams(BaseParams):
                     f"smoothness has {len(self.smoothness)} value(s) but tissue has {len(self.tissue)} entry/entries — "
                     "lengths must match, or provide a single float applied to all tissues."
                 )
+        if isinstance(self.slit_width, list) and len(self.slit_width) != len(self.tissue):
+            raise ValueError(
+                f"slit_width has {len(self.slit_width)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                "lengths must match, or provide a single float applied to all tissues."
+            )
+        if isinstance(self.slit_every, list) and len(self.slit_every) != len(self.tissue):
+            raise ValueError(
+                f"slit_every has {len(self.slit_every)} value(s) but tissue has {len(self.tissue)} entry/entries — "
+                "lengths must match, or provide a single int applied to all tissues."
+            )
         return self
 
 
@@ -777,10 +829,17 @@ class NeedleAerenchymaParams(BaseParams):
 
 class StomataParams(BaseParams):
     name       : str   = "stomata"
-    n_files    : int   = Field(default=4,     ge=1, title = "Number of Stomata", description = "Number of stomata to generate")
+    n_files    : int   = Field(default=4,     ge=1, title = "Number of Stomata", description = "Number of stomata to generate, evenly spread around the epidermis. Ignored if n_adaxial/n_abaxial are set.")
     width      : float = Field(default=0.025, ge=0.00001, title = "Width", description = "Width of the stomata")
     depth      : float = Field(default=0.06,  ge=0.00001, title = "Depth", description = "Depth of the stomata")
     sub_chamber: float = Field(default=0.04,  ge=0.00001, title = "Sub Chamber", description = "Sub chamber of the stomata")
+    n_adaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (adaxial)", description = "Number of stomata on the upper (adaxial) side. If set together with n_abaxial, overrides n_files with a directional, corner-excluded placement.")
+    n_abaxial  : Optional[int] = Field(default=None, ge=0, title = "Stomata (abaxial)", description = "Number of stomata on the lower (abaxial) side. If set together with n_adaxial, overrides n_files with a directional, corner-excluded placement.")
+    edge_margin: float = Field(default=0.12, ge=0.0, le=0.5, title = "Edge Margin", description = "Fraction of each adaxial/abaxial epidermis run skipped at both ends (where the two sides meet, i.e. the corners) when n_adaxial/n_abaxial are set.")
+    chamber_clearance: float = Field(default=0.0, ge=0.0, title = "Chamber Clearance", description = "Radius (multiples of the hypodermis cell diameter) around each sub-stomatal chamber within which the innermost hypodermis cell seed is deleted before tessellation, so palisade mesophyll can extend up to the chamber. 0 = feature off (no cells removed).")
+    sunken     : bool  = Field(default=True, title = "Sunken Stomata", description = "Split each guard cell into its outer rectangle and the ellipse below it: the ellipse stays the guard cell (sunk into a pit) and the rectangle becomes an epidermal cell arching over it, as in conifer needles. Default True: needle stomata are sunken by default, matching gymnosperm anatomy. False = one fused guard cell flush with the surface.")
+    guard_cell_diameter: Optional[float] = Field(default=None, gt=0, title = "Guard Cell Diameter", description = "Base diameter used to size each guard cell's ellipse (gc_rx = gc_ry = diameter / 2). Defaults to the epidermis cell's own width when unset, so existing configs are unchanged.")
+    guard_cell_aspect: float = Field(default=0.5, gt=0, le=1.0, title = "Guard Cell Aspect", description = "Vertical-to-horizontal radius ratio of each guard cell's ellipse (effective vertical radius = guard_cell_diameter/2 * guard_cell_aspect). Lower values flatten/sink the guard cell more; 0.5 reproduces the previous hardcoded shape.")
 
 
 NeedleEndodermisParams = _layer_params("NeedleEndodermisParams", "endodermis", "endodermal", cell_diameter=0.02,   cell_width=0.05,  n_layers=1, shift=0.5, order=3)

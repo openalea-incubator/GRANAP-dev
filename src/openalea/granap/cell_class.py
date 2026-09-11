@@ -7,7 +7,8 @@ class Cell:
     def __init__(self, x: float, y: float, diameter: float, width: float=0, height: float=0,
                 type: str="", id_cell: int=-1, id_layer: int=-1, id_group: int=-1,
                 angle: float=None, radius: float=None, area: float=None, polygon: Polygon=None, axis: float=None,
-                protect_topology: bool = False, protect_shape: bool = False, track_id=None):
+                protect_topology: bool = False, protect_shape: bool = False, track_id=None,
+                cgroup: int = 0):
 
         self.x = x
         self.y = y
@@ -18,6 +19,11 @@ class Cell:
         self.id_cell = id_cell
         self.id_layer = id_layer
         self.id_group = id_group
+        # MECHA cgroup integer (see anatomy_writer.CGROUP_MAP) -- 0 means
+        # "unset", in which case NetworkExporter.export resolves one from
+        # ``type`` at export time.  Explicit non-zero values (e.g. the
+        # Phase-9 transfusion bridge cells) always win.
+        self.cgroup = cgroup
         # Persistent developmental-series id (see ROOT_SERIES_PLAN): a tracked xylem
         # vessel keeps the same track_id across the apex->collet series; None for
         # everything untracked.  Must survive Voronoi grouping and reach the gdf.
@@ -83,6 +89,7 @@ class Cell:
                 "area": self.area,
                 "protect_topology": self.protect_topology,
                 "protect_shape": self.protect_shape,
+                "cgroup": self.cgroup,
                 }
     
     def smooth(self, smooth_factor: float = 0.01):

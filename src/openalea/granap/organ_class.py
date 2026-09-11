@@ -8,7 +8,7 @@ import geopandas as gpd
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Point, Polygon, MultiPolygon
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 from collections import defaultdict
@@ -60,6 +60,15 @@ class Organ(AbstractNetwork, ABC):
     #: are flagged ``protect_topology`` so NetworkExporter wires them as dedicated
     #: wall_air network nodes.  False for root/stem; leaves override this True.
     PROTECT_AIR_TOPOLOGY: bool = False
+
+    #: Cell types that must NEVER carry a symplastic (plasmodesmata) edge,
+    #: even when they legitimately flank a real two-cell wall -- apoplastic-only
+    #: pathways (e.g. a dead conduit with no living cytoplasm to connect
+    #: through). Enforced generically in ``NetworkExporter.export``'s Phase-6
+    #: symplastic block; membrane/wall edges are always left untouched. Empty
+    #: for every organ by default; ``NeedleAnatomy`` sets
+    #: ``("transfusion tracheid",)``.
+    APOPLASTIC_ONLY_TYPES: tuple = ()
 
     def __init__(self, randomness: float = 1.0, seed: Optional[int] = None):
         """
@@ -195,9 +204,10 @@ class Organ(AbstractNetwork, ABC):
         """Build layer polygons from current layer configuration."""
         layers_polygons = []
         layer_array = self.layer_manager.expand_layers()
-        
+
         polygon = self.generate_base_shape()
-        
+        base_center = polygon.centroid
+
         for i_layer, layer in enumerate(layer_array):
             if i_layer == 0:
                 # Add outside layer
@@ -216,10 +226,12 @@ class Organ(AbstractNetwork, ABC):
             # corner-cuts slightly *past* the requested buffer distance, so a high
             # factor applied once per peeled ring accumulates and shrinks the
             # innermost region (the stele) well below its nominal thickness.
-            polygon = GeometryProcessor.buffer_polygon(
+            polygon = self._offset_layer_polygon(
                 polygon,
                 -space_increment - layer["cell_diameter"] / 2,
-                smooth_factor=self.LAYER_SMOOTH_FACTOR,
+                layer,
+                self.LAYER_SMOOTH_FACTOR,
+                center=base_center,
             )
 
             space_increment = layer["cell_diameter"] / 2
@@ -231,6 +243,8 @@ class Organ(AbstractNetwork, ABC):
                 id_layer=i_layer + 1,
                 cell_width=layer["cell_width"],
                 shift=layer["shift"],
+                n_points=layer.get("n_points"),
+                protect_shape=layer.get("protect_shape", False),
             ))
         
         # Add central layers (vascular, parenchyma, etc.)
@@ -240,9 +254,22 @@ class Organ(AbstractNetwork, ABC):
 
         # Optional reshape: let subclasses morph layer polygons
         layers_polygons = self.reshape_layers(layers_polygons)
-        
+
         return layers_polygons
-    
+
+    def _offset_layer_polygon(self, polygon: Polygon, distance: float, layer: dict,
+                              smooth_factor: float, center: Optional[Point] = None) -> Polygon:
+        """
+        Shrink/expand one ring layer's polygon by ``distance``.
+
+        Default implementation: a plain uniform buffer, identical to the
+        previous inline call — every organ keeps today's behavior unchanged.
+        Subclasses (e.g. ``NeedleAnatomy``) may override to offset by a
+        per-angle distance instead (see ``GeometryProcessor.variable_buffer_polygon``),
+        driven by an optional ``"thickness_profile"`` entry in ``layer``.
+        """
+        return GeometryProcessor.buffer_polygon(polygon, distance, smooth_factor=smooth_factor)
+
     def generate_cells(self) -> gpd.GeoDataFrame:
         """
         Generate cell geometries using Voronoi tessellation.
@@ -584,7 +611,9 @@ class Organ(AbstractNetwork, ABC):
         """Return the recipe of organ-specific (post-fill) tissues.
 
         Default: empty (root organs have none).  Needle overrides it with resin
-        ducts + stomata.
+        ducts, transfusion tissue, the corner-parenchyma retag, stomata and
+        layer-count zoning -- in that order, which is load-bearing (see
+        ``NeedleAnatomy._organ_recipe``).
         """
         return TissueRecipe()
 
@@ -1265,7 +1294,34 @@ class Organ(AbstractNetwork, ABC):
         return plot_tissues(self, ax=ax, show=show, labels=labels,
                             show_effective=show_effective, fuse=fuse)
 
-    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None) -> lil_matrix:
+    def network_bridge_specs(self) -> List[Dict[str, Any]]:
+        """Extra plasmodesmata/membrane network bridges beyond real shared walls.
+
+        Each spec describes a NODE bridge (see ``NetworkExporter.export``'s
+        Phase 9, and the reference diagram
+        ``example/needle/Transfusion_tissue_network.png``): for a
+        ``source_types`` cell A close to a ``target_types`` cell B with only
+        one or more ``blocker_types`` cells geometrically between them (A-B
+        straight line covered by A U B U blockers), a virtual NODE V_T is
+        created per distinct blocker T actually crossed -- standing in for a
+        real, out-of-plane third cell -- and chained
+        ``A <-> V_T1 <-> ... <-> V_Tn <-> B`` via ``plasmodesmata`` edges,
+        with ``membrane`` edges from the two end nodes to the EXISTING wall
+        each already shares with its neighbouring blocker
+        (``wall(A, T1)``/``wall(Tn, B)``). No new wall or junction is ever
+        created, and the virtual node carries no polygon -- just a position
+        (the blocker's own centroid) and a nominal area. One virtual node is
+        shared per blocker across every path that crosses it. A spec dict
+        has the keys ``name``, ``source_types``, ``target_types``,
+        ``blocker_types``, ``bridge_type``, ``radius`` and ``max_links``
+        (a fan-out cap: at most this many accepted bridge paths per source
+        AND per target cell, shortest gaps preferred -- independent of node
+        sharing); see ``NeedleAnatomy.network_bridge_specs`` for a concrete
+        example. Default: no bridges for any organ.
+        """
+        return []
+
+    def export_to_adjencymatrix(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> lil_matrix:
         """
         Build the hydraulic network from cell geometry and return
         the sparse adjacency matrix.
@@ -1274,6 +1330,10 @@ class Organ(AbstractNetwork, ABC):
         that distance of each other but aren't directly adjacent (see
         ``NetworkExporter.export``); ``None`` uses its own default.
 
+        ``**exporter_kwargs`` (e.g. ``bridges: bool``, ``bridge_radius:
+        float``) are forwarded to ``NetworkExporter.export`` — see that
+        method's docstring for the full set.
+
         Returns
         -------
         lil_matrix
@@ -1281,18 +1341,18 @@ class Organ(AbstractNetwork, ABC):
         """
         # Ensure cells are generated before building the network
         self.generate_cells()
-        return super().export_to_adjencymatrix(air_link_radius=air_link_radius)
+        return super().export_to_adjencymatrix(air_link_radius=air_link_radius, **exporter_kwargs)
 
     # ------------------------------------------------------------------
     # Network construction from Voronoi cell geometry
     # ------------------------------------------------------------------
-    def _build_anatnetwork(self, air_link_radius: Optional[float] = None) -> None:
+    def _build_anatnetwork(self, air_link_radius: Optional[float] = None, **exporter_kwargs) -> None:
         """
         Populate ``self.graph`` from the cell GeoDataFrame.
         Delegated to AnatomyWriter's NetworkExporter.
         """
         from openalea.granap.anatomy_writer import NetworkExporter
-        NetworkExporter(self).export(self, air_link_radius=air_link_radius)
+        NetworkExporter(self).export(self, air_link_radius=air_link_radius, **exporter_kwargs)
 
     
     def get_statistics(self) -> Dict[str, Any]:

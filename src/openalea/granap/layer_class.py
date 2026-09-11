@@ -31,6 +31,20 @@ class LayerPolygon:
     tt_diameter: float = 0.0
     tp_diameter: float = 0.0
     p_tt: float = 0.0
+    # Voronoi seed points per cell-border ellipse (CellGenerator.cell_border).
+    # None (default) reproduces the historical fixed rule there (15 points
+    # for an anisotropic cell, 10 for an isotropic one) -- see cell_border's
+    # own docstring. Set to round a ring's cells off more (more seeds
+    # tracking the ellipse more closely -> pinched point-contacts instead of
+    # flat shared walls), at the cost of more seeds and slower tessellation;
+    # see example/needle/pinus_nigra.py's endodermis for the motivating case.
+    n_points: Optional[int] = None
+    # Keep every boundary vertex of a fused cell instead of collapsing it to
+    # one vertex per neighbour-group junction (CellGenerator.simplify_cells).
+    # False (default) reproduces historical behaviour for every existing
+    # caller. Needed for n_points (above) to have a visible rounding effect --
+    # see example/needle/pinus_nigra.py's endodermis for the motivating case.
+    protect_shape: bool = False
 
     # ------------------------------------------------------------------
     # Backward-compatible dict-style access

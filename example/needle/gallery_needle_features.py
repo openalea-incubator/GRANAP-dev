@@ -84,11 +84,39 @@ def plot_air_link_network(organ, title, show=True):
     return fig
 
 
-def main(show=False):
+def build_gallery_needle_data() -> OrganInputData:
+    """Build the ``OrganInputData`` for the feature-showcase needle.
+    """
+    # NeedlePlantTypeParams defaults (OrganInputData.for_needle() doesn't
+    # override width/thickness), needed below to locate the corners.
+    WIDTH, THICKNESS = 1.8, 1.1
+    _, _, CORNER_POS, CORNER_NEG = NeedleAnatomy.pole_and_corner_angles(WIDTH, THICKNESS)
+
     # Configure the input data, then build once.
     data = OrganInputData.for_needle()
     data.set_value("resin_duct", "n_files", 2)
+    data.set_value("resin_duct", "sheath_cell_diameter", 0.015)
     data.set_value("stomata", "n_files", 10)
+    data.set_value("central_cylinder", "vascular_angle", 20)
+    data.set_value("transfusion_tissue", "pack_circles", True)
+    data.set_value("transfusion_tissue", "proportion", 0.85)
+    data.set_value("transfusion_tissue", "parenchyma_diameter", 0.045)
+    data.set_value("transfusion_tissue", "tracheids_diameter", 0.022)
+    data.set_value("transfusion_tissue", "transfusion_tracheids_ratio", 1.5)
+
+    # Append with hypodermis corner
+    data.params.append({
+        "name": "hypodermis_corner", "cell_diameter": 0.0225, "n_layers": 2, "order": 5.1,
+        "thickness_profile": NeedleAnatomy.corner_bump_profile(
+            [(CORNER_POS, 10.0, 1.0), (CORNER_NEG, 10.0, 1.0)], floor=0.70),
+        "zone_angles": {"mode": "wedge", "centers": [CORNER_POS, CORNER_NEG],
+                        "half_width": 4.0},
+    })
+    return data
+
+
+def main(show=False):
+    data = build_gallery_needle_data()
     needle = NeedleAnatomy(data)
 
     needle.plot_layers(show=show, title=f"Needle Layers")

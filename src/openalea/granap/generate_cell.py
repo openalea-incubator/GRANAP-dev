@@ -59,26 +59,40 @@ class CellGenerator:
         return cells_coords
     
     @staticmethod
-    def cell_border(cell_coords: np.ndarray, cell_height: float, 
-                   cell_width: float = 0) -> List[np.ndarray]:
+    def cell_border(cell_coords: np.ndarray, cell_height: float,
+                   cell_width: float = 0, n_points: Optional[int] = None) -> List[np.ndarray]:
         """
         Generate border points for elliptical cells.
-        
+
+        Each cell is drawn as an ellipse of ``n_points`` Voronoi seeds
+        sharing one ``id_group``; seeds of a group fuse into one cell after
+        tessellation, so ``n_points`` controls how closely the fused cell
+        polygon tracks the ellipse -- more points = a rounder cell with
+        pinched point-contacts rather than flat shared walls (see
+        ``LayerPolygon.n_points`` / ``example/needle/pinus_nigra.py``'s
+        endodermis, the case that motivated making this configurable).
+
         Args:
             cell_coords: Array of cell center coordinates
             cell_height: Height of cells
             cell_width: Width of cells (0 = use height)
-        
+            n_points: Seed count per cell border. None (default) reproduces
+                the historical fixed rule: 15 for an anisotropic cell
+                (``cell_height != cell_width``), 10 for an isotropic one --
+                every existing caller that doesn't pass this explicitly
+                keeps exactly that behaviour.
+
         Returns:
             List of arrays, each containing border points for one cell
         """
         if len(cell_coords) == 0:
             return []
-        
+
         major_axis = cell_height
         minor_axis = cell_width if cell_width != 0 else cell_height
 
-        n_points = 15 if cell_height != cell_width else 10
+        if n_points is None:
+            n_points = 15 if cell_height != cell_width else 10
 
         # Vectorised orientation: next/prev neighbours via array roll
         next_coords = np.roll(cell_coords, -1, axis=0)
@@ -191,12 +205,14 @@ class CellGenerator:
                     cells_coords,
                     layer["cell_width"] * 0.7,
                     layer["cell_diameter"] * 0.7,
+                    n_points=layer.get("n_points"),
                 )
             else:
                 layer_cell_borders = CellGenerator.cell_border(
                     cells_coords,
                     layer["cell_diameter"] * 0.7,
                     layer["cell_width"] * 0.7,
+                    n_points=layer.get("n_points"),
                 )
 
             # The next-inner layer polygon is loop-invariant — fetch and prepare
@@ -224,6 +240,7 @@ class CellGenerator:
                         radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                         (cell_coord[1] - center.y)**2),
                         area=np.pi * (layer["cell_diameter"] / 2)**2,
+                        protect_shape=layer.get("protect_shape", False),
                     )
                     all_cells.add_cell(new_cell)
                     id_cell += 1
@@ -254,6 +271,7 @@ class CellGenerator:
                             radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                             (cell_coord[1] - center.y)**2),
                             area=np.pi * (layer["cell_diameter"] / 2)**2,
+                            protect_shape=layer.get("protect_shape", False),
                         )
                         all_cells.add_cell(new_cell)
                         id_cell += 1
@@ -356,6 +374,20 @@ class CellGenerator:
 
     @staticmethod
     def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
+        """Jitter every seed slightly, then tessellate.
+
+        The jitter is one positional block indexed by list order, so a seed's
+        offset depends on how many seeds precede it and inserting or removing one
+        seed perturbs every later cell.  Deriving it from each seed's own position
+        instead was tried and reverted: it changed no golden census (so it fixed
+        nothing measurable) while re-rolling the jitter realisation, which
+        ``CellSetOrgan``'s graft could not survive at the time -- it held only at
+        ``seed=0`` and produced 22-49 interior border walls at seeds 1-5 even on
+        unmodified code.  That graft fragility has since been fixed (see
+        ``test_no_interior_border_walls_at_any_seed``), so the blocker is gone;
+        revisiting this now costs a deliberate golden refreeze rather than a
+        correctness regression.
+        """
         cells = all_cells.cells
         n = len(cells)
         if n == 0:
@@ -506,7 +538,9 @@ class CellGenerator:
             vert_global_idx[cid] = indices
 
         if not all_raw_verts:
-            return {}, {}, {}, set()
+            # 5-tuple, like every other return path -- both call sites
+            # (simplify_cells, NetworkExporter.export) unpack five.
+            return {}, {}, {}, set(), set()
 
         coords_arr = np.array(all_raw_verts)
         kd_tree = cKDTree(coords_arr)
@@ -744,11 +778,14 @@ class CellGenerator:
         width = stomata_setting["width"]
         depth = stomata_setting["depth"]
         sub_chamber = stomata_setting["sub_chamber"]
+        sunken = bool(stomata_setting.get("sunken", False))
 
         # get unique id_group of the cells
         id_groups = [cell.id_group for cell in cells]
         id_groups = np.unique(id_groups)
         cell = cells[0] # template cell
+        guard_cell_diameter = stomata_setting.get("guard_cell_diameter") or cell.width
+        guard_cell_aspect = stomata_setting.get("guard_cell_aspect", 0.5)
 
         triplet = CellManager()
         triplet.cells = cells
@@ -792,14 +829,14 @@ class CellGenerator:
             return local_to_global_poly(pts)
     
         # Create guard cells
-        gc_rx = cell.width / 2
-        gc_ry = cell.width / 2
+        gc_rx = guard_cell_diameter / 2
+        gc_ry = guard_cell_diameter / 2
         gc1_x = -width / 2
         gc2_x = width / 2
         gc_y = depth
-    
-        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry/2)
-        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry/2)
+
+        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
+        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
     
         rect_w = cell.width * 0.6
         rect_h = depth
@@ -807,39 +844,54 @@ class CellGenerator:
     
         guard_cell_1_rect = create_local_rectangle(gc1_x - 0.2 * cell.width, rect_y, rect_w, rect_h)
         guard_cell_2_rect = create_local_rectangle(gc2_x + 0.2 * cell.width, rect_y, rect_w, rect_h)
-    
-        guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
-        guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
-    
-        guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
-        guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
-    
+
+        caps: list = []
+        if sunken:
+            # Sunken stomata: guard cells sit deeper in a pit, capped by
+            # epidermal cells (the rectangles) arching over them -- so the
+            # guard cell itself is the ellipse only, and the rectangles are
+            # returned separately as epidermis caps.
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_ellipse, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_ellipse, 0, 0.5)
+            caps = [guard_cell_1_rect, guard_cell_2_rect]
+        else:
+            guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
+            guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
+
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
+
         # Create sub-stomatal chamber
         chamber_rx = width
         chamber_ry = sub_chamber
         chamber_y = gc_y
         sub_stomatal_chamber = create_local_ellipse(0, chamber_y, chamber_rx * 0.75, chamber_ry)
-    
+
         # Create pore
         pore_w = width
         if pore_w < 0:
             pore_w = 0.005  # fallback
         pore_h = chamber_y
         pore_poly = create_local_rectangle(0, pore_h / 2, pore_w, pore_h)
-    
-        # Combine geometries
-        spacing_poly = pore_poly.difference(unary_union([guard_cell_1_poly, guard_cell_2_poly]))
-        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, guard_cell_1_poly, guard_cell_2_poly]))
-    
+
+        # Combine geometries. Difference against the guard cells *and* the caps
+        # (when sunken) so that, once the rectangles leave the guard-cell
+        # union, the pore/chamber don't balloon upward into the space the
+        # rectangles vacated -- the pore must stay the narrow antechamber
+        # between the two caps.
+        occupied = unary_union([guard_cell_1_poly, guard_cell_2_poly, *caps])
+        spacing_poly = pore_poly.difference(occupied)
+        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, occupied]))
+
         if hasattr(sub_stomatal_chamber, 'geoms'):
             sub_stomatal_chamber = sub_stomatal_chamber.geoms[0]
-    
-        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly])
-    
+
+        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, *caps])
+
         if debug:
             print(carve_poly.area)
 
-        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly
+        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, caps
 
     
     
