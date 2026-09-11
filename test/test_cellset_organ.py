@@ -335,18 +335,20 @@ def test_a_broken_interface_is_not_silent(organ):
     assert rep["interior_border_walls"] == {"stele": 1}
 
 
-def test_overshoot_zero_leaves_real_rim_gaps():
-    """``overshoot=0`` is a geometric failure, not a welding one.
-
-    Without growing the donor past the region rim, the tessellation's outer ring
-    is straightened into chords that cut the corners of the wiggly real outline.
-    No amount of vertex welding can close that, which is why the donor is grown
-    and clipped back.  Coverage is the robust signal (~0.994 on x86); the count
-    of resulting border walls is not, so it is deliberately not asserted here.
-    """
-    organ = CellSetOrgan(CELLSET, seed=SEED, overshoot=0.0)
-    organ.generate_cells()
-    assert organ.graft_report[0]["coverage"] < 0.999
+# There is deliberately no test asserting that ``overshoot=0`` *breaks*.
+#
+# Two attempts at one have now been removed, and both failed the same way: they
+# asserted a specific amount of brokenness, which turns out to be a property of
+# the platform rather than of the option.  On x86 ``overshoot=0`` gives coverage
+# 0.9941 and 3 interior border walls; on macOS/arm64 it tiles exactly (coverage
+# 1.0) and warns about nothing.  Rim coverage looked like the robust signal --
+# it is a gross ~0.6 % geometric quantity, not a last-bit tie -- and it was not.
+#
+# What matters is asserted elsewhere and holds everywhere: the *default* path
+# tiles the region exactly (``test_annulus_is_gone_and_region_is_tiled`` pins
+# coverage to 1.0), and a defect, whenever one occurs, is reported rather than
+# swallowed (``test_a_broken_interface_is_not_silent``, on injected data).
+# Why the overshoot exists is recorded on ``_OVERSHOOT`` in cellset_organ.py.
 
 
 # ---------------------------------------------------------------- export

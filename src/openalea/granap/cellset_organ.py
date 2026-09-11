@@ -100,6 +100,14 @@ _CORE_RADIUS_GUESS: float = 0.62
 # the donor past the rim and clipping back makes the coverage exact by
 # construction; _OVERSHOOT is added to the pericycle thickness as well, so the
 # band that survives the clip is the thickness that was asked for.
+#
+# How badly overshoot=0 fails is platform-dependent, so don't write a test that
+# pins it: on x86 it measures coverage 0.9941 with 3 interior border walls at
+# seed 0, while on macOS/arm64 the same build tiles exactly (coverage 1.0) and
+# reports no defect at all.  Where the straightened chords fall depends on which
+# outer-ring vertices become junctions, which is a discrete decision.  Growing
+# the donor makes the result exact by construction on every platform, which is
+# the point of doing it that way rather than tuning a tolerance.
 _OVERSHOOT: float = 0.19
 
 # Nominal pericycle thickness, as a fraction of the region radius.
@@ -739,13 +747,14 @@ class CellSetOrgan(Organ):
             warnings.warn(
                 "CellSetOrgan: the graft interface is not fully shared — "
                 + "; ".join(faults)
-                + ". This network is not physically sound. Measured causes, "
-                "on x86: overshoot=0 (leaves real rim gaps no welding can "
-                "close), donor_xylem_tag=None and n_vascular_peak>=3 (both "
+                + ". This network is not physically sound. Measured causes, at "
+                "seed 0 on x86: overshoot=0 (leaves real rim gaps no welding "
+                "can close), donor_xylem_tag=None and n_vascular_peak>=3 (both "
                 "pack the donor's vessels tighter than the stele can hold). "
-                "Which seeds and option sets trip this is platform-dependent — "
-                "it is an exact-tie effect — so treat the list as examples, "
-                "not an exhaustive set.",
+                "Treat that as examples, not an exhaustive set: which seeds and "
+                "options trip this varies by platform — overshoot=0 tiles "
+                "cleanly on macOS/arm64 — so the report, not the list, is what "
+                "tells you whether *your* section is sound.",
                 stacklevel=2,
             )
         return {
