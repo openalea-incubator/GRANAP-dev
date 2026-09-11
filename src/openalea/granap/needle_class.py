@@ -3,10 +3,12 @@ Needle anatomy implementation.
 """
 
 import dataclasses
+import warnings
 import numpy as np
 from typing import List, Dict, Any, Optional
-from shapely.geometry import Polygon, Point
-from shapely.ops import unary_union
+from shapely.geometry import Polygon, Point, LineString, MultiLineString, MultiPolygon, GeometryCollection
+from shapely.ops import unary_union, nearest_points
+from shapely.strtree import STRtree
 
 from openalea.granap.organ_class import Organ
 from openalea.granap.cell_class import Cell
@@ -16,8 +18,8 @@ from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.shapes import PolygonInterpolator
 from openalea.granap.input_data import OrganInputData
-from openalea.granap.special_tissues import place_resin_duct, place_stomata
-from openalea.granap.tissue_class import TissueRecipe
+from openalea.granap.special_tissues import place_resin_duct, place_stomata, seat_air_spaces
+from openalea.granap.tissue_class import TissueRecipe, fill_by_packing
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------
@@ -26,19 +28,136 @@ import matplotlib.pyplot as plt
 # Number of epidermis border-point cells to skip at the start of the boundary
 _STOMATA_SKIP_BORDER_PTS: int = 300
 
-# The mesophyll ring used for duct placement is the outer annulus whose inner
-# edge is 1.2× duct diameters from the mesophyll boundary.
+# A resin duct's home zone -- see _is_duct_home_layer -- and its subhypodermal
+# *preference* band within that zone are two different things. This factor
+# sizes the preference band only: the outer shell of the home zone, measured
+# inward from the home zone's own outer limit (normally the hypodermis's
+# inner edge), 1.2x a duct's own built diameter deep. A duct is tried there
+# first (real conifer ducts sit subhypodermally), but the home zone itself --
+# not this band -- is the hard constraint; see _duct_zone_data's escalating
+# search (_seat_duct).
 _DUCT_RING_BUFFER_FACTOR: float = 1.2
 
-# The parenchyma-ring polygon is obtained by shrinking the fitted ellipse
-# inward by this fraction of cell_diameter (prevents ring cells from sitting
-# on the exact ellipse edge).
-_DUCT_RING_INNER_SHRINK: float = 0.15
+# Small outward safety margin (as a fraction of the outermost ring's own
+# radial cell size) added beyond a duct's true built outer edge when
+# computing its carve mask -- clears that ring's cells' own bulge fully so
+# no hairline sliver of tissue is left uncut at the boundary.
+_DUCT_CARVE_MARGIN_FRACTION: float = 0.15
 
-# Fixed placement order for resin ducts within the 7 mesophyll slices.
-# Positions 3 and 6 are the edge positions (placed first, as in real anatomy);
-# the rest fill in around the ring in an evenly distributed pattern.
+# Fixed placement order for resin ducts within the 7 mesophyll slices. Only
+# used for 1 or 3+ slice-placed ducts now -- exactly 2 are corner-anchored
+# instead (see _duct_zone_data). Positions 3 and 6 used to be treated as "the
+# edge positions" for exactly this reason, but slice 3 is centred on 180 deg,
+# not on either of the needle's true corners (pinaster: 203.2/336.8 deg;
+# nigra: 206.9/333.1 deg) -- systematically ~23 deg off on the -x side. Kept
+# for the 1-/3+-duct fallback (no real config in this repo exercises it: both
+# pinaster and the gallery preset use n_files=2, which now takes the corner
+# path, and nigra places all 4 of its ducts by explicit angle) rather than
+# deleted, since a 3-duct config is a plausible future need.
 _DUCT_PLACEMENT_ORDER: list = [3, 6, 0, 2, 4, 1, 5]
+
+# A resin duct's home zone -- the tissue it may occupy -- is palisade plus
+# every mesophyll-family layer (plain "mesophyll" and any "mesophyll_*"
+# variant, e.g. the adaxial-only extra ring): palisade *is* palisade
+# mesophyll, biologically the same tissue family, so a duct may carve it same
+# as ordinary mesophyll. Hypodermis and endodermis are deliberately excluded
+# -- they are the two boundaries a duct must never touch (see
+# _duct_zone_data's zone construction, which additionally buffers the home
+# region away from both by their own cell_diameter).
+def _is_duct_home_layer(name: str) -> bool:
+    return name == "palisade" or name == "mesophyll" or name.startswith("mesophyll_")
+
+
+def _duct_assembly_radius(sizes: dict, built_diameter: float, host_cell_diameter: float) -> float:
+    """Unscaled radius of a duct's whole assembly -- built core (canal +
+    epithelium + sheath) plus the transition ring plus the carve safety
+    margin, all computed from the UNSCALED sizes (before any scale-to-fit).
+
+    This is the room a placement must guarantee before a duct can be seated
+    at its full, measured size. Shared by ``_build_duct`` (which needs it to
+    know what radius to fit) and by ``_duct_zone_data``'s position-based
+    seating (which needs it *before* calling ``_build_duct``, to shrink the
+    home zone into a region of centres that are guaranteed feasible -- see
+    ``_seat_duct_at_point``). Keeping one formula in one place means the two
+    can never drift out of sync with each other.
+    """
+    built_radius = built_diameter / 2
+    if host_cell_diameter > 0 and sizes["sheath_cell_diameter"] > 0:
+        unscaled_transition = float(np.sqrt(sizes["sheath_cell_diameter"] * host_cell_diameter))
+    else:
+        unscaled_transition = 0.0
+    outermost_unscaled = unscaled_transition if unscaled_transition > 0 else sizes["sheath_cell_diameter"]
+    carve_margin_unscaled = outermost_unscaled * _DUCT_CARVE_MARGIN_FRACTION / 2
+    return built_radius + unscaled_transition + carve_margin_unscaled
+
+
+# Stepwise half-widths (degrees) tried when a duct can't reach its full,
+# measured size on its requested bearing even after the home zone's band
+# preference is dropped (see _duct_zone_data._seat_duct, stage 3 of the
+# escalating fit search). Capped at 180/7 = 25.7 deg -- one legacy
+# _DUCT_PLACEMENT_ORDER slice's own half-width -- so a duct can drift no
+# further off its requested bearing than the old fixed pizza-slice scheme
+# ever allowed; only past this cap does a duct actually shrink
+# (_build_duct's proportional scale-to-fit, the true last resort).
+_DUCT_WEDGE_WIDEN_STEPS: tuple = (10.0, 15.0, 20.0, 180.0 / 7.0)
+
+# Default half-width (degrees) of the wedge an explicitly-placed duct
+# ("angles" on a resin_duct param dict) is fitted into. Per-duct override:
+# "wedge". Also the starting half-width for the corner-anchored default (see
+# _duct_zone_data) -- both are seated by the same escalating search
+# (_seat_duct).
+#
+# Deliberately much tighter than one _DUCT_PLACEMENT_ORDER slice (180/7 =
+# 25.7 deg): the whole point of naming an angle is to put the duct *there*,
+# and fit_inner_ellipse seats it at the widest inscribed circle of the wedge,
+# which inside a 25.7 deg wedge can drift a dozen degrees off the requested
+# bearing (a measured 15.5 deg duct landed at 3.3 deg). 10 deg keeps the
+# drift small while still leaving room to find a slot; _seat_duct widens it
+# in stages (_DUCT_WEDGE_WIDEN_STEPS) only if the duct can't reach full size
+# at this width.
+_DUCT_WEDGE_HALF_WIDTH: float = 10.0
+
+# Every duct's sheath ring gets an outer transition ring of host-tissue
+# ("mesophyll") cells, so a duct is always fully surrounded by mesophyll
+# rather than abutting the palisade/hypodermis it happens to sit next to.
+# Sized as the geometric mean of the sheath cell and the host cell (see
+# _build_duct), which doubles as the fix for the "radial sunburst" failure
+# mode vascular_bundle.py's _SHEATH_MIN_RATIO guards against -- a small ring
+# bordering coarse tissue directly and ballooning out to meet it.
+#
+# This used to be conditional on the host being _DUCT_SHEATH_MIN_RATIO = 4x
+# coarser than the sheath, on the reasoning that closely-matched sizes need
+# no filler. That left ducts in a fine-celled mesophyll (e.g.
+# example/needle/pinus_nigra.py, ratio 0.052/0.018 = 2.9) with their sheath
+# bordering palisade directly and its cells ballooning to ~2.7x their
+# intended area. The ring is now unconditional: where the sizes already
+# match, the geometric mean simply lands near both and the ring is an
+# ordinary ring of mesophyll cells, which is what "surrounded by mesophyll"
+# means anyway.
+
+# Fixed tangential/radial slack (multiples of the hypodermis cell diameter,
+# independent of chamber_clearance) added to the sub-stomatal-chamber removal
+# column in _inward_column. The hypodermis ring is seeded as its own
+# independent layer pass, not snapped to any one stoma's local frame, so the
+# hypodermis cell genuinely touching a given chamber can sit measurably
+# outside the chamber's own raw silhouette. Tuned empirically against
+# pinus_pinaster.py with tune_clearance.py's ray-cast open/blocked metric:
+# below ~1.0 almost nothing in the padded probe's reach is a real hypodermis
+# cell (0-2 of 18 stomata open regardless of depth); 1.75 clears 14/18 at
+# chamber_clearance=2 while keeping total removal to ~3.6 cells/stoma. The
+# remaining ~4 blocked stomata sit against the corner hypodermis_corner
+# nodules (up to 5 layers there vs. 2 elsewhere) and would need a
+# disproportionately larger pad -- costly everywhere else -- to also clear.
+_STOMA_HYPODERMIS_PAD_FACTOR: float = 1.75
+
+# How close to the corner-parenchyma pocket's edge a seed may sit and still
+# count as inside it (see retag_corner_parenchyma). The pocket is cut out of the
+# layer polygon, so it inherits that outline -- and the layer's border seeds lie
+# exactly *on* it, which makes a bare `contains` test a coin flip on the last
+# bit and drifted the needle census between x86 and arm64. Not a tuned value:
+# the boundary cases measure within 5.3e-17 and the nearest true interior cell
+# is farther than 1e-6, so anything in that gap picks the same cells.
+_POCKET_ON_EDGE_TOL: float = 1e-9
 
 class NeedleAnatomy(Organ):
     """
@@ -47,6 +166,12 @@ class NeedleAnatomy(Organ):
     Implements the specific structure of gymnosperm needle leaves,
     including transfusion tissue and resin ducts.
     """
+
+    #: Transfusion tracheids are dead, apoplastic-only conduits (see
+    #: example/needle/Transfusion_network.md) -- they must never carry a
+    #: symplastic (plasmodesmata) edge, only membrane/wall. Xylem and every
+    #: other organ's network are untouched.
+    APOPLASTIC_ONLY_TYPES = ("transfusion tracheid",)
 
     def __init__(self, input_data: Any = None, seed: Optional[int] = None):
         """
@@ -89,40 +214,159 @@ class NeedleAnatomy(Organ):
         for param in self.layers:
             self.layer_manager.add_layer(Layer.from_dict(param))
     
+    @staticmethod
+    def _angular_multiplier(profile: List[List[float]], angle_deg: float) -> float:
+        """
+        Circularly interpolate a list of ``(angle_degrees, multiplier)``
+        control points at ``angle_deg`` (wrapping at 360 degrees).
+
+        Consumed by ``_offset_layer_polygon`` for any layer carrying a
+        ``"thickness_profile"`` entry, e.g. the extra abaxial-only mesophyll
+        ring or the corner-thickened hypodermis ring: the ring's nominal
+        radial offset is scaled by this multiplier as a function of position
+        around the needle cross-section. The actual pole/corner angles
+        depend on the base shape's aspect ratio -- see example/needle/
+        pinus_pinaster.py's ``_pole_and_corner_angles`` for the derivation
+        (for this needle: adaxial pole ~270 deg, abaxial pole ~90 deg,
+        corners ~0/~180 deg-ish).
+        """
+        if not profile:
+            return 1.0
+        pts = sorted((float(a) % 360.0, float(m)) for a, m in profile)
+        angles = np.array([a for a, _ in pts])
+        mults = np.array([m for _, m in pts])
+        # Extend circularly so np.interp sees a monotonically increasing
+        # x-range that safely covers any angle in [0, 360).
+        ext_angles = np.concatenate(([angles[-1] - 360.0], angles, [angles[0] + 360.0]))
+        ext_mults = np.concatenate(([mults[-1]], mults, [mults[0]]))
+        return float(np.interp(angle_deg % 360.0, ext_angles, ext_mults))
+
+    def _offset_layer_polygon(self, polygon: Polygon, distance: float, layer: Dict[str, Any],
+                              smooth_factor: float, center: Optional[Point] = None) -> Polygon:
+        """
+        Needle override: dispatch to an angle-varying offset when the layer
+        dict carries a ``"thickness_profile"`` entry; otherwise fall back to
+        the shared uniform-buffer behavior (every other layer, unchanged).
+        """
+        profile = layer.get("thickness_profile")
+        if not profile:
+            return super()._offset_layer_polygon(polygon, distance, layer, smooth_factor, center=center)
+
+        offset_center = center if center is not None else polygon.centroid
+        offset_fn = lambda angle: distance * self._angular_multiplier(profile, angle)
+        return GeometryProcessor.variable_buffer_polygon(
+            polygon, offset_center, offset_fn, smooth_factor=smooth_factor
+        )
+
+    def _resolved_dimensions(self) -> tuple:
+        """Resolve the needle's actual (width, thickness), computing from the
+        layer stack whichever of the two global params was left at 0.
+        Shared by ``_create_base_shape`` and ``_pole_and_corner_angles``
+        (both need the *real* extent, not just whatever's in global_params).
+        """
+        if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
+            return self._calculate_needle_width(), self._calculate_needle_thickness()
+        elif self.global_params["width"] == 0:
+            return self._calculate_needle_width(), self.global_params["thickness"]
+        elif self.global_params["thickness"] == 0:
+            return self.global_params["width"], self._calculate_needle_thickness()
+        else:
+            return self.global_params["width"], self.global_params["thickness"]
+
     def _create_base_shape(self) -> Polygon:
         """
         Create the half-ellipse shape of a needle cross-section.
-        
+
         Returns:
             Half-ellipse polygon
         """
-        # if width and thickness are not provided (set to 0), calculate them from the layers
-        if self.global_params["width"] == 0 and self.global_params["thickness"] == 0:
-            width = self._calculate_needle_width()
-            thickness = self._calculate_needle_thickness()
-        # if width or thickness is provided, calculate the other
-        elif self.global_params["width"] == 0:
-            width = self._calculate_needle_width()
-            thickness = self.global_params["thickness"]
-        elif self.global_params["thickness"] == 0:
-            width = self.global_params["width"]
-            thickness = self._calculate_needle_thickness()
-        # if both width and thickness are provided, use them
-        else:
-            width = self.global_params["width"]
-            thickness = self.global_params["thickness"]
-        
+        width, thickness = self._resolved_dimensions()
         return GeometryProcessor.half_ellipse_polygon(width, thickness)
+
+    @staticmethod
+    def pole_and_corner_angles(width: float, thickness: float) -> tuple:
+        """Locate the needle cross-section's adaxial pole, abaxial pole, and
+        two corners as polar angles (degrees) around the base shape's
+        centroid -- the convention ``thickness_profile``/``zone_angles``
+        entries use (see ``_angular_multiplier``/``_offset_layer_polygon``),
+        and the single source of truth for every angle-based zone in this
+        class, including directional stomata placement
+        (``_directional_stomata_triplets``).
+
+        The base half-ellipse (``GeometryProcessor.half_ellipse_polygon``) is
+        flat at y=0 (adaxial edge, x in [-width/2, width/2]) and domed up to
+        (0, thickness) (abaxial peak). Treated as a uniform lamina its
+        centroid sits at y_c = k*thickness/(3*pi) above the flat edge (the
+        half-disk-centroid formula has k=4; k=3.5 here tracks the actual
+        padded "outside" polygon's centroid slightly better) -- a naive
+        "0=adaxial, 180=abaxial, +-90=corners" guess is wrong for any but a
+        specific aspect ratio, putting the poles at the corners instead for
+        a needle this flat.
+        """
+        a = width / 2.0
+        y_c = 3.5 * thickness / (3.0 * np.pi)
+        adaxial_pole = np.degrees(np.arctan2(-y_c, 0.0)) % 360.0
+        abaxial_pole = np.degrees(np.arctan2(thickness - y_c, 0.0)) % 360.0
+        corner_pos = np.degrees(np.arctan2(-y_c, a)) % 360.0     # near 0/360 side
+        corner_neg = np.degrees(np.arctan2(-y_c, -a)) % 360.0    # near 180 side
+        return float(adaxial_pole), float(abaxial_pole), float(corner_pos), float(corner_neg)
+
+    @staticmethod
+    def corner_bump_profile(peaks, floor=0.15):
+        """Build a circular (angle_deg, multiplier) thickness_profile from a list
+        of (center_angle_deg, half_width_deg, peak_multiplier) nodules.
+
+        Each nodule is a rise/peak/fall triangle over a `floor` baseline
+        elsewhere (angles wrap circularly, see
+        ``NeedleAnatomy._angular_multiplier``); keep nodules well separated so
+        adjacent triangles don't overlap.
+
+        `floor` must stay nonzero: at floor=0 a ring's boundary coincides with
+        its outer neighbor's, producing near-coincident Voronoi seeds and wildly
+        oversized (numerically unstable) cell polygons at the valley nodules.
+        """
+        pts = [(0.0, floor), (360.0, floor)]
+        for center, half_width, mult in peaks:
+            pts.append((center - half_width, floor))
+            pts.append((center, mult))
+            pts.append((center + half_width, floor))
+        return sorted(pts)
 
     def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         """
-        When "central_cylinder" has shape="ellipse", interpolate each layer
-        polygon between the outer half-ellipse (t=0) and a full ellipse
-        aligned with the endodermis layer (t=1).
+        When "central_cylinder" has shape="ellipse", morph the layer polygons
+        between the outer half-ellipse (t=0) and a full ellipse aligned with
+        the endodermis layer (t=1). Layers inward from the endodermis
+        (transfusion, parenchyma ...) are fully changed to fit inside the
+        ellipse.
 
-        Layers from the outside down to the endodermis are gradually morphed.
-        Layers inward from the endodermis (transfusion, parenchyma …) are
-        fully changed to fit inside the ellipse.
+        **Which layers get morphed, and by how much.** The two are grouped by
+        what actually governs their shape in a real needle:
+
+        - The **surface tissues** -- epidermis, hypodermis, palisade,
+          everything outside the mesophyll -- follow the *global* outline.
+          They are left exactly as ``_offset_layer_polygon`` peeled them, so
+          each keeps its own measured thickness and stays parallel to the
+          needle's outer shape.
+        - The **mesophyll family** (``mesophyll`` and any ``mesophyll_*``
+          ring) plus the endodermis carry the whole transition to the
+          *central cylinder*: the morph runs across just these rings, from
+          the innermost surface tissue's boundary (t=0) to the target ellipse
+          (t=1). Mesophyll is the accommodating tissue -- it is thick where
+          the domed outline stands off the cylinder and thin where the flat
+          adaxial face comes close to it, which is what the sections show.
+
+        Within that morphed group each ring is placed at its own measured
+        share of the distance (the cumulative sum of the rings'
+        ``cell_diameter``, normalised) rather than at an equal 1/n step, so a
+        thick mesophyll ring stays thick relative to a thin endodermis. The
+        group as a whole is scaled to whatever radial room is actually left
+        between the surface tissues and the cylinder, so the measured
+        proportions are honoured even when the total does not fit exactly.
+
+        Falls back to morphing every ring from the outside inward (the
+        original behaviour) when the config has no mesophyll-family layer at
+        all.
         """
         if self.central_cylinder_params.get("shape") != "ellipse":
             return layers_polygons
@@ -144,26 +388,44 @@ class NeedleAnatomy(Organ):
             0, smooth_factor=0.0
         )
 
-        # --- find the index of the endodermis layer --------------------------
+        # --- pick the span of rings that carries the morph -------------------
         layer_names = [lp["name"] for lp in layers_polygons]
-        
+
         endo_idx = layer_names.index("endodermis")
 
-        # outside polygon (index 0) is the reference half-ellipse shape; we
-        # keep it as-is (t=0) and warp everything inward up to endo_idx (t=1).
-        outer_poly = layers_polygons[0]["polygon"]
+        # The mesophyll family + endodermis absorb the transition; everything
+        # outside them keeps its measured offset of the global outline. With
+        # no mesophyll at all, fall back to morphing from index 1 (the
+        # original behaviour) so such a config still produces a closed
+        # cylinder.
+        mesophyll_first = next((i for i, n in enumerate(layer_names)
+                                if i < endo_idx and (n == "mesophyll" or n.startswith("mesophyll_"))),
+                               None)
+        first_morphed = mesophyll_first if mesophyll_first is not None else 1
 
-        # Pre-compute one interpolator between the outer shape and the ellipse.
+        # t=0 is the boundary the morph starts from: the innermost surface
+        # tissue's own polygon (index 0, "outside", when morphing everything).
+        source_poly = layers_polygons[first_morphed - 1]["polygon"]
+
+        # Pre-compute one interpolator between that boundary and the ellipse.
         try:
-            interp = PolygonInterpolator(outer_poly, target_ellipse)
+            interp = PolygonInterpolator(source_poly, target_ellipse)
         except Exception:
             # If PolygonInterpolator fails (degenerate geometry), skip reshape.
             return layers_polygons
 
-        n_to_morph = endo_idx + 1  # indices 0 … endo_idx inclusive
-        
-        for i in range(1, n_to_morph):          # skip index 0 (outside)
-            t = i / max(n_to_morph - 1, 1)     # 0 < t <= 1
+        # Each morphed ring lands at its own measured share of the distance
+        # (cumulative cell_diameter, normalised), so the last one is exactly
+        # t=1 (the ellipse) and the ones before it keep their relative
+        # thicknesses instead of every ring getting an equal 1/n step.
+        span = range(first_morphed, endo_idx + 1)
+        depths = [max(float(layers_polygons[i].get("cell_diameter", 0.0) or 0.0), 1e-9) for i in span]
+        total_depth = sum(depths)
+
+        cumulative = 0.0
+        for k, i in enumerate(span):
+            cumulative += depths[k]
+            t = cumulative / total_depth      # 0 < t <= 1, ==1 on the endodermis
             try:
                 new_poly = interp.fast_interpolate(t)
                 if not new_poly.is_empty and new_poly.is_valid:
@@ -226,10 +488,60 @@ class NeedleAnatomy(Organ):
         central_layers = []
         space_increment = self.central_cylinder_params["cell_diameter"] / 2
         transfusion_layers_remaining = self.transfusion_params["n_layers"]
-
-        tt_diameter = self.transfusion_params["tracheids_diameter"]
-        tp_diameter = self.transfusion_params["parenchyma_diameter"]
         parenchyma_diameter = self.central_cylinder_params["cell_diameter"]
+
+        self._transfusion_zone = None
+        pack_circles = self.transfusion_params.get("pack_circles", False)
+        if pack_circles:
+            # Reserve the transfusion zone's depth here (so the parenchyma/
+            # vascular region that follows starts in the right place), but
+            # place the cells later via circle-packing (add_transfusion_tissue)
+            # instead of one row of ring cells per nominal layer -- see that
+            # method's docstring.
+            nominal_diameter = self.transfusion_params.get("diameter_max", 0.05)
+            transfusion_depth = transfusion_layers_remaining * nominal_diameter
+
+            # Hold the zone off the endodermis by half an endodermis cell --
+            # the same `cell_diameter / 2` gap this file uses everywhere else
+            # between a ring's boundary and the next thing seeded against it.
+            # `current_polygon` is the endodermis's own boundary, so packing
+            # right up to it (as this did) puts transfusion seeds flush
+            # against the endodermis ring, and the global Voronoi then splits
+            # that boundary in the packed cells' favour: the endodermis
+            # rendered at ~58% of the area its measured cell size implies,
+            # and got progressively thinner the finer tracheids_diameter was
+            # set, because finer cells crowd the boundary with more seeds.
+            # Only the zone's outer edge moves; `shrunk` (and so the
+            # parenchyma/vascular region inward of it) is unchanged.
+            endodermis_params = next((p for p in self.params if p["name"] == "endodermis"), {})
+            endodermis_clearance = float(endodermis_params.get("cell_diameter", 0.0) or 0.0) / 2
+
+            transfusion_outer = current_polygon
+            if endodermis_clearance > 0:
+                held_off = GeometryProcessor.buffer_polygon(
+                    current_polygon, -endodermis_clearance, smooth_factor=0.6
+                )
+                if not held_off.is_empty and held_off.is_valid and held_off.area > 0:
+                    transfusion_outer = held_off
+
+            if transfusion_depth > 0:
+                shrunk = GeometryProcessor.buffer_polygon(
+                    current_polygon, -space_increment - transfusion_depth, smooth_factor=0.6
+                )
+                if not shrunk.is_empty and shrunk.is_valid and shrunk.area > 0:
+                    self._transfusion_zone = transfusion_outer.difference(shrunk)
+                    current_polygon = shrunk
+                    # Sized from the *upcoming* parenchyma ring's own (much
+                    # smaller) cell scale, not the transfusion zone's own
+                    # nominal_diameter -- using the latter left an oversized
+                    # gap before the first parenchyma ring, whose seeds then
+                    # had unusually large Voronoi territory (rendering as
+                    # visibly bigger cells than every parenchyma ring after it).
+                    space_increment = parenchyma_diameter / 2
+            transfusion_layers_remaining = 0  # skip the ring-based branch below entirely
+
+        tt_diameter = self.transfusion_params["tracheids_diameter"] if not pack_circles else 0.0
+        tp_diameter = self.transfusion_params["parenchyma_diameter"] if not pack_circles else 0.0
         transfusion_type = self.transfusion_params.get("transfusion_type", False)
         tt_ratio = self.transfusion_params.get("transfusion_tracheids_ratio", 0.5)
         p_tt = tt_ratio / (1.0 + tt_ratio) if tt_ratio > 0 else 0.0
@@ -246,6 +558,8 @@ class NeedleAnatomy(Organ):
                     -space_increment - avg_diameter / 2,
                     smooth_factor=0.6
                 )
+                if current_polygon.is_empty or not current_polygon.is_valid or current_polygon.area <= 0:
+                    break  # the ring buffered down to nothing; stop before appending a degenerate polygon
 
                 space_increment = avg_diameter / 2
 
@@ -266,6 +580,8 @@ class NeedleAnatomy(Organ):
                     -space_increment - parenchyma_diameter / 2,
                     smooth_factor=0.7
                 )
+                if current_polygon.is_empty or not current_polygon.is_valid or current_polygon.area <= 0:
+                    break  # the ring buffered down to nothing; stop before appending a degenerate polygon
 
                 space_increment = parenchyma_diameter / 2
 
@@ -326,56 +642,171 @@ class NeedleAnatomy(Organ):
         recipe = TissueRecipe()
         recipe.special("vascular ellipse grid",
                        lambda: self.fit_vascular_elements(polygon),
-                       produces=("xylem", "phloem", "cambium", "Strasburger cell"))
+                       produces=("xylem", "phloem", "cambium", "Strasburger cell", "Str. Interstitial cell"))
         return recipe
 
     def fit_vascular_elements(self, polygon):
         # from polygon, fit two ellipses
         rx = self.central_cylinder_params["vascular_width"]/2
         ry = self.central_cylinder_params["vascular_height"]/2
-        ellipses = GeometryProcessor.two_ellipses(polygon, rx, ry)
+        angle = self.central_cylinder_params.get("vascular_angle")
+        ellipses = GeometryProcessor.two_ellipses(polygon, rx, ry, angle=angle)
+        self._parenchyma_pocket_zone = self._corner_parenchyma_pockets(polygon, ellipses)
         cells_in_ellipses, list_ellipses_polygons = self.vascular_elements_in_ellipses(ellipses)
         vascular_cm = CellManager()
         vascular_cm.cells = cells_in_ellipses
         self.vascular_cells = vascular_cm
         self.vascular_polygons = list_ellipses_polygons
-        
+
+    @staticmethod
+    def _corner_parenchyma_pockets(polygon: Polygon, ellipses: List[Dict[str, Any]]) -> Optional[Polygon]:
+        """The sliver of ``polygon`` left over beyond each ellipse's own
+        outer (lateral, away-from-centre) side.
+
+        Even after ``GeometryProcessor.push_ellipse_to_boundary`` slides an
+        ellipse out to touch the region's real edge, its rounded outline
+        can't perfectly fill a sharper corner -- the small crescent that's
+        left over is exactly what should become Strasburger cell instead of
+        parenchyma (see example/needle/Str place blue.png). Clipping to the
+        half-plane on each ellipse's own outer side of its centre keeps just
+        that corner sliver, excluding both the gap between the two ellipses
+        and anything toward the needle's own centre.
+        """
+        minx, miny, maxx, maxy = polygon.bounds
+        pad = max(maxx - minx, maxy - miny) + 1.0
+        pockets = []
+        for ellipse in ellipses:
+            cx = ellipse["center"][0]
+            if cx <= 0:
+                half_plane = Polygon([(minx - pad, miny - pad), (cx, miny - pad),
+                                      (cx, maxy + pad), (minx - pad, maxy + pad)])
+            else:
+                half_plane = Polygon([(cx, miny - pad), (maxx + pad, miny - pad),
+                                      (maxx + pad, maxy + pad), (cx, maxy + pad)])
+            pocket = polygon.difference(ellipse["polygon"]).intersection(half_plane)
+            if not pocket.is_empty:
+                pockets.append(pocket)
+        return unary_union(pockets) if pockets else None
+
+    def retag_corner_parenchyma(self) -> None:
+        """Retag parenchyma cells in the corner pockets (see
+        ``_corner_parenchyma_pockets``) to "Strasburger cell" -- a plain
+        rename, existing cells kept at their existing size/position.
+
+        **A seed exactly on the pocket edge counts as inside.**  The pocket is
+        carved out of the layer polygon, so it inherits that polygon's own
+        outline -- and the layer's border seeds sit exactly *on* that outline.
+        ``zone.contains`` excludes the boundary, so for those cells the tag came
+        down to whether GEOS put them 1e-18 in or out, which differs by platform:
+        44 of the 250 parenchyma candidates here are boundary cases (30 of 102
+        for the gallery needle), and macOS/arm64 resolved 4 of them the other way
+        than x86, drifting the golden census.  Half the Strasburger cells were
+        decided by arithmetic noise rather than anatomy.
+
+        Including them is both the geometric and the biological reading: a seed
+        on the outline still gets a Voronoi body *inside* the region, and those
+        cells form the single-cell rim where the central cylinder meets the
+        transfusion tissue -- the contact albuminous cells exist to make.  The
+        alternative (excluding them) puts a parenchyma layer between the
+        Strasburger mantle and the transfusion tissue and, on the gallery
+        needle, shrinks the cluster to 10 cells.
+
+        The tolerance is not tuned: measured boundary cases sit within 5.3e-17
+        while the nearest genuine interior cell is farther than 1e-6, so any
+        value in that gap selects the identical set.
+        """
+        zone = getattr(self, "_parenchyma_pocket_zone", None)
+        if zone is None or zone.is_empty:
+            return
+        edge = zone.boundary
+        for c in self.all_cells.get_cells_by_type("parenchyma"):
+            p = Point(c.x, c.y)
+            if zone.contains(p) or edge.distance(p) <= _POCKET_ON_EDGE_TOL:
+                c.type = "Strasburger cell"
+
 
     def vascular_elements_in_ellipses(self, ellipses, debug=False):
-        """Seed the rectangular xylem/phloem grid (with a central cambium row and
-        interstitial Strasburger files) into each of the two vascular ellipses.
+        """Seed the rectangular xylem/phloem grid (with a central cambium row
+        and interstitial Strasburger-lineage files) into each of the two
+        vascular ellipses.
 
         Each grid coordinate is built in the ellipse's local frame, then rotated
         by the ellipse angle and translated to its centre (:func:`place`); cells
         that land inside the ellipse are kept.  A bespoke fill — there is no
         region to pack, the layout is an explicit grid.
+
+        ``"Str. Interstitial cell"`` columns run through both the xylem
+        *and* phloem rows of the grid (retyped from ordinary xylem/phloem),
+        matching example/needle/vascular_ellipse.png. The other Strasburger-
+        lineage cells -- the corner cluster outside the ellipse -- are
+        handled separately, by retagging real parenchyma cells in place
+        (see ``retag_corner_parenchyma``/``_corner_parenchyma_pockets``)
+        rather than seeded here.
+
+        Invariant: the cambium sits on the ellipse mid-line at local_x == 0;
+        xylem rows are seeded strictly on the negative-local_x (adaxial) side
+        and phloem rows strictly on the positive-local_x (abaxial) side, so
+        neither stack crosses the cambium. This is enforced by construction
+        (both loops are built outward from `cambium_d` with no term that can
+        change sign) together with the `sin_a < 0` frame-flip below, which
+        anchors +local_x to always point abaxially regardless of
+        ``central_cylinder.vascular_angle``.
         """
         list_ellipses_polygons: List[Polygon] = []
         cells_in_ellipses: List[Cell] = []
 
-        params_xylem   = next(p for p in self.params if p["name"] == "xylem")
-        params_phloem  = next(p for p in self.params if p["name"] == "phloem")
-        params_cambium = next(p for p in self.params if p["name"] == "cambium")
+        params_xylem       = next(p for p in self.params if p["name"] == "xylem")
+        params_phloem      = next(p for p in self.params if p["name"] == "phloem")
+        params_cambium     = next(p for p in self.params if p["name"] == "cambium")
+        params_strasburger = next((p for p in self.params if p["name"] == "Strasburger cells"), None)
         xylem_rows       = params_xylem["n_files"]
         phloem_rows      = params_phloem["n_files"]
         xylem_cell_width = params_xylem["cell_diameter"]
         xylem_cluster_n  = int(params_xylem["n_clusters"])
 
         id_cell = 0
-        for ellipse in ellipses:
+        for idx, ellipse in enumerate(ellipses):
             center = ellipse["polygon"].centroid
             rx, ry = ellipse["axes"]
-            angle  = np.deg2rad(ellipse["angle"]) - np.pi / 2
+            # `two_ellipses` mirrors the *outline* angle for the second
+            # (right) ellipse across the vertical midline (180-angle) --
+            # correct for the ellipse shape itself (symmetric under 180 deg
+            # rotation), but the content grid below is built from an
+            # explicit rotation, not a reflection, so reusing that mirrored
+            # angle here rotates the right ellipse's internal xylem/phloem
+            # layout 180 deg out of step with the left one's. Adding 180 deg
+            # back for the first (left) ellipse only realigns the two,
+            # independent of whatever angle central_cylinder.vascular_angle
+            # is actually set to.
+            content_angle_deg = ellipse["angle"] + (180.0 if idx == 0 else 0.0)
+            angle  = np.deg2rad(content_angle_deg) - np.pi / 2
             cos_a, sin_a = np.cos(angle), np.sin(angle)
 
-            xylem_cell_height  = (rx - params_cambium["cell_diameter"]) / xylem_rows
-            phloem_cell_height = (rx - params_cambium["cell_diameter"]) / phloem_rows
+            # Phloem occupies the positive-local_x side, so +local_x must point abaxially
+            # (toward the dome, +y). The ellipse angle alone does not guarantee that --
+            # flip the frame when it comes out pointing adaxially, so xylem stays on the
+            # flat/adaxial side of the cambium for any central_cylinder.vascular_angle.
+            if sin_a < 0:
+                cos_a, sin_a = -cos_a, -sin_a
+
+            # `angle` is built so that local_y always ends up aligned with
+            # the ellipse's *actual* rx (major/width) direction (and local_x
+            # with its ry/minor direction) once `place()` rotates+translates
+            # it -- see `place()` below. The xylem/cambium/phloem stack is
+            # radial (spans the bundle's short, ry axis) with repeated
+            # column files spread along the long, rx axis, so rows are built
+            # on local_x (sized by ry) and columns on local_y (sized by rx):
+            # the reverse of a naive rx-for-rows/ry-for-columns assignment.
+            cambium_d = params_cambium["cell_diameter"]
+            xylem_cell_height  = (ry - cambium_d) / xylem_rows
+            phloem_cell_height = (ry - cambium_d) / phloem_rows
             xylem_cell_diameter  = (xylem_cell_width + xylem_cell_height) / 2
             phloem_cell_diameter = (xylem_cell_width + phloem_cell_height) / 2
+            strasburger_diameter = params_strasburger["cell_diameter"] if params_strasburger else xylem_cell_diameter
 
-            n_xylem_width      = int(np.ceil(ry * 2 / xylem_cell_width))
+            n_xylem_width      = int(np.ceil(rx * 2 / xylem_cell_width))
             xylem_cluster_size = int(np.ceil(
-                (ry * 2 - xylem_cell_width * (xylem_cluster_n - 1)) / (xylem_cell_width * xylem_cluster_n)
+                (rx * 2 - xylem_cell_width * (xylem_cluster_n - 1)) / (xylem_cell_width * xylem_cluster_n)
             ))
             temp_cluster_id    = xylem_cluster_size
 
@@ -391,30 +822,39 @@ class NeedleAnatomy(Organ):
                     )
 
             for i in range(n_xylem_width + 1):
-                col_x = i * xylem_cell_width - ry + xylem_cell_width / 2
+                col_y = i * xylem_cell_width - rx + xylem_cell_width / 2
 
-                # xylem rows (upper part); interstitial cluster files are Strasburger cells
-                xylem_type = "Strasburger cell" if temp_cluster_id == 0 else "xylem"
-                for j in range(xylem_rows + 1):
-                    place(col_x, j * xylem_cell_height - ry + xylem_cell_height / 2,
-                          xylem_type, xylem_cell_diameter)
+                # Interstitial cluster files are the Strasburger lineage
+                # running straight through the grid -- both the xylem *and*
+                # phloem rows of that column are retyped (from ordinary
+                # xylem/phloem), sized like the corner cluster below.
+                is_interstitial = (temp_cluster_id == 0)
+                xylem_type  = "Str. Interstitial cell" if is_interstitial else "xylem"
+                phloem_type = "Str. Interstitial cell" if is_interstitial else "phloem"
+                for j in range(xylem_rows):
+                    place(-(j * xylem_cell_height + cambium_d + xylem_cell_height / 2), col_y,
+                          xylem_type, strasburger_diameter if is_interstitial else xylem_cell_diameter)
 
-                # phloem rows (lower part)
-                for j in range(1, phloem_rows + 1):
-                    place(col_x, j * phloem_cell_height + phloem_cell_height / 2,
-                          "phloem", phloem_cell_diameter)
+                for j in range(phloem_rows):
+                    place(  j * phloem_cell_height + cambium_d + phloem_cell_height / 2, col_y,
+                          phloem_type, strasburger_diameter if is_interstitial else phloem_cell_diameter)
 
                 if temp_cluster_id == 0:
                     temp_cluster_id = xylem_cluster_size + 1
                 temp_cluster_id -= 1
 
                 # cambium cell on the ellipse mid-line
-                place(col_x, 0, "cambium", xylem_cell_diameter)
+                place(0, col_y, "cambium", xylem_cell_diameter)
 
+            # The corner-pocket parenchyma (beyond the ellipse's own outer
+            # edge) is retagged to "Strasburger cell" separately, once real
+            # parenchyma cells exist to relabel -- see
+            # NeedleAnatomy.retag_corner_parenchyma / _corner_parenchyma_pockets.
             list_ellipses_polygons.append(ellipse["polygon"])
 
             if debug:
-                color_map = {"Strasburger cell": "red", "xylem": "blue", "phloem": "green", "cambium": "yellow"}
+                color_map = {"Strasburger cell": "red", "Str. Interstitial cell": "orange",
+                            "xylem": "blue", "phloem": "green", "cambium": "yellow"}
                 plt.plot(ellipse["polygon"].exterior.xy[0], ellipse["polygon"].exterior.xy[1])
                 for cell in cells_in_ellipses:
                     plt.plot(cell.x, cell.y, "o", color=color_map[cell.type])
@@ -425,17 +865,76 @@ class NeedleAnatomy(Organ):
     def _organ_recipe(self) -> TissueRecipe:
         """Needle organ-specific tissues as a recipe of P2 special-tissue steps.
 
-        Both are cell-relative post-fill placements (carved into existing cells),
-        so they are ``special`` steps; the geometry is computed in ``add_canal`` /
-        ``add_stomata`` and placed by ``special_tissues.place_resin_duct`` /
-        ``place_stomata``.
+        Resin ducts and stomata are cell-relative post-fill placements
+        (carved into existing cells); transfusion tissue (when
+        ``transfusion_tissue.pack_circles`` is set) is a zone fill via
+        circle-packing rather than a ring seed.
+
+        ``add_stomata`` calls ``self.all_cells.recenter_cells()``, which
+        shifts every *existing* cell's coordinates to the population mean but
+        cannot retroactively shift ``self._transfusion_zone`` (a shapely
+        polygon computed earlier, during layer-polygon construction, in the
+        original un-recentred frame). "transfusion tissue" therefore has to
+        run *before* "stomata": placing its cells while everything is still
+        in that same original frame keeps them consistent with the zone, and
+        the subsequent recenter shifts them correctly along with every other
+        cell. Running it after "stomata" (as before) placed transfusion
+        cells relative to the stale, un-shifted zone while the rest of the
+        organ had already moved -- the two point clouds no longer shared an
+        origin, and the downstream global Voronoi tessellation stretched
+        cells across that gap into huge, wildly misplaced polygons.
+        ``"layer-count zoning"`` reads ``cell.angle`` as set by
+        ``recenter_cells``, so it must stay *after* "stomata".
         """
         recipe = TissueRecipe()
         recipe.special("resin ducts", self.add_canal,
-                       produces=("resin duct", "duct"))
+                       produces=("resin duct sheath", "resin duct epithelium", "duct"))
+        recipe.special("transfusion tissue", self.add_transfusion_tissue,
+                       produces=("transfusion parenchyma", "transfusion tracheid"))
+        recipe.special("corner parenchyma to strasburger", self.retag_corner_parenchyma)
         recipe.special("stomata", self.add_stomata,
                        produces=("guard cell", "air space", "pore"))
+        recipe.special("layer-count zoning", self._restrict_zoned_layers)
         return recipe
+
+    def network_bridge_specs(self) -> List[Dict[str, Any]]:
+        """Bridge transfusion parenchyma across an intervening tracheid.
+
+        Round parenchyma ellipses (``Transfusion_tissue.png``) sit
+        individually embedded in the tracheid matrix, so stripping
+        tracheids of their symplastic edges (``APOPLASTIC_ONLY_TYPES``)
+        would otherwise leave many of them as isolated symplastic islands
+        instead of staying continuous from the endodermis inward to the
+        Strasburger cells / phloem (see
+        ``example/needle/Transfusion_network.md``). Each bridge stands in
+        for a real, out-of-plane third cell.
+
+        The inner ``"parenchyma"`` layer is a valid bridge target: it maps
+        to cgroup 5, and MECHA's ``(5, 17)`` interface is a live symplastic
+        connection (only ``(5, 18)`` -- tracheid -- is zeroed), so bridging
+        onto it is exactly as physiologically sound as bridging onto another
+        transfusion parenchyma cell.
+
+        The bridge is a NODE, not a cell with a polygon (matches the
+        reference diagram ``example/needle/Transfusion_tissue_network.png``):
+        one virtual, out-of-plane node is created per distinct tracheid
+        actually crossed, and shared across every source->target path that
+        crosses that same tracheid -- not one virtual cell per pair, and no
+        separate geometry is fabricated for it. ``max_links`` is a fan-out
+        cap (at most this many accepted bridge paths per source AND per
+        target cell, shortest gaps preferred), independent of that sharing.
+        """
+        tp = self.transfusion_params
+        return [{
+            "name": "transfusion",
+            "source_types": ("transfusion parenchyma",),
+            "target_types": ("transfusion parenchyma", "parenchyma",
+                             "Strasburger cell", "endodermis", "phloem"),
+            "blocker_types": ("transfusion tracheid",),
+            "bridge_type": "transfusion parenchyma",   # -> cgroup 17, so (17,17)=8.0e5 applies
+            "radius": tp.get("bridge_radius") or tp["parenchyma_diameter"],
+            "max_links": tp.get("bridge_max_links", 4),
+        }]
 
     # ------------------------------------------------------------------
     # Geometry helpers — pure computation, no cell placement
@@ -445,13 +944,171 @@ class NeedleAnatomy(Organ):
         """
         Compute resin duct geometry from layer polygons without placing cells.
 
+        Each resin duct is modeled as three concentric zones, built inside-out
+        from an explicitly measured lumen size -- matching the classic conifer-
+        needle duct figure: a central open lumen (L, no cells) directly
+        bordered by a single layer of epithelial cells (Ep, thin-walled,
+        secretory), itself surrounded by an outer layer of larger sheath cells
+        (Sh, thicker-walled), embedded in the mesophyll (M).
+
+        A fourth "transition ring" of ordinary mesophyll-tagged filler cells
+        is always added just outside the sheath, so every duct ends up
+        surrounded by mesophyll rather than abutting whichever tissue its
+        slot borders (see the module-level note where
+        _DUCT_SHEATH_MIN_RATIO used to gate this, and
+        special_tissues.place_resin_duct's own _DUCT_SHEATH_MIN_CELLS)
+        -- without it, carve_and_insert removes
+        every host seed under the sheath's footprint, so the sheath ring borders the
+        mesophyll's own coarse cells directly and its Voronoi region
+        balloons out to meet them (the same "radial sunburst" failure
+        vascular_bundle.py's _grow_bundle_sheath was built to avoid). The
+        transition ring is sized as the geometric mean of the sheath cell
+        and the host cell -- a size-matched neighbour that bounds the
+        sheath's Voronoi region -- and is tagged as the host tissue itself
+        rather than a new cell type, exactly like the bundle's outer sheath.
+
+        Sizing is inside-out and additive -- nothing here ever shrinks the
+        canal or epithelium to make room for the sheath -- with one exception:
+        if a duct's placement region (band, home zone, or wedge -- see
+        _seat_duct) is too narrow to hold the full requested size at its
+        Chebyshev center, every measurement for THAT duct is scaled
+        down together (preserving lumen : epithelium : sheath proportions)
+        rather than letting the duct overflow into neighbouring tissue. See
+        the scale-to-fit step below.
+          - "lumen_diameter" is the lumen's own literal diameter (a direct
+            measurement) -- the canal is built AT this size, not derived from it.
+          - "cell_diameter" / "sheath_cell_diameter" are each ring's RADIAL
+            (ring-thickness) size. The epithelium ring's outer edge is the canal
+            grown outward by cell_diameter; the sheath ring's outer edge is the
+            epithelium's outer edge grown outward again by sheath_cell_diameter.
+          - "cell_width" / "sheath_cell_width" are each ring's TANGENTIAL
+            (along-the-ring) size, consumed only by place_resin_duct; 0 means
+            isotropic (falls back to the matching radial size).
+          - The overall built diameter (lumen + both wall layers, doubled) is
+            *derived* -- lumen_diameter + 2*cell_diameter + 2*sheath_cell_diameter
+            -- and drives both where a duct's slot is searched for
+            (fit_inner_ellipse) and how far in from the home zone's own outer
+            edge that search prefers (_DUCT_RING_BUFFER_FACTOR). There is no
+            independent "diameter" knob that could drift out of sync with the
+            real cell-size measurements.
+          - Scale-to-fit: fit_inner_ellipse shrinks its requested radius
+            (shrink-to-fit) when a duct's slot can't hold a circle of the
+            full assembly radius (built core + transition ring + carve
+            margin, from the unscaled sizes -- see _build_duct) at the
+            Chebyshev center. Each duct compares its own achieved fit radius
+            against the requested assembly radius and, if smaller, scales
+            lumen_diameter/cell_diameter/cell_width/sheath_cell_diameter/
+            sheath_cell_width down by that same factor -- so a duct squeezed
+            into a tight spot shrinks as a whole instead of silently
+            overflowing its slot (and getting corrupted/dropped downstream).
+            _seat_duct (below) tries progressively looser slots before
+            accepting a shrink at all -- see "Placement".
+
         Returns (duct_data, rdp) where duct_data is a list of per-duct dicts:
-          - "outer":        mask polygon used to remove existing cells
-          - "ring":         parenchyma ring polygon (for resin-duct cell placement)
-          - "canal":        inner lumen polygon (for duct cell placement)
-          - "ring_center":  centroid of the fitted inner ellipse (angle reference)
-        rdp is the resin_duct parameter dict.
+          - "carve":            outer mask polygon used to remove existing
+                                 mesophyll cells (covers the full sheath
+                                 footprint -- and the transition ring's own
+                                 footprint when one is added -- with a small
+                                 safety margin)
+          - "sheath_ring":       sheath ring cell-placement curve
+          - "epithelium_outer":  epithelium ring's own outer edge (== the
+                                 sheath ring's inner reference; also used for
+                                 visualization)
+          - "epithelium_ring":   epithelium ring cell-placement curve
+          - "transition_ring":   transition-ring cell-placement curve; None
+                                 only when there is no host tissue to blend
+                                 into (no "mesophyll" params) or the sheath
+                                 is degenerate
+          - "canal":             lumen boundary / cell-placement curve
+          - "center":            shared center point for the canal and both rings
+          - "lumen_diameter" / "cell_diameter" / "cell_width" /
+            "sheath_cell_diameter" / "sheath_cell_width": this duct's own
+            already-scaled sizes (== the unscaled rdp values when the duct's
+            slice had room for the full built size).
+          - "transition_cell_size": this duct's transition-ring cell size
+            (sqrt(sheath_cell_diameter * host_cell_diameter), computed from
+            the already-scaled sheath_cell_diameter), or 0 when no
+            transition ring was added.
+        rdp is the first resin_duct parameter dict (both callers discard it).
         Returns ([], None) when there are no resin_duct params or no mesophyll layer.
+
+        **Home zone.** Every duct's slot is searched for inside the *home
+        zone*: palisade plus every mesophyll-family layer (plain
+        "mesophyll" and any "mesophyll_*" variant -- see
+        ``_is_duct_home_layer``), buffered away from the hypodermis and the
+        endodermis by each neighbour's own ``cell_diameter`` (its radial
+        cell height). A duct may freely carve palisade -- it *is* palisade
+        mesophyll -- but must never touch either of those two boundaries.
+        See the zone-construction block below for the exact buffer formula.
+
+        **Placement.** Three ways to say where the ducts go, and a config
+        may mix them freely (every ``resin_duct`` dict in ``self.params``
+        is read, not just the first):
+
+        - *Slice placement* (the default): a dict with no ``"positions"``
+          or ``"angles"`` key contributes ``n_files`` ducts. Exactly **2**
+          such ducts go to the needle's two true corner bearings
+          (``pole_and_corner_angles``), seated by point (below) -- this is
+          what keeps a 2-duct config (pinaster, the gallery preset)
+          anchored at its real anatomical corners rather than at the
+          historical ``_DUCT_PLACEMENT_ORDER`` slice boundaries, which are
+          centred ~23 deg off on the -x side for these needles' aspect
+          ratios. **1 or 3+** slice-placed ducts keep the legacy fixed
+          pizza-slice positions from ``_DUCT_PLACEMENT_ORDER`` (no real
+          config in this repo currently uses either count; kept for a
+          plausible future 3-duct config).
+        - *Explicit position*: a dict carrying ``"positions"`` (a list of
+          ``(x, y)`` points in the model frame -- the same un-recentred
+          frame ``layers_polygons`` itself lives in) contributes one duct
+          per point, each sized by *that* dict, seated as close to that
+          exact point as the hypodermis/endodermis buffers allow. This is
+          the most direct mode: no bearing/wedge conversion at all, so it
+          is the right choice when a duct's position was measured directly
+          (e.g. digitised from a micrograph -- see
+          ``example/needle/pinus_nigra.py``).
+        - *Explicit bearing*: a dict carrying ``"angles"`` (a list of polar
+          angles in degrees, ``pole_and_corner_angles``' convention)
+          contributes one duct per angle, converted to a target point on
+          that bearing (``_bearing_target_point``) and seated the same way
+          as ``"positions"``. Give several dicts to get ducts of different
+          sizes at chosen bearings/positions. ``n_files`` is ignored for a
+          dict carrying either ``"positions"`` or ``"angles"``; the
+          list length is the count. Optional ``"wedge"`` sets the wedge
+          half-width used only by the point-seating's own fallback (below),
+          not the normal seating path.
+
+        **Point-based seating** (``_seat_duct_at_point``). Both
+        ``"positions"``/``"angles"`` ducts and the corner-anchored default
+        are seated at an explicit target POINT, not at a wedge's widest-
+        inscribed-circle centre: ``fit_inner_ellipse`` (the wedge-based
+        approach) finds the deepest point of whatever sub-region it is
+        handed, which is not necessarily anywhere near the requested
+        bearing/position -- a measured duct was observed to drift ~0.06mm
+        (~6% of needle thickness) off its requested spot, in the direction
+        the wedge happened to be locally widest. Seating instead checks
+        whether the target lies in ``F = zone.buffer(-assembly_radius)``
+        (every centre from which the whole assembly -- built core +
+        transition ring + carve margin -- clears the home zone at full,
+        measured size); if so the point is used verbatim (scale 1.0,
+        exactly on target), otherwise the nearest point of ``F`` is used
+        -- but ONLY when that point is within one ``assembly_radius`` of
+        the target (a nudge, not a relocation: ``F`` need not be one
+        contiguous blob around the target -- e.g. nigra's abaxial pole has
+        zero room anywhere nearby for its large duct's full assembly, while
+        ``F`` still exists ~0.63mm away at the two corners, and silently
+        snapping that far would defeat the whole point of seating by
+        position). Falls back to the older wedge-based escalating search
+        (``_seat_duct``: band -> full zone -> widened wedge up to
+        ``_DUCT_WEDGE_WIDEN_STEPS``' 180/7 deg cap, then
+        ``_build_duct``'s proportional scale-to-fit with a
+        ``warnings.warn`` naming the bearing and achieved scale) whenever
+        ``F`` is empty, or has no point close enough to the target -- shrink
+        in place near the requested bearing/position, not a distant
+        full-size relocation. The 1-/3+-duct ``_DUCT_PLACEMENT_ORDER`` fallback
+        still uses the older band/zone pizza-slice search directly (no
+        wedge-widening: a fixed pizza slice is already at its full angular
+        allotment, and widening it would have to steal room from a
+        neighbouring duct's own slice).
         """
         rdp_list = [p for p in self.params if p["name"] == "resin_duct"]
         if not rdp_list:
@@ -459,38 +1116,537 @@ class NeedleAnatomy(Organ):
         rdp = rdp_list[0]
 
         layer_names = [l["name"] for l in layers_polygons]
-        if "mesophyll" not in layer_names:
+
+        # --- home zone: palisade + every mesophyll-family layer, buffered
+        # off the hypodermis and the endodermis ------------------------------
+        # layers_polygons is outer-to-inner and each entry's polygon is that
+        # layer's own *inner* edge (see _is_duct_home_layer's docstring note
+        # and the module docstring). The home block is contiguous by
+        # construction (palisade/mesophyll/mesophyll_* are always seeded
+        # adjacent in the layer stack), so the first match's outer neighbour
+        # bounds the zone on one side and the last match's own polygon
+        # bounds it on the other.
+        home_idx = [i for i, n in enumerate(layer_names) if _is_duct_home_layer(n)]
+        if not home_idx:
             return [], None
+        home_idx.sort()   # defensive; already ascending given layer order
 
-        polygon_for_duct = layers_polygons[layer_names.index("mesophyll")]["polygon"]
-        polygon_for_duct = polygon_for_duct.difference(
-            GeometryProcessor.buffer_polygon(polygon_for_duct, -rdp["diameter"] * _DUCT_RING_BUFFER_FACTOR, 0)
-        )
+        outer_idx = home_idx[0] - 1
+        home_outer = (layers_polygons[outer_idx]["polygon"] if outer_idx >= 0
+                     else layers_polygons[home_idx[0]]["polygon"])
+        # home_inner is the innermost home layer's own polygon -- per the
+        # "polygon == that layer's inner edge" convention this is the
+        # mesophyll's inner boundary, i.e. the endodermis's *outer* edge.
+        home_inner = layers_polygons[home_idx[-1]]["polygon"]
 
-        n_canal = rdp["n_files"]
-        if n_canal < 7:
-            n_regions = 7
-            add_duct = _DUCT_PLACEMENT_ORDER[:n_canal]
-        else:
-            n_regions = n_canal
-            add_duct = list(range(n_regions))
+        # Buffers: one full radial cell height of each forbidden neighbour,
+        # looked up directly from self.params (same idiom as the
+        # host_cell_diameter lookup just below). Missing a layer (e.g. no
+        # hypodermis in some hypothetical config) degrades gracefully to a
+        # zero buffer on that side rather than erroring.
+        hypodermis_params    = next((p for p in self.params if p["name"] == "hypodermis"), {})
+        hypodermis_clearance = float(hypodermis_params.get("cell_diameter", 0.0) or 0.0)
+        endodermis_params    = next((p for p in self.params if p["name"] == "endodermis"), {})
+        endodermis_clearance = float(endodermis_params.get("cell_diameter", 0.0) or 0.0)
+
+        zone = GeometryProcessor.buffer_polygon(home_outer, -hypodermis_clearance, 0)
+        inner_barrier = GeometryProcessor.buffer_polygon(home_inner, endodermis_clearance, 0)
+        zone = zone.difference(inner_barrier)
+        if zone.is_empty:
+            # The clearance buffers ate the whole home band -- a config too
+            # tight for the rule (none of the three real configs in this
+            # repo hit this; see the headroom check in the approved plan).
+            # Warn loudly and fall back to the unbuffered band rather than
+            # silently placing ducts against a forbidden boundary or
+            # dropping them entirely.
+            warnings.warn(
+                "resin duct home zone collapsed after hypodermis/endodermis "
+                "clearance buffers; falling back to the unbuffered band -- "
+                "ducts may sit closer to a boundary than intended"
+            )
+            zone = home_outer.difference(home_inner)
+
+        # Local host-tissue cell size the transition ring blends the sheath
+        # into. The duct sits in the mesophyll layer per add_canal, so the
+        # mesophyll's own "cell_diameter" is the right lookup even though
+        # the render shows a duct's transition/sheath also bordering
+        # palisade in places -- the mesophyll figure is still representative
+        # of the coarse "ground" tissue this ring needs to blend into.
+        mesophyll_params    = next((p for p in self.params if p["name"] == "mesophyll"), {})
+        host_cell_diameter  = mesophyll_params.get("cell_diameter", 0.0)
+
+        # --- one placement request per duct -------------------------------
+        # Each request pairs one duct's sizes with where to look for it:
+        # a literal (x, y) point (measured "positions"), a bearing in
+        # degrees ("angles"), or neither (slice placement, resolved below in
+        # _DUCT_PLACEMENT_ORDER). See the docstring.
+        requests = []      # (sizes, mode, value, wedge_half_width)
+        for p in rdp_list:
+            # Defensive .get() fallbacks: a raw param-list caller (e.g.
+            # example/needle/pinus_pinaster.py's plain list-of-dicts style)
+            # bypasses pydantic defaulting entirely, so bare indexing would
+            # KeyError for it.
+            lumen_diameter       = p.get("lumen_diameter", 0.037)
+            cell_diameter        = p["cell_diameter"]
+            sheath_cell_diameter = p.get("sheath_cell_diameter", cell_diameter)
+            sizes = {
+                "lumen_diameter":       lumen_diameter,
+                "cell_diameter":        cell_diameter,
+                "cell_width":           p.get("cell_width") or cell_diameter,
+                "sheath_cell_diameter": sheath_cell_diameter,
+                "sheath_cell_width":    p.get("sheath_cell_width") or sheath_cell_diameter,
+            }
+            positions = p.get("positions")
+            angles = p.get("angles")
+            if positions:
+                # Literal (x, y) points in the model frame (the same
+                # un-recentred frame layers_polygons lives in) -- the most
+                # direct placement mode, seated exactly (subject to the
+                # hypodermis/endodermis buffers) rather than converted
+                # through any bearing/wedge math at all. wedge is unused for
+                # this mode except as the fallback search's starting width
+                # if the point turns out infeasible everywhere.
+                requests.extend((sizes, "point", (float(x), float(y)), _DUCT_WEDGE_HALF_WIDTH)
+                                 for x, y in positions)
+            elif angles:
+                wedge = float(p.get("wedge", _DUCT_WEDGE_HALF_WIDTH))
+                requests.extend((sizes, "angle", float(a), wedge) for a in angles)
+            else:
+                requests.extend((sizes, "slice", None, 0.0) for _ in range(int(p["n_files"])))
+
+        # --- subhypodermal preference band ---------------------------------
+        # A duct is tried here first (real conifer ducts sit subhypodermally)
+        # before the home zone's full depth is offered -- see _seat_duct.
+        # Depends on the duct's own built size (_DUCT_RING_BUFFER_FACTOR), so
+        # it is computed per distinct size and cached -- the buffer is the
+        # expensive operation here.
+        band_cache = {}
+
+        def _band(built_diameter):
+            """The outer shell of the home zone a duct of this size prefers.
+
+            Measured inward from the home zone's own outer limit
+            (``home_outer`` -- normally the hypodermis's inner edge, or the
+            palisade's inner edge when the config has a hypodermis but the
+            zone's outer bound is still the hypodermis; see the zone
+            construction above), then clipped back to ``zone`` so a shell
+            wider than the local home depth still respects both clearance
+            buffers. This is a *preference*, not the hard constraint --
+            ``zone`` already has the hypodermis/endodermis buffers baked in,
+            so a duct that doesn't fit this shell falls through to the full
+            zone in ``_seat_duct`` rather than being rejected.
+            """
+            key = round(built_diameter, 9)
+            if key not in band_cache:
+                shell = home_outer.difference(
+                    GeometryProcessor.buffer_polygon(home_outer, -built_diameter * _DUCT_RING_BUFFER_FACTOR, 0)
+                )
+                band_cache[key] = shell.intersection(zone)
+            return band_cache[key]
+
+        def _seat_duct(angle_deg, start_half_width, sizes, built_diameter):
+            """Escalating placement search for one duct centred on ``angle_deg``.
+
+            Tries, in order, and accepts the first candidate that seats the
+            duct at its full (scale 1.0) measured size:
+              1. the subhypodermal band, at ``start_half_width``;
+              2. the full home zone (band preference dropped), same width;
+              3. the full home zone, wedge widened stepwise up to
+                 ``_DUCT_WEDGE_WIDEN_STEPS``' cap.
+            Falls back to the best (widest achieved) candidate and warns,
+            naming the bearing and the achieved scale, when even the widest
+            wedge in the full zone falls short -- ``_build_duct``'s own
+            proportional scale-to-fit is the actual last resort; this
+            function never scales anything itself.
+            """
+            candidates = [
+                self._duct_wedge(_band(built_diameter), angle_deg, start_half_width),
+                self._duct_wedge(zone, angle_deg, start_half_width),
+            ]
+            for half_width in _DUCT_WEDGE_WIDEN_STEPS:
+                if half_width > start_half_width:
+                    candidates.append(self._duct_wedge(zone, angle_deg, half_width))
+
+            best = None
+            for region in candidates:
+                if region is None or region.is_empty:
+                    continue
+                duct = self._build_duct(region, sizes, built_diameter, host_cell_diameter)
+                if duct is None:
+                    continue
+                if best is None or duct["cell_diameter"] > best["cell_diameter"]:
+                    best = duct
+                if sizes["cell_diameter"] <= 0 or duct["cell_diameter"] >= sizes["cell_diameter"] * 0.999:
+                    return duct
+            if best is not None and sizes["cell_diameter"] > 0:
+                achieved_scale = best["cell_diameter"] / sizes["cell_diameter"]
+                if achieved_scale < 0.999:
+                    warnings.warn(
+                        f"resin duct at bearing {angle_deg:.1f} deg could not reach "
+                        f"full size in the available home zone; scaled to "
+                        f"{achieved_scale:.3f}"
+                    )
+            return best
+
+        # --- position-based seating -----------------------------------
+        # The primary seating strategy for both "positions" and "angles"
+        # (and the corner-anchored default, which is just two computed
+        # bearings): seat the duct at an explicit target POINT rather than
+        # at a wedge's widest-inscribed-circle centre. fit_inner_ellipse
+        # (what _seat_duct above uses) finds the deepest point of whatever
+        # sub-region it is handed, which is not necessarily anywhere near
+        # the requested bearing/position -- a measured duct could and did
+        # drift ~0.06mm (~6% of needle thickness) off its requested spot,
+        # in the direction the wedge happened to be locally widest. Seating
+        # by point removes that drift entirely for an already-feasible
+        # point, and bounds it to the minimal corrective move for one that
+        # isn't.
+        width, thickness = self._resolved_dimensions()
+        origin = Point(0.0, 3.5 * thickness / (3.0 * np.pi))   # pole_and_corner_angles' origin
+
+        def _bearing_target_point(angle_deg, depth):
+            """A point on ``angle_deg``'s ray from ``origin``, ``depth``
+            inward from where the ray first crosses the home zone's outer
+            limit (``home_outer``). Converts a bearing into a literal point
+            so ``_seat_duct_at_point`` can seat it exactly like a measured
+            ``positions`` entry.
+
+            ``depth`` should be the duct's own ``assembly_radius`` (not,
+            say, a fraction of ``built_diameter``): that is precisely how
+            far ``F = zone.buffer(-assembly_radius)`` sits inward of
+            ``home_outer`` in the radial direction, so a target built this
+            way lands as close as a straight radial offset can get it to
+            ``F``'s own boundary -- minimizing (ideally, eliminating) the
+            lateral snap ``_seat_duct_at_point`` would otherwise need to
+            find a feasible point, which is what left the corner-anchored
+            pair measurably off-bearing when this used a shallower,
+            built-diameter-based depth instead.
+            """
+            minx, miny, maxx, maxy = home_outer.bounds
+            max_r = max(maxx - minx, maxy - miny) * 2
+            theta = np.radians(angle_deg)
+            dx, dy = np.cos(theta), np.sin(theta)
+            ray = LineString([(origin.x, origin.y), (origin.x + max_r * dx, origin.y + max_r * dy)])
+            inter = home_outer.boundary.intersection(ray)
+            candidates = []
+            if not inter.is_empty:
+                geoms = inter.geoms if hasattr(inter, "geoms") else [inter]
+                candidates = [g for g in geoms if g.geom_type == "Point"]
+            if not candidates:
+                # Degenerate (tangent ray, or origin outside home_outer):
+                # fall back to origin itself -- _seat_duct_at_point's own
+                # feasibility/snapping still keeps the duct off the
+                # forbidden boundaries.
+                return Point(origin.x, origin.y)
+            nearest = min(candidates, key=lambda pt: (pt.x - origin.x) ** 2 + (pt.y - origin.y) ** 2)
+            return Point(nearest.x - depth * dx, nearest.y - depth * dy)
+
+        def _seat_duct_at_point(target, sizes, built_diameter, fallback_angle_deg, fallback_wedge=_DUCT_WEDGE_HALF_WIDTH):
+            """Seat a duct at (or as close as possible to) ``target``.
+
+            The feasible region ``F = zone.buffer(-assembly_radius)`` is
+            exactly the set of centres whose whole assembly (built core +
+            transition ring + carve margin) stays inside the home zone --
+            i.e. off the hypodermis and endodermis by their required
+            buffers. If ``target`` is already in ``F`` it is used verbatim.
+
+            If not, ``F`` is checked for a LOCAL correction: the nearest
+            point of ``F`` is accepted only when it is within one
+            ``assembly_radius`` of ``target`` -- a nudge, not a
+            relocation. ``F`` is not always one contiguous blob around the
+            target; nigra's abaxial pole, for instance, has zero room
+            anywhere nearby for its large duct's full assembly (mesophyll
+            too thin there once buffered off both the hypodermis and the
+            palisade band it also occupies), while ``F`` still exists
+            further away, at the two corners -- roughly 0.63mm off, on a
+            0.955mm-thick needle. Snapping there unconditionally would
+            silently relocate the duct across the needle instead of seating
+            it near its measured position, which is exactly what this
+            method must not do. So: an out-of-range nearest point is
+            treated the same as no feasible point at all, and the search
+            falls back to the older wedge-based ``_seat_duct`` -- shrink in
+            place at (or very near) the requested bearing/position, with a
+            ``warnings.warn`` naming the achieved scale, rather than a
+            distant full-size relocation.
+            """
+            assembly_radius = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+            feasible = GeometryProcessor.buffer_polygon(zone, -assembly_radius, 0)
+            center = None
+            if not feasible.is_empty:
+                if feasible.contains(target):
+                    center = target
+                else:
+                    candidate, _tp = nearest_points(feasible, target)
+                    if candidate.distance(target) <= assembly_radius:
+                        center = candidate
+            if center is not None:
+                return self._build_duct(None, sizes, built_diameter, host_cell_diameter, center=center)
+            return _seat_duct(fallback_angle_deg, fallback_wedge, sizes, built_diameter)
+
+        sliced     = [(sizes, None, 0.0) for sizes, mode, _v, _w in requests if mode == "slice"]
+        explicit   = [(sizes, angle, wedge) for sizes, mode, angle, wedge in requests if mode == "angle"]
+        positioned = [(sizes, xy, wedge) for sizes, mode, xy, wedge in requests if mode == "point"]
+
+        n_sliced = len(sliced)
 
         duct_data = []
-        for slice_id, slice_polygon in enumerate(GeometryProcessor.pizza_slice(polygon_for_duct, n_regions)):
-            if slice_id not in add_duct:
-                continue
-            duct_poly       = GeometryProcessor.fit_inner_ellipse(slice_polygon, rdp["diameter"] / 2)
-            outer           = GeometryProcessor.buffer_polygon(duct_poly["polygon"],  rdp["cell_diameter"] / 2, 0)
-            ring            = GeometryProcessor.buffer_polygon(duct_poly["polygon"], -(rdp["cell_diameter"] / 2) * _DUCT_RING_INNER_SHRINK)
-            canal           = GeometryProcessor.buffer_polygon(ring,                 -rdp["cell_diameter"])
-            duct_data.append({
-                "outer":       outer,
-                "ring":        ring,
-                "canal":       canal,
-                "ring_center": duct_poly["polygon"].centroid,
-            })
+
+        def _built(sizes):
+            return (sizes["lumen_diameter"]
+                    + 2 * sizes["cell_diameter"]
+                    + 2 * sizes["sheath_cell_diameter"])   # derived -- see docstring
+
+        if n_sliced == 2:
+            # Corner-anchored default: the needle's two true corners
+            # (pole_and_corner_angles), not pizza slices 3/6 -- see the
+            # module comment on _DUCT_PLACEMENT_ORDER and the docstring's
+            # "Placement" section above. Order (corner_neg then corner_pos)
+            # mirrors the historical slice-3-then-6 emission order, since
+            # duct_data's order feeds cell placement order downstream.
+            # Seated by point (via _bearing_target_point), same as an
+            # explicit "angles" bearing -- a corner IS just a computed
+            # bearing.
+            _adax, _abax, corner_pos, corner_neg = self.pole_and_corner_angles(width, thickness)
+            for (sizes, _a, _w), bearing in zip(sliced, (corner_neg, corner_pos)):
+                built_diameter = _built(sizes)
+                depth = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+                target = _bearing_target_point(bearing, depth)
+                duct = _seat_duct_at_point(target, sizes, built_diameter, bearing)
+                if duct is not None:
+                    duct_data.append(duct)
+        elif n_sliced > 0:
+            # 1 or 3+ slice-placed ducts: legacy fixed pizza-slice positions
+            # (_DUCT_PLACEMENT_ORDER), built on the new home zone/band. Gets
+            # the band -> zone preference (tier 1/2 of _seat_duct) but not
+            # the wedge-widening (tier 3): a pizza slice is already at its
+            # full angular allotment, and widening it would have to steal
+            # room from a neighbouring duct's own slice. No real config in
+            # this repo exercises this branch -- see the module comment on
+            # _DUCT_PLACEMENT_ORDER.
+            if n_sliced < 7:
+                n_regions = 7
+                add_duct = _DUCT_PLACEMENT_ORDER[:n_sliced]
+            else:
+                n_regions = n_sliced
+                add_duct = list(range(n_regions))
+
+            # Slice-placed ducts are emitted in ascending slice order -- the order
+            # the historical single-pass ``enumerate(pizza_slice(...))`` produced,
+            # kept because duct_data order feeds cell placement order downstream.
+            slice_plan = sorted(zip(add_duct, sliced), key=lambda kv: kv[0])
+
+            band_slices_cache = {}
+            zone_slices_cache = {}
+            for slice_id, (sizes, _a, _w) in slice_plan:
+                built_diameter = _built(sizes)
+                key = round(built_diameter, 9)
+                if key not in band_slices_cache:
+                    band_slices_cache[key] = GeometryProcessor.pizza_slice(_band(built_diameter), n_regions)
+                    zone_slices_cache[key] = GeometryProcessor.pizza_slice(zone, n_regions)
+                band_slices = band_slices_cache[key]
+                zone_slices = zone_slices_cache[key]
+
+                duct = None
+                if slice_id < len(band_slices):
+                    duct = self._build_duct(band_slices[slice_id], sizes, built_diameter, host_cell_diameter)
+                if slice_id < len(zone_slices) and (
+                    duct is None or duct["cell_diameter"] < sizes["cell_diameter"] * 0.999
+                ):
+                    zone_duct = self._build_duct(zone_slices[slice_id], sizes, built_diameter, host_cell_diameter)
+                    if zone_duct is not None and (duct is None or zone_duct["cell_diameter"] > duct["cell_diameter"]):
+                        duct = zone_duct
+                if duct is not None:
+                    duct_data.append(duct)
+
+        for sizes, angle, wedge in explicit:
+            built_diameter = _built(sizes)
+            depth = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+            target = _bearing_target_point(angle, depth)
+            duct = _seat_duct_at_point(target, sizes, built_diameter, angle, fallback_wedge=wedge)
+            if duct is not None:
+                duct_data.append(duct)
+
+        for sizes, xy, wedge in positioned:
+            built_diameter = _built(sizes)
+            target = Point(xy[0], xy[1])
+            fallback_angle = float(np.degrees(np.arctan2(xy[1] - origin.y, xy[0] - origin.x)) % 360.0)
+            duct = _seat_duct_at_point(target, sizes, built_diameter, fallback_angle, fallback_wedge=wedge)
+            if duct is not None:
+                duct_data.append(duct)
 
         return duct_data, rdp
+
+    @staticmethod
+    def _duct_wedge(annulus, angle_deg, half_width_deg):
+        """The part of ``annulus`` on a given bearing -- the explicit-placement
+        counterpart of one ``GeometryProcessor.pizza_slice`` wedge.
+
+        Cut as a wedge of +-``half_width_deg`` about ``angle_deg``, measured
+        around the annulus centroid in ``pole_and_corner_angles``' convention
+        (the same origin ``pizza_slice`` uses, so the two placement modes
+        share one angular frame). Returns the largest piece when the wedge
+        crosses the annulus in more than one part, or None when it misses it
+        entirely.
+        """
+        if annulus is None or annulus.is_empty:
+            return None
+        cx, cy = annulus.centroid.x, annulus.centroid.y
+        minx, miny, maxx, maxy = annulus.bounds
+        radius = max(maxx - minx, maxy - miny) * 2
+
+        a0 = np.radians(angle_deg - half_width_deg)
+        a1 = np.radians(angle_deg + half_width_deg)
+        # A few intermediate vertices so the wedge's outer arc stays outside
+        # the annulus for wide half-widths instead of cutting across it.
+        arc = np.linspace(a0, a1, max(3, int(2 * half_width_deg / 5) + 2))
+        wedge = Polygon([(cx, cy)] + [(cx + radius * np.cos(t), cy + radius * np.sin(t)) for t in arc])
+
+        piece = annulus.intersection(wedge)
+        if piece.is_empty:
+            return None
+        if piece.geom_type == "MultiPolygon":
+            piece = max(piece.geoms, key=lambda g: g.area)
+        return piece if piece.geom_type == "Polygon" else None
+
+    @staticmethod
+    def _build_duct(placement, sizes, built_diameter, host_cell_diameter, center=None):
+        """Build one duct's concentric geometry, either at an explicit
+        ``center`` or (when ``center`` is None) at the widest-inscribed-
+        circle seat ``fit_inner_ellipse`` finds inside ``placement``.
+
+        The two modes serve different placement strategies (see
+        ``_duct_zone_data``): ``center`` is how a duct gets seated at an
+        exact target point (measured ``positions``, or an ``angles``
+        bearing converted to a point -- ``_seat_duct_at_point``) rather than
+        wherever a wedge happens to be locally widest, which can drift the
+        centre well off the requested bearing/position (a duct's whole
+        assembly still has to fit -- callers seating this way are
+        responsible for guaranteeing that, typically via
+        ``zone.buffer(-assembly_radius)``, so this function does not
+        re-derive a scale in that case). ``placement`` (the ``center is
+        None`` path) is the older wedge/pizza-slice search, kept as the
+        fallback when no feasible point exists anywhere (see
+        ``_seat_duct_at_point``) and for the legacy ``_DUCT_PLACEMENT_ORDER``
+        fallback (1 or 3+ slice-placed ducts) -- there, ``scale`` can still
+        come out below 1.0 and the duct shrinks as a whole.
+
+        Returns the per-duct dict described in ``_duct_zone_data``'s
+        docstring.
+        """
+        built_radius = built_diameter / 2
+
+        # The reserved radius is the WHOLE assembly -- built core (canal +
+        # epithelium + sheath) *plus* the transition ring and the carve
+        # safety margin -- not just the built core. Bounding a duct's search
+        # region (the home zone/band/wedge in _duct_zone_data) is not
+        # sufficient on its own: the transition ring and carve margin are
+        # added *outside* built_radius (stage 4 below), so a duct seated
+        # right at the edge of a correctly-bounded region would still
+        # overshoot it by transition_cell_size + margin if only built_radius
+        # were reserved here -- which is exactly how a duct could still end
+        # up touching the hypodermis/endodermis even with a correctly
+        # buffered home zone. Computed from the UNSCALED sizes (mirrors
+        # stage 4's formula, which recomputes the same thing from the
+        # already-scaled sizes once `scale` is known below) so the reserved
+        # radius matches the duct's true, un-shrunk footprint.
+        assembly_radius = _duct_assembly_radius(sizes, built_diameter, host_cell_diameter)
+
+        if center is not None:
+            # Seated at an explicit point: the caller (_seat_duct_at_point)
+            # guarantees `center` lies inside zone.buffer(-assembly_radius),
+            # so the whole assembly is already known to fit here at full
+            # (scale 1.0) size -- no Chebyshev-centre search needed, and
+            # none of `placement`'s wedge/slice geometry is consulted.
+            scale = 1.0
+        else:
+            # Slot-finding: positions the duct within its sub-region at the
+            # true assembly scale. fit_inner_ellipse *shrinks* its requested
+            # radius (shrink-to-fit) when the region is too narrow to hold a
+            # circle that big at the Chebyshev center -- ``axes[0]`` is
+            # whatever radius it actually achieved, which can be smaller
+            # than ``assembly_radius``.
+            duct_poly = GeometryProcessor.fit_inner_ellipse(placement, assembly_radius)
+            center    = duct_poly["polygon"].centroid
+
+            # Scale-to-fit: axes[0] is the radius fit_inner_ellipse actually
+            # achieved at this region's Chebyshev center, which shrink-to-fit
+            # can leave smaller than the requested assembly_radius. Scale
+            # every size for THIS duct down by that same ratio so it shrinks
+            # as a whole (preserving lumen : epithelium : sheath
+            # proportions) instead of overflowing its region. This is the
+            # only place a duct's size is ever scaled.
+            scale = min(1.0, duct_poly["axes"][0] / assembly_radius) if assembly_radius > 0 else 1.0
+
+        d_lumen_diameter    = sizes["lumen_diameter"] * scale
+        d_cell_diameter     = sizes["cell_diameter"] * scale
+        d_cell_width        = sizes["cell_width"] * scale
+        d_sheath_diameter   = sizes["sheath_cell_diameter"] * scale
+        d_sheath_width      = sizes["sheath_cell_width"] * scale
+
+        # Stage 1 -- the lumen: a literal circle at the (possibly
+        # scaled) measured diameter.
+        canal = GeometryProcessor.buffer_polygon(center, d_lumen_diameter / 2, 0)
+
+        # Stage 2 -- epithelium ring, grown outward from the canal by its
+        # own radial thickness. Seeded at the band's radial midpoint so
+        # its own bulge (+-d_cell_diameter/2) exactly spans
+        # canal -> epithelium_outer.
+        epithelium_ring  = GeometryProcessor.buffer_polygon(canal, d_cell_diameter / 2, 0)
+        epithelium_outer = GeometryProcessor.buffer_polygon(canal, d_cell_diameter, 0)
+
+        # Stage 3 -- sheath ring, grown outward from the epithelium's own
+        # outer edge by its own radial thickness -- additive, never
+        # encroaching on the epithelium/canal built above.
+        sheath_ring  = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter / 2, 0)
+        sheath_outer = GeometryProcessor.buffer_polygon(epithelium_outer, d_sheath_diameter, 0)
+
+        # Stage 4 -- transition ring, grown outward from the sheath's own
+        # outer edge by an intermediate cell size (the geometric mean of the
+        # sheath cell and the host mesophyll cell). This is what makes a duct
+        # sit *surrounded by mesophyll* instead of against whatever tissue
+        # its slot borders, and it bounds the sheath's Voronoi region against
+        # a size-matched neighbour rather than letting it fan out into the
+        # coarse mesophyll/palisade as a radial sunburst. Unconditional --
+        # see _DUCT_SHEATH_MIN_RATIO's removal note at the top of this module.
+        # The only thing that can skip it is a config with no host tissue to
+        # blend into (no "mesophyll" params) or a degenerate sheath.
+        transition_ring       = None
+        transition_outer      = sheath_outer
+        transition_cell_size  = 0.0
+        if host_cell_diameter > 0 and d_sheath_diameter > 0:
+            transition_cell_size = float(np.sqrt(d_sheath_diameter * host_cell_diameter))
+            transition_ring  = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size / 2, 0)
+            transition_outer = GeometryProcessor.buffer_polygon(sheath_outer, transition_cell_size, 0)
+
+        # Small outward safety margin beyond the outermost ring's true
+        # outer edge (the transition ring's, when one is added, else the
+        # sheath's) so the carve mask fully clears that ring's cells'
+        # own bulge (mirrors the old code's incidental margin, scaled
+        # off the outermost ring's own radial size).
+        outermost_diameter = transition_cell_size if transition_ring is not None else d_sheath_diameter
+        carve = GeometryProcessor.buffer_polygon(
+            transition_outer, outermost_diameter * _DUCT_CARVE_MARGIN_FRACTION / 2, 0
+        )
+
+        return {
+            "carve":             carve,
+            "sheath_ring":       sheath_ring,
+            "epithelium_outer":  epithelium_outer,
+            "epithelium_ring":   epithelium_ring,
+            "transition_ring":       transition_ring,
+            "transition_cell_size":  transition_cell_size,
+            "canal":             canal,
+            "center":            center,
+            # Per-duct, already-scaled sizes -- place_resin_duct reads
+            # these directly instead of the shared, unscaled rdp values,
+            # so a duct that had to shrink to fit still gets cells sized
+            # to match its own (smaller) rings.
+            "lumen_diameter":       d_lumen_diameter,
+            "cell_diameter":        d_cell_diameter,
+            "cell_width":           d_cell_width,
+            "sheath_cell_diameter": d_sheath_diameter,
+            "sheath_cell_width":    d_sheath_width,
+        }
 
     @staticmethod
     def _stomata_carve_polygons(triplet_centers, sp, cell_diam):
@@ -522,6 +1678,334 @@ class NeedleAnatomy(Organ):
         return results
 
     # ------------------------------------------------------------------
+    # Intercellular air spaces (mesophyll-specific geometry)
+    # ------------------------------------------------------------------
+
+    def _apply_intercellular(self, ics: dict) -> None:
+        """Needle override of the intercellular-space geometry.
+
+        In the needle mesophyll the intercellular air spaces are small rhombic
+        (diamond-shaped) lacunae seated *on the walls* between adjacent mesophyll
+        cells. This override intercepts the ``mesophyll`` tissue and builds those
+        wall-centred rhombi (see :meth:`_apply_mesophyll_wall_rhombi`).
+
+        It also intercepts ``palisade``: instead of rhombi, thin full-height
+        air *slits* are carved across every ``slit_every``-th wall between
+        angularly-adjacent palisade cells (see
+        :meth:`_apply_palisade_wall_slits`), read from the optional
+        ``slit_width``/``slit_every`` per-tissue lists.
+
+        Any other tissue is delegated to the shared base implementation unchanged.
+        """
+        tissues = ics.get("tissue", [])
+        if isinstance(tissues, str):
+            tissues = [tissues]
+        if "mesophyll" not in tissues and "palisade" not in tissues:
+            super()._apply_intercellular(ics)
+            return
+
+        smoothness = ics.get("smoothness", 0)
+        if isinstance(smoothness, (int, float)):
+            smoothness_per_tissue = [float(smoothness)] * len(tissues)
+        else:
+            smoothness_per_tissue = [float(s) for s in smoothness]
+        smoothness_by_tissue = dict(zip(tissues, smoothness_per_tissue))
+
+        # slit_width / slit_every: optional parallel per-tissue lists (only
+        # consumed for "palisade"). Default to 0 (off) so tissue entries that
+        # don't set them -- and every pre-existing config, which never had
+        # these keys at all -- see no behaviour change.
+        slit_width = ics.get("slit_width", 0.0)
+        if isinstance(slit_width, (int, float)):
+            slit_width_per_tissue = [float(slit_width)] * len(tissues)
+        else:
+            slit_width_per_tissue = [float(w) for w in slit_width]
+        slit_width_by_tissue = dict(zip(tissues, slit_width_per_tissue))
+
+        slit_every = ics.get("slit_every", 0)
+        if isinstance(slit_every, (int, float)):
+            slit_every_per_tissue = [int(slit_every)] * len(tissues)
+        else:
+            slit_every_per_tissue = [int(e) for e in slit_every]
+        slit_every_by_tissue = dict(zip(tissues, slit_every_per_tissue))
+
+        # Build the wall-centred rhombic lacunae for the mesophyll only.
+        if "mesophyll" in tissues:
+            self._apply_mesophyll_wall_rhombi(smoothness_by_tissue.get("mesophyll", 0.0))
+
+        # Carve the thin wall slits for the palisade only.
+        if "palisade" in tissues:
+            self._apply_palisade_wall_slits(
+                slit_width_by_tissue.get("palisade", 0.0),
+                slit_every_by_tissue.get("palisade", 0),
+            )
+
+        # Delegate the remaining tissues (if any) to the generic implementation.
+        other_tissues = [t for t in tissues if t not in ("mesophyll", "palisade")]
+        if other_tissues:
+            remaining = dict(ics)
+            remaining["tissue"] = other_tissues
+            remaining["smoothness"] = [smoothness_by_tissue[t] for t in other_tissues]
+            remaining.pop("slit_width", None)
+            remaining.pop("slit_every", None)
+            super()._apply_intercellular(remaining)
+
+    def _apply_mesophyll_wall_rhombi(self, smoothness: float) -> None:
+        """Insert small rhombic air spaces on the walls between mesophyll cells.
+
+        For every wall shared by two adjacent mesophyll cells a rhombus (a
+        four-vertex diamond) is placed, centred on the wall midpoint and aligned
+        with the wall: its principal diagonal is parallel to the wall and spans
+        about ``MAJOR_WALL_FRACTION`` of the wall length, and its
+        principal-to-secondary diagonal ratio is ``AXIS_RATIO``.
+
+        The air-space cells use the same labelling conventions as the base
+        intercellular routine (``id_layer=0``, ``id_group=id_cell``).
+        """
+        MAJOR_WALL_FRACTION = 1.0 / 3.0   # principal diagonal ≈ 1/3 of the wall length
+        AXIS_RATIO = 2.0                  # principal : secondary diagonal = 2 : 1
+
+        # Any mesophyll-family type (plain "mesophyll" plus variants like the
+        # adaxial-only extra ring) gets the same wall-rhombi treatment -- they
+        # are all spongy mesophyll tissue.
+        mesophyll_cells = [
+            c for c in self.all_cells.cells
+            if c.polygon is not None and (c.type == "mesophyll" or c.type.startswith("mesophyll_"))
+        ]
+        if len(mesophyll_cells) < 2:
+            return
+
+        polys = [c.polygon for c in mesophyll_cells]
+        tree = STRtree(polys)
+
+        rhombus_polys: List[Polygon] = []
+        seen_pairs: set = set()
+        for i, poly_i in enumerate(polys):
+            for j in tree.query(poly_i):
+                if j <= i:
+                    continue
+                pair = (i, j)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                poly_j = polys[j]
+                if not poly_i.intersects(poly_j):
+                    continue
+                shared = poly_i.intersection(poly_j)
+                for wall in self._iter_wall_segments(shared):
+                    rhombus = self._wall_rhombus(wall, MAJOR_WALL_FRACTION, AXIS_RATIO)
+                    if rhombus is not None and not rhombus.is_empty and rhombus.area > 1e-6:
+                        rhombus_polys.append(rhombus)
+
+        if not rhombus_polys:
+            return
+
+        # Union all lacunae once. Carving the cells and building the air-space
+        # cells from this *same* geometry keeps their shared boundaries
+        # vertex-for-vertex identical, so the network sees real walls and
+        # junctions between each lacuna and its mesophyll hosts.
+        air_union = GeometryProcessor.union_polygons(rhombus_polys)
+
+        # Split the air union into its connected lacunae; each becomes one cell.
+        if isinstance(air_union, MultiPolygon):
+            air_faces = [g for g in air_union.geoms if not g.is_empty and g.area > 1e-6]
+        elif not air_union.is_empty and air_union.area > 1e-6:
+            air_faces = [air_union]
+        else:
+            return
+
+        # Carve the lacunae out of the mesophyll cells and insert them as
+        # air-space cells (shared post-fill placement). ``protect_topology`` keeps
+        # each rhombus's straight sides as distinct walls, so the neighbouring mesophyll cell keeps the matching
+        # notch instead of being straightened across it (see ``CellGenerator._build_topology``).
+        
+        seat_air_spaces(
+            self.all_cells, mesophyll_cells, air_union, air_faces,
+            protect_topology=True,
+        )
+
+    def _apply_palisade_wall_slits(self, width: float, every: int) -> None:
+        """Carve thin, full-height air slits across every ``every``-th wall
+        between angularly-adjacent palisade cells.
+
+        The palisade is a single ring, so its cells form one closed angular
+        sequence around the needle. Cells are ordered by the polar angle
+        (``atan2``) of their own polygon centroid about the organ centre --
+        by the time intercellular spaces are computed the whole cell
+        population has already been recentred on the origin (``add_stomata``
+        calls ``CellManager.recenter_cells`` earlier in ``_organ_recipe``,
+        well before Voronoi grouping / ``add_intercellular_spaces`` run), so
+        this angle is a genuine position around the ring, not an arbitrary
+        seeding index.
+
+        ``id_group`` is deliberately NOT used to pick "every Nth cell":
+        stomata carving and ``_restrict_zoned_layers`` both remove palisade
+        cells after they are first seeded, opening gaps in the ``id_group``
+        sequence. Taking parity on ``id_group`` would drift across those gaps
+        and skip walls unevenly instead of a true "every Nth cell" pattern.
+        The angular ordering has no such gaps -- it is recomputed from the
+        cells that actually survived to this point.
+
+        Only every ``every``-th wall of the ring's ``n`` walls is slit (wall
+        ``k`` sits between the ``k``-th and ``(k+1)``-th cell in angular
+        order); with ``every=2`` this pairs up angularly-adjacent cells
+        (0-1, 2-3, 4-5, ...), giving one slit per two cells as the bug
+        report asks for, and leaves every other wall solid so no palisade
+        cell loses more than one of its walls to a slit.
+        """
+        if width <= 0 or every < 2:
+            return
+
+        palisade_cells = [
+            c for c in self.all_cells.cells
+            if c.polygon is not None and c.type == "palisade"
+        ]
+        if len(palisade_cells) < every:
+            return
+
+        # Order the ring by angular position about the (recentred) organ centre.
+        palisade_cells.sort(key=lambda c: np.arctan2(c.polygon.centroid.y, c.polygon.centroid.x))
+        polys = [c.polygon for c in palisade_cells]
+        n = len(polys)
+
+        slit_polys: List[Polygon] = []
+        for k in range(0, n, every):
+            j = (k + 1) % n
+            poly_i, poly_j = polys[k], polys[j]
+            if not poly_i.intersects(poly_j):
+                continue
+            shared = poly_i.intersection(poly_j)
+            for wall in self._iter_wall_segments(shared):
+                # Slightly short of the full wall length (not exactly 1.0):
+                # a slit reaching all the way to the wall's own endpoints
+                # lands its corners exactly on existing cell-junction
+                # vertices, which can turn the carve difference into a
+                # degenerate GeometryCollection instead of a clean polygon.
+                slit = self._wall_slit(wall, 0.9, width)
+                if slit is not None and not slit.is_empty and slit.area > 1e-9:
+                    slit_polys.append(slit)
+
+        if not slit_polys:
+            return
+
+        # Union all slits once, same reasoning as the mesophyll rhombi: carving
+        # the cells and building the air-space cells from the same geometry
+        # keeps the shared boundaries vertex-for-vertex identical.
+        slit_union = GeometryProcessor.union_polygons(slit_polys)
+
+        if isinstance(slit_union, MultiPolygon):
+            slit_faces = [g for g in slit_union.geoms if not g.is_empty and g.area > 1e-9]
+        elif not slit_union.is_empty and slit_union.area > 1e-9:
+            slit_faces = [slit_union]
+        else:
+            return
+
+        # protect_topology keeps each slit's straight sides as distinct walls
+        # so the neighbouring palisade cell keeps the matching notch instead
+        # of being straightened across it.
+        seat_air_spaces(
+            self.all_cells, palisade_cells, slit_union, slit_faces,
+            protect_topology=True,
+        )
+
+    @staticmethod
+    def _iter_wall_segments(shared) -> List[LineString]:
+        """Yield the 1-D wall segments from a cell/cell intersection geometry.
+
+        Two adjacent Voronoi cells share their boundary as a ``LineString`` (or a
+        ``MultiLineString``); point-only touches and degenerate parts are ignored.
+        """
+        walls: List[LineString] = []
+        if isinstance(shared, LineString):
+            if shared.length > 0:
+                walls.append(shared)
+        elif isinstance(shared, MultiLineString):
+            walls.extend(g for g in shared.geoms if g.length > 0)
+        elif isinstance(shared, GeometryCollection):
+            for g in shared.geoms:
+                if isinstance(g, (LineString, MultiLineString)):
+                    walls.extend(NeedleAnatomy._iter_wall_segments(g))
+        return walls
+
+    @staticmethod
+    def _wall_rhombus(wall: LineString, major_fraction: float, axis_ratio: float) -> Optional[Polygon]:
+        """Build a small rhombus centred on ``wall`` and aligned with it.
+
+        The rhombus is a four-vertex diamond whose principal diagonal is parallel
+        to the wall and spans ``major_fraction`` of the wall length; the secondary
+        (perpendicular) diagonal is the principal divided by ``axis_ratio``. 
+        Returns ``None`` for walls too short.
+        """
+        length = wall.length
+        if length <= 1e-9:
+            return None
+
+        # Wall midpoint (by arc length) and local orientation.
+        mid = wall.interpolate(0.5, normalized=True)
+        p0 = np.asarray(wall.coords[0])
+        p1 = np.asarray(wall.coords[-1])
+        direction = p1 - p0
+        norm = np.hypot(direction[0], direction[1])
+        if norm <= 1e-12:
+            return None
+        unit = direction / norm                       # along the wall
+        perp = np.array([-unit[1], unit[0]])          # perpendicular to the wall
+
+        half_major = 0.5 * length * major_fraction    # along the wall
+        half_minor = half_major / axis_ratio          # across the wall
+        if half_major <= 1e-9 or half_minor <= 1e-9:
+            return None
+
+        c = np.array([mid.x, mid.y])
+        verts = [
+            c + half_major * unit,    # tip along the wall (+)
+            c + half_minor * perp,    # tip across the wall (+)
+            c - half_major * unit,    # tip along the wall (-)
+            c - half_minor * perp,    # tip across the wall (-)
+        ]
+        return Polygon([tuple(v) for v in verts])
+
+    @staticmethod
+    def _wall_slit(wall: LineString, length_fraction: float, width: float) -> Optional[Polygon]:
+        """Build a thin rectangle centred on ``wall`` and aligned with it.
+
+        Same local frame as :meth:`_wall_rhombus` (wall midpoint, ``unit`` along
+        the wall, ``perp`` across it), but returns a **rectangle** rather than a
+        diamond: the four corners are ``c +- half_major*unit +- half_minor*perp``.
+        ``length_fraction`` ~1.0 gives a full-height slit ("height = the
+        mesophyll"); ``width`` is an absolute (not wall-relative) tangential
+        size. Returns ``None`` for degenerate/too-short walls, matching
+        :meth:`_wall_rhombus`'s contract.
+        """
+        length = wall.length
+        if length <= 1e-9:
+            return None
+
+        mid = wall.interpolate(0.5, normalized=True)
+        p0 = np.asarray(wall.coords[0])
+        p1 = np.asarray(wall.coords[-1])
+        direction = p1 - p0
+        norm = np.hypot(direction[0], direction[1])
+        if norm <= 1e-12:
+            return None
+        unit = direction / norm                       # along the wall
+        perp = np.array([-unit[1], unit[0]])          # perpendicular to the wall
+
+        half_major = 0.5 * length * length_fraction    # along the wall
+        half_minor = 0.5 * width                       # across the wall (absolute)
+        if half_major <= 1e-9 or half_minor <= 1e-9:
+            return None
+
+        c = np.array([mid.x, mid.y])
+        verts = [
+            c + half_major * unit + half_minor * perp,
+            c + half_major * unit - half_minor * perp,
+            c - half_major * unit - half_minor * perp,
+            c - half_major * unit + half_minor * perp,
+        ]
+        return Polygon([tuple(v) for v in verts])
+
+    # ------------------------------------------------------------------
     # Cell-placement methods — call geometry helpers then place cells
     # ------------------------------------------------------------------
 
@@ -531,56 +2015,427 @@ class NeedleAnatomy(Organ):
         Geometry is computed here (organ-specific); the cell placement is the
         shared :func:`special_tissues.place_resin_duct`.
         """
-        duct_data, rdp = self._duct_zone_data(self._layers_polygons)
+        duct_data, _rdp = self._duct_zone_data(self._layers_polygons)
         if not duct_data:
             return
 
         layer_for_duct = [l["name"] for l in self._layers_polygons].index("mesophyll")
-        place_resin_duct(self.all_cells, duct_data, rdp, layer_for_duct)
+        place_resin_duct(self.all_cells, duct_data, layer_for_duct)
+
+    def add_transfusion_tissue(self):
+        """Fill the reserved transfusion-tissue zone by circle-packing.
+
+        Only runs when ``transfusion_tissue.pack_circles`` is set (see
+        ``_create_central_layers``, which reserves ``self._transfusion_zone``
+        instead of emitting one-row-per-ring "transfusion" layer polygons in
+        that case). Transfusion cells are irregular and densely packed
+        rather than a uniform ring, so :func:`tissue_class.fill_by_packing`
+        (Apollonian circle packing, already used this way for vessels/rays
+        elsewhere in the engine) is a better fit than the ring seeder.
+
+        Two structural passes, parenchyma first: transfusion parenchyma --
+        the large ellipses that are the visually dominant element in
+        ``Transfusion_tissue.png`` -- is packed into the *full* zone first,
+        so it claims the good open space at its own (large) scale. Transfusion
+        tracheids are then packed into whatever's left over (``zone`` minus
+        the parenchyma's own footprint), at their own (small) scale, forming
+        a fine matrix that fills the gaps around the already-placed
+        parenchyma. Packing parenchyma second (into the leftover swiss-cheese
+        residue) would bound its achievable circle size by the gaps between
+        an already-placed tracheid matrix rather than by its own diameter,
+        systematically under-filling it -- the opposite of what the
+        reference image shows. ``transfusion_tracheids_ratio``
+        (tracheid:parenchyma) splits the overall ``proportion`` occupancy
+        target between the two passes; the second pass's ``proportion`` is
+        rescaled against the *remaining* region's own (usually smaller) area
+        so the combined tissue still lands close to the original total
+        occupancy. Each pass uses its own diameter (``parenchyma_diameter``/
+        ``tracheids_diameter``, falling back to the shared ``diameter_max``
+        when zero/absent) so parenchyma can be large while tracheids are
+        small.
+        """
+        zone = getattr(self, "_transfusion_zone", None)
+        if zone is None or zone.is_empty:
+            return
+
+        tp = self.transfusion_params
+        diameter_max = tp.get("diameter_max", 0.05)
+        proportion = tp.get("proportion", 0.6)
+        ratio = tp.get("transfusion_tracheids_ratio", 1.0)
+        p_tt = ratio / (1.0 + ratio) if ratio > 0 else 0.0
+        p_tp = 1.0 - p_tt
+
+        parenchyma_diameter = tp.get("parenchyma_diameter") or diameter_max
+        tracheids_diameter = tp.get("tracheids_diameter") or diameter_max
+
+        zone_area = zone.area
+        remaining_zone = zone
+        if p_tp > 0:
+            parenchyma_placed = fill_by_packing(
+                self.all_cells, zone, "transfusion parenchyma",
+                rng=self.rng, diameter_max=parenchyma_diameter,
+                proportion=proportion * p_tp, allow_ellipse=True,
+            )
+            if parenchyma_placed:
+                parenchyma_union = unary_union([p for p, _, _ in parenchyma_placed])
+                remaining_zone = zone.difference(parenchyma_union)
+
+        if remaining_zone.is_empty or remaining_zone.area <= 0 or p_tp >= 1.0:
+            return
+
+        remaining_target_area = zone_area * proportion * p_tt
+        tracheid_proportion = min(0.95, remaining_target_area / remaining_zone.area)
+        if tracheid_proportion <= 0:
+            return
+        fill_by_packing(
+            self.all_cells, remaining_zone, "transfusion tracheid",
+            rng=self.rng, diameter_max=tracheids_diameter,
+            proportion=tracheid_proportion, allow_ellipse=True,
+        )
+
+    def _restrict_zoned_layers(self) -> None:
+        """Prune any layer carrying a ``zone_angles`` entry down to only the
+        cells whose recentred polar angle falls inside the configured zone.
+
+        Layers like ``hypodermis_corner`` or ``mesophyll_abaxial`` need a
+        nonzero ``thickness_profile`` floor everywhere (see
+        ``_offset_layer_polygon``) purely to keep ``CellGenerator``'s
+        next-layer bleed clip from cropping the *neighboring* ring -- that
+        floor was never meant to also seed a visible row of cells outside the
+        layer's real zone (a corner wedge, or one half of the cross-section).
+        This mirrors how ``DicotLeafAnatomy`` varies its palisade layer count
+        by region (some rows genuinely don't exist outside their zone,
+        leaf_class.py:862-965) without needing that mechanism's per-column
+        ``fill_along`` seeding -- the ring geometry here is left completely
+        untouched; only cell *presence* is restricted, via the same
+        ``CellManager.remove_cells``/``cell.angle`` (set by
+        ``recenter_cells``, already called earlier by ``add_stomata``) used
+        for directional stomata placement.
+        """
+        for layer in self.layers:
+            zone = layer.get("zone_angles")
+            if not zone:
+                continue
+            cells = self.all_cells.get_cells_by_type(layer["name"])
+            if not cells:
+                continue
+            to_remove = [c for c in cells
+                        if not self._angle_in_zone(np.degrees(c.angle) % 360.0, zone)]
+            if to_remove:
+                self.all_cells.remove_cells(to_remove)
+
+    @staticmethod
+    def _angle_in_zone(angle_deg: float, zone: Dict[str, Any]) -> bool:
+        if zone.get("mode") == "half":
+            pole = float(zone["pole"]) % 360.0
+            return NeedleAnatomy._circular_diff(angle_deg, pole) < 90.0
+        half_width = float(zone.get("half_width", 15.0))
+        return any(NeedleAnatomy._circular_diff(angle_deg, c) <= half_width
+                   for c in zone.get("centers", []))
+
+    @staticmethod
+    def _circular_diff(a: float, b: float) -> float:
+        d = abs(a - b) % 360.0
+        return min(d, 360.0 - d)
 
     def _aerenchyma_target_denominator(self, n_files: int) -> float:
         return float(n_files ** 1.12 + 1)
 
     def add_stomata(self):
-        """Add stomata to the needle epidermis."""
+        """Add stomata to the needle epidermis.
+
+        With ``n_files`` only, stomata are spread evenly around the whole
+        epidermis ring (previous behavior, unchanged). With ``n_adaxial`` and
+        ``n_abaxial`` both set, placement instead goes through
+        :meth:`_directional_stomata_triplets` for a directional,
+        corner-excluded layout.
+        """
         self.all_cells.recenter_cells()
         stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
         if not stomata_params_list:
             return
 
-        sp         = stomata_params_list[0]
-        n_stomata  = sp["n_files"]
+        sp = stomata_params_list[0]
         epidermis_cells = self.all_cells.get_cells_by_type("epidermis")
         if not epidermis_cells:
             return
 
         cell_diam = epidermis_cells[0].diameter
+        n_adaxial = sp.get("n_adaxial")
+        n_abaxial = sp.get("n_abaxial")
 
-        # Sample n_stomata evenly spaced groups, avoiding the very ends
-        indices = np.linspace(
-            _STOMATA_SKIP_BORDER_PTS,
-            len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
-            n_stomata, dtype=int
-        )
+        if n_adaxial is not None and n_abaxial is not None:
+            triplet_centers = self._directional_stomata_triplets(epidermis_cells, sp, n_adaxial, n_abaxial, cell_diam)
+        else:
+            n_stomata = sp["n_files"]
+            # Sample n_stomata evenly spaced groups, avoiding the very ends
+            indices = np.linspace(
+                _STOMATA_SKIP_BORDER_PTS,
+                len(epidermis_cells) - np.round(len(epidermis_cells) / n_stomata),
+                n_stomata, dtype=int
+            )
 
-        # Build triplet centroids from placed epidermis cell groups
-        triplet_centers = []
-        for i in indices:
-            g = epidermis_cells[i].id_group
-            try:
-                triplet_centers.append((
-                    self.all_cells.get_centroid_of_group(g - 1),
-                    self.all_cells.get_centroid_of_group(g),
-                    self.all_cells.get_centroid_of_group(g + 1),
-                ))
-            except KeyError:
-                pass  # adjacent group was removed; skip this stomata position
+            # Build triplet centroids from placed epidermis cell groups
+            triplet_centers = []
+            for i in indices:
+                g = epidermis_cells[i].id_group
+                try:
+                    triplet_centers.append((
+                        self.all_cells.get_centroid_of_group(g - 1),
+                        self.all_cells.get_centroid_of_group(g),
+                        self.all_cells.get_centroid_of_group(g + 1),
+                    ))
+                except KeyError:
+                    pass  # adjacent group was removed; skip this stomata position
 
         stomata_geoms = self._stomata_carve_polygons(triplet_centers, sp, cell_diam)
 
         # Cell placement (guard cells + chamber + pore, carved into the
         # epidermis) is the shared special-tissue function.
         place_stomata(self.all_cells, stomata_geoms, sp, cell_diam)
+
+        self._clear_hypodermis_under_chambers(stomata_geoms, sp)
+
+    def _clear_hypodermis_under_chambers(self, stomata_geoms: List[tuple], sp: Dict[str, Any]) -> None:
+        """Delete the innermost hypodermis *seed cell* under each sub-stomatal chamber.
+
+        This runs before ``CellGenerator.voronoi_diagram`` (called later by
+        ``Organ.generate_cells``), i.e. while cells are still bare seeds with no
+        polygon yet. That timing is exactly what makes this simple: a deleted
+        hypodermis seed just leaves a gap in the seed field, and the Voronoi
+        tessellation automatically grows the neighbouring (palisade) seeds'
+        territory into that gap -- there is no polygon surgery to do, no
+        re-clipping of the hypodermis ring, nothing else to keep consistent.
+        This mirrors ``_restrict_zoned_layers``, which also prunes seeds by
+        ``CellManager.remove_cells`` pre-tessellation rather than reshaping
+        finished polygons.
+
+        A single hypodermis *cell* is not one seed point here: ``generate_cells_
+        info`` samples each cell's border as a small cluster of ~10 points
+        sharing one ``id_group`` (later dissolved back into one polygon by
+        ``process_voronoi_groups``). The removal test is therefore evaluated on
+        each *group's* centroid, not on individual points -- a chamber whose
+        probe only grazes the near-side points of a border-straddling cell
+        would otherwise have its far-side points survive, leaving a shrunken
+        sliver of that same hypodermis cell still standing right at the
+        chamber instead of a clean gap.
+
+        The candidate region is an *oriented column* under the chamber (see
+        :meth:`_inward_column`), not an isotropic ``chamber.buffer(...)`` disc.
+        A disc probe buys radial reach at the cost of growing sideways just as
+        fast, which -- against this needle's 2-layer (5-layer at the corners)
+        hypodermis band -- strips whole rows of healthy neighbouring
+        hypodermis cells to reach one cell's depth inward (measured directly:
+        an isotropic probe wide enough to open every stoma deleted 34% of the
+        whole hypodermis band). The column keeps the tangential width fixed
+        at the chamber's own footprint and only lets ``chamber_clearance``
+        control how far inward it reaches, so it can punch through a thick
+        band without also eating the cells beside it.
+
+        Only the hypodermis cell(s) radially *inward* of the chamber are
+        removed (the outer hypodermis row must survive) -- "inward" is decided
+        by comparing each candidate group's centroid distance from the organ
+        centre (set to the origin by ``recenter_cells`` at the top of
+        ``add_stomata``) against the chamber centroid's distance from that
+        same centre. This check is still needed even with the column probe:
+        ``_inward_column``'s padding (see ``_STOMA_HYPODERMIS_PAD_FACTOR``)
+        pulls the column's start back past the chamber's own inner edge --
+        and, for a shallow chamber, potentially back past the chamber
+        centroid itself -- to reach hypodermis cells that sit a bit outside
+        the chamber's raw silhouette, so it can no longer be assumed that
+        everything inside the column is inward of the centroid.
+        """
+        chamber_clearance = float(sp.get("chamber_clearance", 0.0) or 0.0)
+        if chamber_clearance <= 0.0:
+            return
+
+        hypodermis_cells = [c for c in self.all_cells.cells
+                             if c.type == "hypodermis" or c.type.startswith("hypodermis_")]
+        if not hypodermis_cells:
+            return
+
+        hypo_diam = hypodermis_cells[0].diameter
+        depth = chamber_clearance * hypo_diam
+
+        groups: Dict[int, List[Cell]] = {}
+        for c in hypodermis_cells:
+            groups.setdefault(c.id_group, []).append(c)
+        group_centroids = {
+            gid: (float(np.mean([m.x for m in members])), float(np.mean([m.y for m in members])))
+            for gid, members in groups.items()
+        }
+
+        to_remove: List[Cell] = []
+        for geom in stomata_geoms:
+            chamber = geom[3]
+            if chamber is None:
+                continue
+            gc1, gc2 = geom[1], geom[2]
+            region = self._inward_column(chamber, gc1, gc2, depth,
+                                          pad=_STOMA_HYPODERMIS_PAD_FACTOR * hypo_diam)
+            if region is None:
+                continue
+            chamber_radius = np.hypot(chamber.centroid.x, chamber.centroid.y)
+            for gid, (gx, gy) in group_centroids.items():
+                if np.hypot(gx, gy) < chamber_radius and region.contains(Point(gx, gy)):
+                    to_remove.extend(groups[gid])
+
+        if to_remove:
+            self.all_cells.remove_cells(to_remove)
+            self.all_cells.recalculate_cell_properties()
+
+    @staticmethod
+    def _inward_column(chamber: Polygon, gc1: Polygon, gc2: Polygon, depth: float,
+                        pad: float = 0.0) -> Optional[Polygon]:
+        """Oriented probe rectangle for :meth:`_clear_hypodermis_under_chambers`.
+
+        Built directly in the organ (global) frame -- the chamber polygon
+        already lives there, so there is no round trip through a local frame
+        the way :meth:`GeometryProcessor.place_local` needs for shapes that
+        are authored at the origin.
+
+        The long axis must be the stoma's own *local* inward direction, not
+        the line from the chamber centroid to the organ centre: this
+        needle's cross-section is a flattened dome, not a circle, so "toward
+        the organ centroid" diverges from the true local surface normal by
+        up to ~60 degrees away from the flat/pointed extremes (measured
+        directly) -- using it would aim the column past the cells it's
+        supposed to hit. ``CellGenerator.create_stomata`` already derives the
+        one direction that's actually correct, from the epidermis triplet's
+        own tangent (``tangent_angle = atan2(next-prev)``, inward =
+        ``tangent_angle + pi/2``); that same axis is recovered here from the
+        two guard cells it built with it, which sit side by side along that
+        tangent -- the line through their centroids -- with the sign picked
+        by whichever perpendicular points back toward the organ centre.
+
+        The column starts at the chamber's own innermost point (the vertex of
+        ``chamber`` furthest along the inward direction) and extends further
+        inward by ``depth``. Its tangential half-width is fixed at the
+        chamber's own extent perpendicular to the inward direction -- *not*
+        derived from ``depth``/``chamber_clearance`` -- so it only ever covers
+        what is genuinely underneath the chamber, however far inward it
+        reaches.
+
+        ``pad`` (a fixed fraction of the hypodermis cell diameter, independent
+        of ``chamber_clearance``) grows the window slightly on both the
+        radial start and the tangential half-width. It exists because the
+        hypodermis ring is seeded independently of the stoma (its own layer
+        pass, own row spacing) rather than snapped to this stoma's local
+        frame, so the nearest real hypodermis cell centroid can sit a bit
+        outside the chamber's own raw silhouette (measured directly: the
+        unpadded column, though correctly oriented, matched almost no cells)
+        without that meaning it is not genuinely the cell touching the
+        chamber. ``pad`` does not scale with ``chamber_clearance``, so it
+        does not reintroduce the sideways over-removal an isotropic buffer
+        caused.
+
+        Returns ``None`` if the two guard cells coincide (degenerate tangent).
+        """
+        ccx, ccy = chamber.centroid.x, chamber.centroid.y
+
+        t = np.array([gc2.centroid.x - gc1.centroid.x, gc2.centroid.y - gc1.centroid.y])
+        t_norm = np.linalg.norm(t)
+        if t_norm == 0:
+            return None
+        t = t / t_norm
+        u = np.array([-t[1], t[0]])            # perpendicular to the tangent
+        if np.dot(u, [-ccx, -ccy]) < 0:         # pick the sign pointing inward
+            u = -u
+
+        rel = np.asarray(chamber.exterior.coords) - np.array([ccx, ccy])
+        du = rel @ u   # signed offset inward from the centroid
+        dt = rel @ t   # signed tangential offset from the centroid
+
+        inner_edge = float(du.max()) - pad             # chamber's own innermost extent, padded
+        half_width = float(np.abs(dt).max()) + pad     # chamber's own tangential half-width, padded
+
+        corners_local = [
+            (inner_edge,         -half_width),
+            (inner_edge,          half_width),
+            (inner_edge + depth,  half_width),
+            (inner_edge + depth, -half_width),
+        ]
+        corners = [(ccx + d * u[0] + w * t[0], ccy + d * u[1] + w * t[1])
+                   for d, w in corners_local]
+        return Polygon(corners)
+
+    def _directional_stomata_triplets(self, epidermis_cells: List[Cell], sp: Dict[str, Any],
+                                      n_adaxial: int, n_abaxial: int, cell_diam: float) -> List[tuple]:
+        """Split epidermis groups into an adaxial (flat) and abaxial (domed)
+        angular run around the needle centre, excluding a corner wedge from
+        both, and pick ``n_adaxial``/``n_abaxial`` evenly spaced triplets.
+
+        ``recenter_cells`` (called by ``add_stomata`` before this) already
+        centres every cell on the organ's centroid and sets ``cell.angle =
+        atan2(y, x)``, in the same frame ``pole_and_corner_angles`` measures
+        -- used here as the single source of truth for where the adaxial/
+        abaxial poles and the two corners actually sit (a fixed 0/90/180/270
+        guess is only exactly right for one specific aspect ratio; this
+        needle's actual corners sit well off 0/180, see
+        ``pole_and_corner_angles``'s docstring).
+
+        The two runs are picked independently, each including its own most
+        extreme allowed position right at the edge of the shared
+        corner-exclusion wedge -- so the adaxial run's pick nearest one
+        corner and the abaxial run's pick nearest that same corner can land
+        close together just outside the wedge on either side. ``cell_diam``
+        drives a minimum-separation filter (:meth:`_drop_overlapping_triplets`)
+        that catches this (and any other) close pair after picking.
+        """
+        width, thickness = self._resolved_dimensions()
+        adaxial_pole, _, corner_pos, corner_neg = self.pole_and_corner_angles(width, thickness)
+
+        group_angle: Dict[int, float] = {}
+        for c in epidermis_cells:
+            group_angle.setdefault(c.id_group, float(np.degrees(c.angle) % 360.0))
+
+        centroid: Dict[int, Any] = {}
+        for g in group_angle:
+            try:
+                centroid[g] = self.all_cells.get_centroid_of_group(g)
+            except KeyError:
+                pass  # adjacent group was removed
+
+        # edge_margin (0-0.5, default 0.12) as a fraction of a quarter-turn:
+        # how many degrees of wedge to exclude on each side of each corner.
+        corner_half_width = float(sp.get("edge_margin", 0.12)) * 90.0
+        corner_zone = {"mode": "wedge", "centers": [corner_pos, corner_neg], "half_width": corner_half_width}
+        adaxial_zone = {"mode": "half", "pole": adaxial_pole}
+
+        non_corner = [(g, a) for g, a in group_angle.items() if not self._angle_in_zone(a, corner_zone)]
+        adaxial_run = sorted(g for g, a in non_corner if self._angle_in_zone(a, adaxial_zone))
+        abaxial_run = sorted(g for g, a in non_corner if not self._angle_in_zone(a, adaxial_zone))
+
+        triplets = (self._pick_stomata_triplets(adaxial_run, centroid, n_adaxial)
+                    + self._pick_stomata_triplets(abaxial_run, centroid, n_abaxial))
+        min_sep = 1.3 * (float(sp.get("width", 0.02)) + cell_diam)
+        return self._drop_overlapping_triplets(triplets, min_sep)
+
+    @staticmethod
+    def _pick_stomata_triplets(run: List[int], centroid: Dict[int, Any], n: int) -> List[tuple]:
+        """``n`` evenly spaced prev/curr/next triplets along one epidermis
+        angular run (an adaxial or abaxial arc, corners already excluded)."""
+        if n <= 0 or not run:
+            return []
+        picks = np.unique(np.linspace(0, len(run) - 1, n).astype(int))
+        out = []
+        for i in picks:
+            g = run[i]
+            if (g - 1) in centroid and (g + 1) in centroid:
+                out.append((centroid[g - 1], centroid[g], centroid[g + 1]))
+        return out
+
+    @staticmethod
+    def _drop_overlapping_triplets(triplets: List[tuple], min_sep: float) -> List[tuple]:
+        """Greedily keep triplets in order, dropping any whose stoma centre
+        (the triplet's middle position) lands within ``min_sep`` of an
+        already-kept one."""
+        kept = []
+        for t in triplets:
+            cx, cy = t[1]
+            if all(np.hypot(cx - kx, cy - ky) >= min_sep for _, (kx, ky), _ in kept):
+                kept.append(t)
+        return kept
 
     # ------------------------------------------------------------------
     # Visualization hook
@@ -598,11 +2453,16 @@ class NeedleAnatomy(Organ):
         """
         extra = {}
 
-        # Resin ducts — delegate entirely to the shared geometry helper
+        # Resin ducts — delegate entirely to the shared geometry helper.
+        # Painted largest-first (sheath, then epithelium's outer edge, then
+        # the canal) so each smaller disc overwrites the center of the
+        # previous one, giving a 3-band concentric preview without computing
+        # annuli explicitly.
         duct_data, _ = self._duct_zone_data(layers_polygons)
         if duct_data:
-            extra["resin_duct"]  = [d["outer"] for d in duct_data]
-            extra["resin_canal"] = [d["canal"] for d in duct_data]
+            extra["resin_sheath"] = [d["carve"] for d in duct_data]
+            extra["resin_duct"]   = [d["epithelium_outer"] for d in duct_data]
+            extra["resin_canal"]  = [d["canal"] for d in duct_data]
 
         # Stomata — approximate seed positions from the epidermis layer polygon
         stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
@@ -639,9 +2499,3 @@ class NeedleAnatomy(Organ):
                 extra["stomata"] = [geom[0] for geom in stomata_geoms]
 
         return extra
-
-        
-
-
-
-

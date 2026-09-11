@@ -57,6 +57,7 @@ def place_packed_group(
     angle_center: Optional[Tuple[float, float]] = None,
     min_diameter: Optional[float] = None,
     alt_type: Optional[str] = None,
+    track_ids: Optional[list] = None,
 ) -> List[Tuple[Polygon, str, int]]:
     """Place border-point seeds for every circle of a circle-packing.
 
@@ -118,9 +119,11 @@ def place_packed_group(
             rtype = cell_type
 
         gid = id_base + i
+        tid = track_ids[i] if track_ids is not None and i < len(track_ids) else None
         for border_pt in border_coords[1:]:
             target.add_cell(Cell.radial(
                 rtype, border_pt[0], border_pt[1], actual_diam, gid, (acx, acy),
+                track_id=tid,
             ))
         placed_out.append((placed, rtype, gid))
 
@@ -136,13 +139,15 @@ def fill_along(
     cx: float,
     cy: float,
     xylem_union=None,
+    keep_union=None,
 ) -> None:
     """Place cell seeds along a geometry edge (Polygon exterior or line).
 
     Each resampled position along the edge becomes one Voronoi group, oriented
     by its local tangent (via ``CellGenerator.cell_border``).  Positions falling
-    inside ``xylem_union`` are skipped (but still consume an id_group, matching
-    the legacy behaviour).
+    inside ``xylem_union`` are skipped; if ``keep_union`` is given, positions
+    *outside* it are skipped too (so the seeds are confined to it).  A skipped
+    position still consumes an id_group, matching the legacy behaviour.
     """
     if isinstance(geometry, Polygon):
         line_segs = [geometry.exterior]
@@ -168,7 +173,9 @@ def fill_along(
         )
 
         for i, _coord in enumerate(cells_coords[1:]):
-            if xylem_union and xylem_union.contains(Point(_coord[0], _coord[1])):
+            pt = Point(_coord[0], _coord[1])
+            if (xylem_union and xylem_union.contains(pt)) or \
+               (keep_union is not None and not keep_union.contains(pt)):
                 next_id_group += 1
                 continue
             id_group = next_id_group

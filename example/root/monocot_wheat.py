@@ -59,12 +59,12 @@ def anatomy_metrics(root: RootAnatomy) -> dict:
 def main(show=True):
     wheat = OrganInputData.for_root()  # monocot preset (planttype=1)
 
-    # ── Stele size + radial parenchyma (pith) gradient ─────────────────────
+    # -- Stele size + radial parenchyma (pith) gradient ---------------------
     wheat.set_value("stele", "thickness",            0.283)
     wheat.set_value("stele", "cell_diameter",        0.013)
     wheat.set_value("stele", "cell_diameter_center", 0.018)
 
-    # ── Vasculature: ring of metaxylem vessels + protoxylem (no star) ──────
+    # -- Vasculature: ring of metaxylem vessels + protoxylem (no star) ------
     wheat.set_value("xylem", "xylem_shape",              "default")
     wheat.set_value("xylem", "n_vascular_bundles",       3)      # polyarch metaxylem ring
     wheat.set_value("xylem", "vessel_diameter",          0.0945)
@@ -74,18 +74,18 @@ def main(show=True):
     wheat.set_value("xylem", "protoxylem_cluster_width", 0.023)
     wheat.set_value("xylem", "protoxylem_cluster_height", 0.025)
 
-    # ── Phloem bundles (between the xylem poles) ───────────────────────────
+    # -- Phloem bundles (between the xylem poles) ---------------------------
     wheat.set_value("phloem", "sieve_diameter", 0.014)
     wheat.set_value("phloem", "cluster_width",  0.014)
     wheat.set_value("phloem", "cluster_height", 0.0249)
 
-    # ── Endodermis / pericycle (stele boundary) ────────────────────────────
+    # -- Endodermis / pericycle (stele boundary) ----------------------------
     wheat.set_value("endodermis", "cell_diameter", 0.0162)
     wheat.set_value("endodermis", "cell_width",    0.0281)
     wheat.set_value("pericycle", "cell_diameter",  0.0183)
     wheat.set_value("pericycle", "cell_width",     0.013)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     wheat.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.018,
@@ -108,13 +108,13 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     wheat.set_value("exodermis", "cell_diameter", 0.028)
     wheat.set_value("exodermis", "cell_width",    0.033)
     wheat.set_value("epidermis", "cell_diameter", 0.017)
     wheat.set_value("epidermis", "cell_width",    0.034)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     wheat.set_value("inter_cellular_spaces", "smoothness", 0.05)
     wheat.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])
@@ -130,12 +130,12 @@ def main(show=True):
     # Other anatomy of wheat
     wheat_watde = OrganInputData.for_root()  # monocot preset (planttype=1)
 
-    # ── Stele size + radial parenchyma (pith) gradient ─────────────────────
+    # -- Stele size + radial parenchyma (pith) gradient ---------------------
     wheat_watde.set_value("stele", "thickness",            0.35)
     wheat_watde.set_value("stele", "cell_diameter",        0.010)
     wheat_watde.set_value("stele", "cell_diameter_center", 0.016)
 
-    # ── Vasculature: ring of metaxylem vessels + protoxylem (no star) ──────
+    # -- Vasculature: ring of metaxylem vessels + protoxylem (no star) ------
     wheat_watde.set_value("xylem", "xylem_shape",              "default")
     wheat_watde.set_value("xylem", "n_vascular_bundles",       7)      # polyarch metaxylem ring
     wheat_watde.set_value("xylem", "vessel_diameter",          0.0675)
@@ -145,18 +145,18 @@ def main(show=True):
     wheat_watde.set_value("xylem", "protoxylem_cluster_width", 0.021)
     wheat_watde.set_value("xylem", "protoxylem_cluster_height", 0.021)
 
-    # ── Phloem bundles (between the xylem poles) ───────────────────────────
+    # -- Phloem bundles (between the xylem poles) ---------------------------
     wheat_watde.set_value("phloem", "sieve_diameter", 0.013)
     wheat_watde.set_value("phloem", "cluster_width",  0.025)
     wheat_watde.set_value("phloem", "cluster_height", 0.020)
 
-    # ── Endodermis / pericycle (stele boundary) ────────────────────────────
+    # -- Endodermis / pericycle (stele boundary) ----------------------------
     wheat_watde.set_value("endodermis", "cell_diameter", 0.0175)
     wheat_watde.set_value("endodermis", "cell_width",    0.027)
     wheat_watde.set_value("pericycle", "cell_diameter",  0.022)
     wheat_watde.set_value("pericycle", "cell_width",     0.013)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     wheat_watde.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.018,
@@ -179,13 +179,13 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     wheat_watde.set_value("exodermis", "cell_diameter", 0.029)
     wheat_watde.set_value("exodermis", "cell_width",    0.031)
     wheat_watde.set_value("epidermis", "cell_diameter", 0.029)
     wheat_watde.set_value("epidermis", "cell_width",    0.021)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     wheat_watde.set_value("inter_cellular_spaces", "smoothness", 0.05)
     wheat_watde.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])

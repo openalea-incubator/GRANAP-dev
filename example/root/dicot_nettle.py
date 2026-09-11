@@ -27,7 +27,7 @@ from openalea.granap.input_data import (
     DicotCambiumParams,
     DicotSecondaryGrowthParams,
     DicotSecondaryXylemParams,
-    DicotSecondaryCambiumParams,
+    SecondaryCambiumParams,
     DicotSecondaryPhloemParams
 )
 
@@ -42,7 +42,7 @@ def main(show=True):
     data.params.append(DicotCambiumParams())
     data.params.append(DicotSecondaryGrowthParams())
     data.params.append(DicotSecondaryXylemParams())
-    data.params.append(DicotSecondaryCambiumParams())
+    data.params.append(SecondaryCambiumParams())
     data.params.append(DicotSecondaryPhloemParams())
 
     # Focus-ellipse outline from a measured contour profile :
@@ -54,11 +54,11 @@ def main(show=True):
     data.params.append({"name": "base_shape", **shape_params})
 
     data.set_value("secondary_growth", "value", True)
-    # ── Stele size + radial parenchyma gradient ────────────────────────────
+    # -- Stele size + radial parenchyma gradient ----------------------------
     data.set_value("stele", "cell_diameter",        0.012)
     data.set_value("stele", "cell_diameter_center", 0.01)
 
-    # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
+    # -- Star xylem (n arms, radial extent, vessel size gradient) -----------
     data.set_value("xylem", "n_vascular_peak",     2)
     data.set_value("xylem", "radius_valley_side",        0.018)
     data.set_value("xylem", "radius_peak_side",        0.08)
@@ -71,7 +71,7 @@ def main(show=True):
     data.set_value("xylem", "gradient_steepness",  3)
     data.set_value("xylem", "enforce_gradient_min", 1)
     data.set_value("xylem", "allow_ellipse", False)
-    # ── Secondary xylem  ───────────────────────────────────────────────────
+    # -- Secondary xylem  ---------------------------------------------------
     data.set_value("secondary_xylem", "prop_stele", 0.65)
     data.set_value("secondary_xylem", "cell_diameter", 0.012)
     data.set_value("secondary_xylem", "cell_width", 0.010)
@@ -87,13 +87,13 @@ def main(show=True):
     data.set_value("secondary_xylem", "parenchyma_width_sd", 0.005)
     data.set_value("secondary_xylem", "parenchyma_width", 0.015)     
 
-    # ── Primary cambium ring (valleys first, maturing outward) ─────────────
+    # -- Primary cambium ring (valleys first, maturing outward) -------------
     data.set_value("cambium", "radius_valley_side",   0.019)
     data.set_value("cambium", "radius_peak_side",   0.082)
     data.set_value("cambium", "visible_distance", 0.0)
     data.set_value("cambium", "arc_peak_side",          0.014)
     data.set_value("cambium", "arc_valley_side",       0.015)
-    # ── Secondary cambium ring  ────────────────────────────────────────────
+    # -- Secondary cambium ring  --------------------------------------------
     # Smooth best-fit superellipse (focus_ellipse) fitted to the measured
     # cambium contour: 
     n_layer = 4
@@ -107,7 +107,7 @@ def main(show=True):
     data.set_value("secondary_cambium", "cell_diameter",    0.009)
     data.set_value("secondary_cambium", "cell_width",       0.029)
     data.set_value("secondary_cambium", "n_layers", n_layer)
-    # Secondary Phloem (between the star arms, near the cambium) ───────────
+    # Secondary Phloem (between the star arms, near the cambium) -----------
     data.set_value("secondary_phloem", "height",    0.12)
     data.set_value("secondary_phloem", "top_width", 1.5)
     data.set_value("secondary_phloem", "alive_distance", 0.09)
@@ -121,7 +121,7 @@ def main(show=True):
     data.set_value("secondary_phloem", "parenchyma_width", 0.016)
 
 
-    # ── Phellogen layer ────────────────────────────────────────────────────
+    # -- Phellogen layer ----------------------------------------------------
     data.params.append({
         "name": "phellem",
         "cell_diameter": 0.013,

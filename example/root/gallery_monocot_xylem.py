@@ -47,12 +47,12 @@ def cell_type_counts(root: RootAnatomy) -> dict:
 
 
 scenarios = [
-    # ── default: ring of discrete metaxylem bundles ────────────────────────
+    # -- default: ring of discrete metaxylem bundles ------------------------
     {"label": "Default — 1 metaxylem", "shape": "default",
      "xylem": {"n_vascular_bundles": 1}},
     {"label": "Default — 6 metaxylem", "shape": "default",
      "xylem": {"n_vascular_bundles": 6}},
-    # ── arch: metaxylem ring + graded protoxylem poles ─────────────────────
+    # -- arch: metaxylem ring + graded protoxylem poles ---------------------
     {"label": "Arch — 6 metaxylem / 10 protoxylem", "shape": "arch",
      "xylem": {"n_metaxylem": 6, "n_vascular_peak": 10,
                "vessel_diameter": 0.08, "vessel_diameter_sd": 0.005,
@@ -70,7 +70,7 @@ scenarios = [
                "protoxylem_diameter_min": 0.01, "protoxylem_diameter": 0.06,
                "protoxylem_pole_width_inner" : 0.06, "protoxylem_pole_width_outer" : 0.02},
      "phloem": {"sieve_diameter": 0.015, "cluster_width": 0.04, "cluster_height": 0.035}},
-    # ── star: star-shaped xylem + phloem in the valleys between arms ────────
+    # -- star: star-shaped xylem + phloem in the valleys between arms --------
     {"label": "Star — 11 arms, no pith", "shape": "star",
      "xylem": {"n_vascular_peak": 11, "arc_peak_side": 0.012, "arc_valley_side": 0.02},
      "phloem": {"cluster_width": 0.015, "cluster_height": 0.02, "sieve_diameter": 0.008}},

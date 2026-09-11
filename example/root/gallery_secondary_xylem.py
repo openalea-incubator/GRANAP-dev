@@ -61,7 +61,7 @@ def main(show=False):
 
         roots.append(root)
 
-    # ── Visualisation ─────────────────────────────────────────────────────────
+    # -- Visualisation ---------------------------------------------------------
 
     n = len(scenarios)
     n_cols = 4
