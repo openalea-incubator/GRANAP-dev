@@ -4,14 +4,23 @@ Geometry processor module for handling polygon operations.
 
 import numpy as np
 import shapely as sp
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Callable
 from shapely.geometry import Point, Polygon, MultiPolygon, GeometryCollection
+from shapely.affinity import translate as _shapely_translate, rotate as _shapely_rotate, scale as _shapely_scale
 from cv2 import fitEllipse
 from scipy.optimize import minimize
 from scipy.spatial import Delaunay, ConvexHull
 from shapely.ops import unary_union
 
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
+
+
+#: Grid the polygon fed to :func:`shapely.maximum_inscribed_circle` is snapped to
+#: in :meth:`GeometryProcessor._chebyshev_center`.  Coarse enough (~1e6x) to swamp
+#: the ~1e-16 last-bit differences between platform libm implementations, which
+#: otherwise decide the inscribed-circle tie in a symmetric zone; fine enough to be
+#: far below any anatomical length in the model (cell diameters are ~1e-2 mm).
+_MIC_SNAP_GRID = 1e-9
 
 
 class GeometryProcessor:
@@ -56,7 +65,41 @@ class GeometryProcessor:
         x = radius * np.cos(theta)
         y = radius * np.sin(theta)
         return sp.Polygon(np.column_stack((x, y)))
-    
+
+    @staticmethod
+    def oriented_ellipse(tx: float, ty: float, width: float, height: float,
+                         angle_deg: float, resolution: int = 64) -> Polygon:
+        """Axis-aligned unit disc scaled to ``width`` x ``height``, rotated so its
+        major (``height``) axis points along ``angle_deg`` (minus the 90 deg that maps
+        the +y major axis to the radial direction), then translated to ``(tx, ty)``.
+
+        The one source for every oriented vascular cluster ellipse (phloem
+        valleys, arch phloem, proto/phloem bundles, whole vascular-bundle
+        envelopes).  See :meth:`place_local` for the matching transform applied to
+        a *set* of local-frame geometries.
+        """
+        raw = Point(0, 0).buffer(1, resolution=resolution)
+        raw = _shapely_scale(raw, width / 2, height / 2)
+        raw = _shapely_rotate(raw, angle_deg - 90, origin=(0, 0))
+        return _shapely_translate(raw, tx, ty)
+
+    @staticmethod
+    def place_local(geoms, cx: float, cy: float, angle_deg: float):
+        """Map local-frame geometries (radial axis = local +y) to their place.
+
+        Applies the same transform as :meth:`oriented_ellipse` — ``rotate(angle_deg
+        - 90, origin=0)`` then ``translate(cx, cy)`` — to every geometry in
+        ``geoms``, so an envelope built at the origin with its radial axis along
+        +y and all of its interior sub-zones move together to ``(cx, cy)`` at
+        orientation ``angle_deg``.  Returns a list of transformed geometries.
+        """
+        out = []
+        for g in geoms:
+            g = _shapely_rotate(g, angle_deg - 90, origin=(0, 0))
+            g = _shapely_translate(g, cx, cy)
+            out.append(g)
+        return out
+
     @staticmethod
     def star_polygon(
         n_branches: int,
@@ -171,6 +214,74 @@ class GeometryProcessor:
         w, h = width / 2.0, height / 2.0
         return sp.Polygon([(-w, -h), (w, -h), (0.0, h)])
 
+    @staticmethod
+    def contour_polygon(shape: str, *, cx: float = 0.0, cy: float = 0.0,
+                        radius: float = 0.0, width: float = 0.0, height: float = 0.0,
+                        n_branches: int = 5,
+                        radius_peak_side: float = None, radius_valley_side: float = None,
+                        arc_peak_side: float = 0.05, arc_valley_side: float = 0.10,
+                        ellipse_ratio: float = 1.0,
+                        profile=None, exponent: float = 4.0,
+                        smooth: float = None) -> Polygon:
+        """One source of truth for an organ / tissue *contour* outline, at ``(cx, cy)``.
+
+        Every contour in the package — the organ ``base_shape``, the eustele /
+        cylinder ring, and the root / stem secondary cambium — comes from here, so
+        the ``circle`` / ``ellipse`` / ``star`` / ``focus_ellipse`` / ``square`` /
+        ``rectangle`` / ``triangle`` family is defined once.
+
+        Sizing: ``circle`` uses ``radius``; box / ``ellipse`` / ``focus_ellipse`` /
+        ``triangle`` use ``width`` / ``height`` (each falling back to ``2*radius``
+        when 0, and ``ellipse`` height further to ``2*radius*ellipse_ratio``).
+
+        ``star`` is the single peak/valley parameterisation used everywhere — an
+        :meth:`oriented_star_polygon` from absolute ``radius_peak_side`` /
+        ``radius_valley_side`` + arcs over ``n_branches`` arms.  When the valley
+        radius is the larger the star is rotated half a period automatically (arms
+        point to the valleys — the root secondary cambium's "peaks in the
+        primary-xylem valleys").
+
+        ``focus_ellipse`` prefers a measured ``profile`` (best-fit superellipse),
+        else ``width`` / ``height`` + ``exponent``.  ``smooth`` (0..1), when given,
+        Laplacian-smooths a star outline (used by the root cambium).
+        """
+        n = max(int(n_branches), 2)
+        if shape == "circle":
+            poly = GeometryProcessor.circle_polygon(radius)
+        elif shape == "ellipse":
+            w = width or 2.0 * radius
+            h = height or 2.0 * radius * ellipse_ratio
+            poly = GeometryProcessor.ellipse_to_polygon(0.0, 0.0, w / 2.0, h / 2.0, 0.0)
+        elif shape == "focus_ellipse":
+            if profile:
+                semi_major, semi_minor, exp = GeometryProcessor.fit_focus_ellipse(profile)
+                poly = GeometryProcessor.focus_ellipse_polygon(
+                    0.0, 0.0, semi_minor, semi_major, 0.0, exponent=exp)
+            else:
+                w = width or 2.0 * radius
+                h = height or 2.0 * radius
+                poly = GeometryProcessor.focus_ellipse_polygon(
+                    0.0, 0.0, w / 2.0, h / 2.0, 0.0, exponent=exponent)
+        elif shape == "star":
+            rp = radius_peak_side if radius_peak_side is not None else radius
+            rv = radius_valley_side if radius_valley_side is not None else radius
+            poly = GeometryProcessor.oriented_star_polygon(
+                n_branches=n, radius_peak_side=rp, radius_valley_side=rv,
+                arc_peak_side=arc_peak_side, arc_valley_side=arc_valley_side)
+            if smooth is not None:
+                coords = GeometryProcessor.smoothing_polygon(
+                    np.column_stack(poly.exterior.xy), smooth_factor=smooth, iterations=5)
+                poly = sp.Polygon(coords).buffer(0)
+        elif shape == "square":
+            w = width or 2.0 * radius
+            poly = GeometryProcessor.rectangle_polygon(w, w)
+        elif shape == "rectangle":
+            poly = GeometryProcessor.rectangle_polygon(width or 2.0 * radius, height or 2.0 * radius)
+        elif shape == "triangle":
+            poly = GeometryProcessor.triangle_polygon(width or 2.0 * radius, height or 2.0 * radius)
+        else:                                                   # unknown -> circle
+            poly = GeometryProcessor.circle_polygon(radius)
+        return _shapely_translate(poly, cx, cy) if (cx or cy) else poly
 
     @staticmethod
     def resample_coords(coords: np.ndarray, target_n_points: int = 200,
@@ -280,6 +391,73 @@ class GeometryProcessor:
             return polygon_buffered
 
     @staticmethod
+    def variable_buffer_polygon(polygon: Polygon, center: Point, offset_fn: Callable[[float], float],
+                                n_pts: int = 720, smooth_factor: float = 0.3) -> Polygon:
+        """
+        Buffer a polygon boundary by a per-angle distance around ``center``,
+        instead of the uniform Minkowski buffer of :meth:`buffer_polygon`.
+
+        Used for tissue rings whose radial thickness varies with position
+        (e.g. a needle's adaxial-thicker mesophyll or corner-thickened
+        hypodermis): each resampled boundary point is moved along its own
+        radial direction from ``center`` by ``offset_fn`` of its polar angle,
+        rather than by one shared distance.
+
+        Args:
+            polygon:       Input polygon.
+            center:        Point used as the polar-angle / radial-offset origin.
+            offset_fn:     Callable(angle_degrees) -> distance, same sign
+                            convention as buffer_polygon's ``distance``
+                            (negative = shrink inward, positive = expand
+                            outward). ``angle_degrees`` is the boundary
+                            point's polar angle around ``center``, in [0, 360).
+            n_pts:         Number of points the boundary is resampled to
+                            before offsetting (uniform arc-length resampling).
+            smooth_factor: Optional post-offset Laplacian smoothing (0 = none).
+
+        Returns:
+            The offset (and optionally smoothed) polygon.
+        """
+        coords = np.array(polygon.exterior.coords)
+        coords = GeometryProcessor.resample_coords(coords, target_n_points=n_pts)
+
+        cx, cy = center.x, center.y
+        dx = coords[:, 0] - cx
+        dy = coords[:, 1] - cy
+        r = np.hypot(dx, dy)
+        r_safe = np.where(r < 1e-9, 1e-9, r)
+        angles = np.degrees(np.arctan2(dy, dx)) % 360.0
+        offsets = np.array([offset_fn(a) for a in angles])
+
+        r_new = np.clip(r + offsets, 1e-6, None)
+        scale = r_new / r_safe
+        new_coords = np.column_stack((cx + dx * scale, cy + dy * scale))
+
+        new_poly = sp.Polygon(new_coords)
+        if not new_poly.is_valid or new_poly.is_empty:
+            new_poly = new_poly.buffer(0)
+
+        # A self-intersecting ("bowtie") result -- e.g. from closely-spaced
+        # narrow peaks in offset_fn combined with coarse resampling -- can
+        # make buffer(0) split the polygon into a MultiPolygon of a real
+        # lobe plus tiny sliver artifacts. Collapse to the single largest
+        # component, same defensive pattern buffer_polygon already uses for
+        # its smoothing branch, so callers always get back one Polygon.
+        if hasattr(new_poly, "geoms"):
+            parts = [g for g in new_poly.geoms if not g.is_empty and hasattr(g, "exterior")]
+            if parts:
+                new_poly = max(parts, key=lambda g: g.area)
+            else:
+                new_poly = Polygon()
+
+        if smooth_factor > 0 and not new_poly.is_empty and hasattr(new_poly, "exterior") and new_poly.exterior is not None:
+            xy = np.array(new_poly.exterior.coords.xy)
+            coords_smooth = GeometryProcessor.smoothing_polygon(xy.T, smooth_factor)
+            new_poly = sp.Polygon(coords_smooth)
+
+        return new_poly
+
+    @staticmethod
     def union_polygons(polygons: List[Polygon]) -> Polygon:
         """
         Union a list of polygons.
@@ -345,7 +523,7 @@ class GeometryProcessor:
           (area grows toward ``4*rx*ry``, latus rectum increases);
         - ``exponent < 2``  -> pointier toward a diamond (latus rectum shrinks).
 
-        The curve keeps the axis endpoints (``±rx`` on the major axis, ``±ry`` on
+        The curve keeps the axis endpoints (``+/-rx`` on the major axis, ``+/-ry`` on
         the minor) fixed; only the fullness between them changes.  ``angle`` is in
         degrees, applied about the shape centre before translating to ``(cx, cy)``.
         """
@@ -643,7 +821,7 @@ class GeometryProcessor:
         Pole of inaccessibility (largest inscribed circle): ``(cx, cy, radius)``.
 
         Computed by GEOS via :func:`shapely.maximum_inscribed_circle` — a single
-        C call returning the centre→boundary segment.  This replaced a Python
+        C call returning the centre->boundary segment.  This replaced a Python
         grid search + scipy Nelder-Mead refinement that ran once per packed
         circle and dominated ``pack_circles``.  The result differs from the old
         approximation at the tolerance level, so it is a deliberate, golden-
@@ -656,6 +834,18 @@ class GeometryProcessor:
 
         minx, miny, maxx, maxy = polygon.bounds
         tolerance = max(maxx - minx, maxy - miny) * 1e-4 or 1e-6
+        # A zone that is symmetric about an axis has *two* tied optimal centres and
+        # GEOS' branch-and-bound picks one of them; with unsnapped input the choice
+        # is made by the last bits of the vertices, which differ between platform
+        # libm implementations (dicot_stem's 3-o'clock bundle sits exactly on the
+        # x-axis and did precisely this).  Snapping to a common grid makes both
+        # platforms feed GEOS bit-identical input, so the tie resolves the same way.
+        try:
+            snapped = sp.set_precision(polygon, _MIC_SNAP_GRID)
+            if not snapped.is_empty and snapped.area > 0.0:
+                polygon = snapped
+        except Exception:
+            pass
         try:
             line = sp.maximum_inscribed_circle(polygon, tolerance=tolerance)
             (cx, cy), _boundary_pt = line.coords
@@ -693,8 +883,8 @@ class GeometryProcessor:
         Args:
             polygon:             Shapely polygon to fill.
             proportion:          Stop when filled_area / polygon_area >= proportion.
-            direction:           Size gradient: "center" (large→small outward),
-                                 "edge" (large→small inward), "middle" (large at mid-radius),
+            direction:           Size gradient: "center" (large->small outward),
+                                 "edge" (large->small inward), "middle" (large at mid-radius),
                                  None (no spatial gradient; size drawn randomly per circle).
             diameter_max:        Maximum circle diameter.
             diameter_min:        Minimum circle diameter.  Defaults to
@@ -822,7 +1012,10 @@ class GeometryProcessor:
                 new_cx    = cx + magnitude * np.cos(angle)
                 new_cy    = cy + magnitude * np.sin(angle)
                 if polygon.contains(Point(new_cx, new_cy)):
-                    new_r_ins = polygon.exterior.distance(Point(new_cx, new_cy))
+                    # .exterior for a Polygon (unchanged); .boundary for a
+                    # MultiPolygon zone (which has no .exterior).
+                    edge = polygon.exterior if polygon.geom_type == "Polygon" else polygon.boundary
+                    new_r_ins = edge.distance(Point(new_cx, new_cy))
                     if new_r_ins >= diameter_min / 2:
                         cx, cy, r_ins = new_cx, new_cy, new_r_ins
 
@@ -955,9 +1148,15 @@ class GeometryProcessor:
         return placed
 
     @staticmethod
-    def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
+    def fit_inner_ellipse(polygon, rx: Optional[float] = None, ry: Optional[float] = None, angle: Optional[float] = None, shrink_step=0.98, min_scale=0.2, debug=False):
         """
-        Fit an inner ellipse to a polygon
+        Fit an inner ellipse to a polygon.
+
+        ``angle`` (degrees), when given, overrides the orientation that would
+        otherwise be auto-detected from the polygon's own shape via
+        ``fitEllipse`` -- useful when the polygon being fit into (e.g. one
+        half of a vascular region split down the middle) has a natural aspect
+        ratio that doesn't reflect the desired ellipse orientation.
         """
         # convert to numpy array of points
         points = np.array(polygon.exterior.coords.xy).T
@@ -968,8 +1167,9 @@ class GeometryProcessor:
         points = points.reshape(-1, 1, 2).astype(np.float32)
 
         # fit ellipse to get orientation and aspect ratio
-        (cx_fit, cy_fit), (major, minor), angle = fitEllipse(points)
-        
+        (cx_fit, cy_fit), (major, minor), fit_angle = fitEllipse(points)
+        angle = fit_angle if angle is None else angle
+
         # Use Chebyshev Center (deepest point inside) instead of fitEllipse center or Centroid
         cx, cy = GeometryProcessor.get_chebyshev_center(polygon)
     
@@ -1002,7 +1202,7 @@ class GeometryProcessor:
                 break
     
             scale_factor_x *= shrink_step
-            scale_factor_y *= shrink_step*0.95
+            scale_factor_y *= shrink_step
         
         if result_ellipse is None:
             # Fallback
@@ -1023,6 +1223,47 @@ class GeometryProcessor:
             plt.show()
     
         return result_ellipse
+
+    @staticmethod
+    def push_ellipse_to_boundary(polygon, ellipse, direction, max_iter=40):
+        """Translate ``ellipse`` (a :func:`fit_inner_ellipse`-style dict) along
+        ``direction`` as far as possible while it stays inside ``polygon``.
+
+        Binary search on the translation distance, same style as the
+        shrink-until-it-fits loop in :func:`fit_inner_ellipse`: an ellipse
+        fit via a Chebyshev centre or a shrink search can end up well short
+        of the polygon's actual boundary, so this pushes it the rest of the
+        way until it touches. ``axes``/``angle`` are left unchanged; only
+        ``center``/``polygon`` move.
+        """
+        dx, dy = direction
+        norm = np.hypot(dx, dy)
+        if norm == 0:
+            return ellipse
+        dx, dy = dx / norm, dy / norm
+
+        base_polygon = ellipse["polygon"]
+        minx, miny, maxx, maxy = polygon.bounds
+        hi = np.hypot(maxx - minx, maxy - miny)
+        lo = 0.0
+
+        def fits(t):
+            return polygon.contains(sp.affinity.translate(base_polygon, dx * t, dy * t))
+
+        for _ in range(max_iter):
+            mid = (lo + hi) / 2.0
+            if fits(mid):
+                lo = mid
+            else:
+                hi = mid
+
+        if lo == 0.0:
+            return ellipse
+        return {
+            **ellipse,
+            "center": [ellipse["center"][0] + dx * lo, ellipse["center"][1] + dy * lo],
+            "polygon": sp.affinity.translate(base_polygon, dx * lo, dy * lo),
+        }
 
     @staticmethod
     def pizza_slice(polygon, n_slices):
@@ -1055,7 +1296,7 @@ class GeometryProcessor:
     
 
     @staticmethod
-    def two_ellipses(polygon, rx, ry):
+    def two_ellipses(polygon, rx, ry, angle: Optional[float] = None):
         # vertical splitting line (make it long enough to fully cross the polygon)
         center = polygon.centroid
     
@@ -1089,10 +1330,24 @@ class GeometryProcessor:
         )
     
         ellipses = []
-    
 
-        ellipses.append(GeometryProcessor.fit_inner_ellipse(left_poly.buffer(-0.002), rx, ry))
-        ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry))
+        # When an explicit angle is given, mirror it across the vertical
+        # split line for the right-hand ellipse (180-angle, equivalent to
+        # -angle for an axis whose orientation is only defined mod 180) so
+        # the pair forms a symmetric "V"/"^" pattern tilted outward from the
+        # midline, rather than both ellipses tilting the same direction.
+        right_angle = angle if angle is None else (180.0 - angle)
+
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(left_poly.buffer(-0.002), rx, ry, angle=angle))
+        ellipses.append(GeometryProcessor.fit_inner_ellipse(right_poly.buffer(-0.002), rx, ry, angle=right_angle))
+
+        # A Chebyshev-centre/shrink-search fit can land well short of the
+        # region's actual edge; slide each ellipse the rest of the way
+        # outward (against the *full*, undivided polygon -- the split line
+        # above is no longer an obstacle once moving away from it) so it
+        # touches the real boundary instead of floating near the middle.
+        ellipses[0] = GeometryProcessor.push_ellipse_to_boundary(polygon, ellipses[0], (-1.0, 0.0))
+        ellipses[1] = GeometryProcessor.push_ellipse_to_boundary(polygon, ellipses[1], (1.0, 0.0))
     
         return ellipses
 

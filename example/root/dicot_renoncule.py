@@ -23,12 +23,12 @@ SEED = 0
 def main(show=True):
     data = OrganInputData.for_dicot_root()
 
-    # ── Stele size + radial parenchyma gradient ────────────────────────────
+    # -- Stele size + radial parenchyma gradient ----------------------------
     data.set_value("stele", "thickness",            0.31)
     data.set_value("stele", "cell_diameter",        0.01)
     data.set_value("stele", "cell_diameter_center", 0.030)
 
-    # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
+    # -- Star xylem (n arms, radial extent, vessel size gradient) -----------
     data.set_value("xylem", "n_vascular_peak",     6)
     data.set_value("xylem", "radius_valley_side",        0.05)
     data.set_value("xylem", "radius_peak_side",        0.155)
@@ -40,13 +40,13 @@ def main(show=True):
     data.set_value("xylem", "gradient_inflection", 0.05 / 0.14)
     data.set_value("xylem", "gradient_steepness",  3)
 
-    # ── Primary phloem (between the star arms, near the cambium) ───────────
+    # -- Primary phloem (between the star arms, near the cambium) -----------
     data.set_value("phloem", "sieve_diameter",    0.007)
     data.set_value("phloem", "relative_distance", 0.1)
     data.set_value("phloem", "cluster_height",    0.05)
     data.set_value("phloem", "cluster_width",     0.03)
 
-    # ── Primary cambium ring (valleys first, maturing outward) ─────────────
+    # -- Primary cambium ring (valleys first, maturing outward) -------------
     data.set_value("cambium", "radius_valley_side",   0.051)
     data.set_value("cambium", "radius_peak_side",   0.14)
     data.set_value("cambium", "visible_distance", 0.1)
@@ -55,13 +55,13 @@ def main(show=True):
     data.set_value("cambium", "cell_diameter",    0.005)
     data.set_value("cambium", "cell_width",       0.01)
 
-    # ── Endodermis / pericycle ─────────────────────────────────────────────
+    # -- Endodermis / pericycle ---------------------------------------------
     data.set_value("endodermis", "cell_diameter", 0.02)
     data.set_value("endodermis", "cell_width",    0.028)
     data.set_value("pericycle", "cell_diameter",  0.04)
     data.set_value("pericycle", "cell_width",     0.025)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     data.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.065,
@@ -82,13 +82,13 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     data.set_value("exodermis", "cell_diameter", 0.023)
     data.set_value("exodermis", "cell_width",    0.05)
     data.set_value("epidermis", "cell_diameter", 0.018)
     data.set_value("epidermis", "cell_width",    0.047)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     data.set_value("inter_cellular_spaces", "smoothness", 0.05)
     data.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])

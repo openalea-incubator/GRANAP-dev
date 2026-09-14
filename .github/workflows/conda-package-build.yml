@@ -29,5 +29,12 @@ run-name: >
 jobs:
   build:
     uses: openalea/action-build-publish-anaconda/.github/workflows/openalea_ci.yml@main
+    with:
+      # Default is [10, 11, 12, 13].  3.10 is dropped: geos 3.14 — pinned in
+      # pyproject.toml because the golden regression test's cell census depends
+      # on the GEOS build — has no py3.10 geospatial stack (pyogrio/proj were
+      # never rebuilt against it), so a py3.10 job would resolve an older GEOS
+      # and drift from the golden values.
+      python-minor-version: '[11, 12, 13]'
     secrets:
       anaconda_token: ${{ secrets.ANACONDA_TOKEN }}

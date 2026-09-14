@@ -59,12 +59,12 @@ def anatomy_metrics(root: RootAnatomy) -> dict:
 def main(show=True):
     tomato = OrganInputData.for_dicot_root()  # dicot preset (planttype=2)
 
-    # ── Stele size + radial parenchyma gradient ────────────────────────────
+    # -- Stele size + radial parenchyma gradient ----------------------------
     tomato.set_value("stele", "thickness",            0.116)
     tomato.set_value("stele", "cell_diameter",        0.01)
     tomato.set_value("stele", "cell_diameter_center", 0.030)
 
-    # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
+    # -- Star xylem (n arms, radial extent, vessel size gradient) -----------
     tomato.set_value("xylem", "n_vascular_peak",     2)
     tomato.set_value("xylem", "radius_valley_side",        0.015)
     tomato.set_value("xylem", "radius_peak_side",        0.058)
@@ -77,13 +77,13 @@ def main(show=True):
     tomato.set_value("xylem", "gradient_steepness",  5)
     tomato.set_value("xylem", "allow_ellipse", True)
 
-    # ── Primary phloem (between the star arms, near the cambium) ───────────
+    # -- Primary phloem (between the star arms, near the cambium) -----------
     tomato.set_value("phloem", "sieve_diameter",    0.005)
     tomato.set_value("phloem", "relative_distance", 0.8)
     tomato.set_value("phloem", "cluster_height",    0.013)
     tomato.set_value("phloem", "cluster_width",     0.035)
 
-    # ── Primary cambium ring (valleys first, maturing outward) ─────────────
+    # -- Primary cambium ring (valleys first, maturing outward) -------------
     tomato.set_value("cambium", "radius_valley_side",   0.017)
     tomato.set_value("cambium", "radius_peak_side",   0.059)
     tomato.set_value("cambium", "visible_distance", 0.02)
@@ -92,13 +92,13 @@ def main(show=True):
     tomato.set_value("cambium", "cell_diameter",    0.005)
     tomato.set_value("cambium", "cell_width",       0.01)
 
-    # ── Endodermis / pericycle ─────────────────────────────────────────────
+    # -- Endodermis / pericycle ---------------------------------------------
     tomato.set_value("endodermis", "cell_diameter", 0.015)
     tomato.set_value("endodermis", "cell_width",    0.019)
     tomato.set_value("pericycle", "cell_diameter",  0.0141)
     tomato.set_value("pericycle", "cell_width",     0.0086)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     tomato.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.015,
@@ -119,11 +119,11 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     tomato.set_value("epidermis", "cell_diameter", 0.027)
     tomato.set_value("epidermis", "cell_width",    0.0255)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     tomato.set_value("inter_cellular_spaces", "smoothness", 0.05)
     tomato.set_value("inter_cellular_spaces", "tissue",
                      ["inner_cortex", "cortex", "outer_cortex"])
@@ -141,12 +141,12 @@ def main(show=True):
     tomato_secondary_1 = OrganInputData.for_dicot_root()  # dicot preset (planttype=2)
 
     tomato_secondary_1.set_value("secondary_growth", "value", True)
-    # ── Stele size + radial parenchyma gradient ────────────────────────────
+    # -- Stele size + radial parenchyma gradient ----------------------------
     tomato_secondary_1.set_value("stele", "thickness",            0.11)
     tomato_secondary_1.set_value("stele", "cell_diameter",        0.006)
     tomato_secondary_1.set_value("stele", "cell_diameter_center", 0.006)
 
-    # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
+    # -- Star xylem (n arms, radial extent, vessel size gradient) -----------
     tomato_secondary_1.set_value("xylem", "n_vascular_peak",     2)
     tomato_secondary_1.set_value("xylem", "radius_valley_side",        0.011)
     tomato_secondary_1.set_value("xylem", "radius_peak_side",        0.04)
@@ -158,7 +158,7 @@ def main(show=True):
     tomato_secondary_1.set_value("xylem", "gradient_inflection", 0.5)
     tomato_secondary_1.set_value("xylem", "gradient_steepness",  1)
     tomato_secondary_1.set_value("xylem", "allow_ellipse", True)
-    # ── Secondary xylem  ───────────────────────────────────────────────────
+    # -- Secondary xylem  ---------------------------------------------------
     tomato_secondary_1.set_value("secondary_xylem", "prop_stele", 1)
     tomato_secondary_1.set_value("secondary_xylem", "cell_diameter", 0.006)
     tomato_secondary_1.set_value("secondary_xylem", "cell_width", 0.006)
@@ -170,15 +170,15 @@ def main(show=True):
     tomato_secondary_1.set_value("secondary_xylem", "prop_vessel_ring", 0.4)
     tomato_secondary_1.set_value("secondary_xylem", "must_be_adjacent", False)
 
-    # ── Primary phloem (between the star arms, near the cambium) ───────────
+    # -- Primary phloem (between the star arms, near the cambium) -----------
     tomato_secondary_1.set_value("phloem", "sieve_diameter",    0.005)
     tomato_secondary_1.set_value("phloem", "relative_distance", 1)
     tomato_secondary_1.set_value("phloem", "cluster_height",    0.006)
     tomato_secondary_1.set_value("phloem", "cluster_width",     0.03)
-    # ── No secondary phloem for this variant ─────────────────────────────────────────
+    # -- No secondary phloem for this variant -----------------------------------------
     tomato_secondary_1.remove_param("secondary_phloem")
 
-    # ── Primary cambium ring (valleys first, maturing outward) ─────────────
+    # -- Primary cambium ring (valleys first, maturing outward) -------------
     tomato_secondary_1.set_value("cambium", "radius_valley_side", 0.011)
     tomato_secondary_1.set_value("cambium", "radius_peak_side",   0.04)
     tomato_secondary_1.set_value("cambium", "visible_distance", 1)
@@ -186,20 +186,20 @@ def main(show=True):
     tomato_secondary_1.set_value("cambium", "arc_valley_side",  0.02)
     tomato_secondary_1.set_value("cambium", "cell_diameter",    0.003)
     tomato_secondary_1.set_value("cambium", "cell_width",       0.01)
-    # ── Secondary cambium ring  ────────────────────────────────────────────
+    # -- Secondary cambium ring  --------------------------------------------
     tomato_secondary_1.set_value("secondary_cambium", "cell_diameter",    0.005)
     tomato_secondary_1.set_value("secondary_cambium", "cell_width",       0.007)
     tomato_secondary_1.set_value("secondary_cambium", "radius_peak_side",   0.055)
     tomato_secondary_1.set_value("secondary_cambium", "radius_valley_side", 0.045)
     tomato_secondary_1.set_value("secondary_cambium", "arc_valley_side", 0.02)
     tomato_secondary_1.set_value("secondary_cambium", "arc_peak_side",   0.02)
-    # ── Endodermis / pericycle ─────────────────────────────────────────────
+    # -- Endodermis / pericycle ---------------------------------------------
     tomato_secondary_1.set_value("endodermis", "cell_diameter", 0.008)
     tomato_secondary_1.set_value("endodermis", "cell_width",    0.014)
     tomato_secondary_1.set_value("pericycle", "cell_diameter",  0.008)
     tomato_secondary_1.set_value("pericycle", "cell_width",     0.008)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     tomato_secondary_1.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.015,
@@ -220,11 +220,11 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     tomato_secondary_1.set_value("epidermis", "cell_diameter", 0.019)
     tomato_secondary_1.set_value("epidermis", "cell_width",    0.018)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     tomato_secondary_1.set_value("inter_cellular_spaces", "smoothness", 0.05)
     tomato_secondary_1.set_value("inter_cellular_spaces", "tissue",
                      ["inner_cortex", "cortex", "outer_cortex"])
@@ -243,12 +243,12 @@ def main(show=True):
     tomato_secondary_2 = OrganInputData.for_dicot_root()  # dicot preset (planttype=2)
 
     tomato_secondary_2.set_value("secondary_growth", "value", True)
-    # ── Stele size + radial parenchyma gradient ────────────────────────────
+    # -- Stele size + radial parenchyma gradient ----------------------------
     tomato_secondary_2.set_value("stele", "thickness",            0.61)
     tomato_secondary_2.set_value("stele", "cell_diameter",        0.01)
     tomato_secondary_2.set_value("stele", "cell_diameter_center", 0.01)
 
-    # ── Star xylem (n arms, radial extent, vessel size gradient) ───────────
+    # -- Star xylem (n arms, radial extent, vessel size gradient) -----------
     tomato_secondary_2.set_value("xylem", "n_vascular_peak",     2)
     tomato_secondary_2.set_value("xylem", "radius_valley_side",  0.010)
     tomato_secondary_2.set_value("xylem", "radius_peak_side",    0.04)
@@ -260,7 +260,7 @@ def main(show=True):
     tomato_secondary_2.set_value("xylem", "gradient_inflection", 0.5)
     tomato_secondary_2.set_value("xylem", "gradient_steepness",  1)
     tomato_secondary_2.set_value("xylem", "allow_ellipse", True)
-    # ── Secondary xylem  ───────────────────────────────────────────────────
+    # -- Secondary xylem  ---------------------------------------------------
     tomato_secondary_2.set_value("secondary_xylem", "prop_stele", 1)
     tomato_secondary_2.set_value("secondary_xylem", "cell_diameter", 0.008)
     tomato_secondary_2.set_value("secondary_xylem", "cell_width", 0.006)
@@ -271,10 +271,10 @@ def main(show=True):
     tomato_secondary_2.set_value("secondary_xylem", "prop_vessel_ring", 0.35)
     tomato_secondary_2.set_value("secondary_xylem", "must_be_adjacent", False)
 
-    # ── No primary phloem for this variant ──────────────────────────────────
+    # -- No primary phloem for this variant ----------------------------------
     tomato_secondary_2.remove_param("phloem")
 
-    # Secondary Phloem (between the star arms, near the cambium) ───────────
+    # Secondary Phloem (between the star arms, near the cambium) -----------
     tomato_secondary_2.set_value("secondary_phloem", "shape", "band")
     tomato_secondary_2.set_value("secondary_phloem", "height",    0.06)
     tomato_secondary_2.set_value("secondary_phloem", "alive_distance", 0.06)
@@ -287,14 +287,14 @@ def main(show=True):
     tomato_secondary_2.set_value("secondary_phloem", "parenchyma_diameter", 0.008)
     tomato_secondary_2.set_value("secondary_phloem", "parenchyma_width", 0.008)
 
-    # ── Primary cambium ring (valleys first, maturing outward) ─────────────
+    # -- Primary cambium ring (valleys first, maturing outward) -------------
     tomato_secondary_2.set_value("cambium", "radius_valley_side",   0.01)
     tomato_secondary_2.set_value("cambium", "radius_peak_side",   0.04)
     tomato_secondary_2.set_value("cambium", "arc_peak_side",          0.008)
     tomato_secondary_2.set_value("cambium", "arc_valley_side",       0.02)
     tomato_secondary_2.set_value("cambium", "cell_diameter",    0.005)
     tomato_secondary_2.set_value("cambium", "cell_width",       0.01)
-    # ── Secondary cambium ring  ────────────────────────────────────────────
+    # -- Secondary cambium ring  --------------------------------------------
     n_layers = 3 
     tomato_cell_diameter = 0.005
     tomato_secondary_2.set_value("secondary_cambium", "cell_diameter",    tomato_cell_diameter)
@@ -303,13 +303,13 @@ def main(show=True):
     tomato_secondary_2.set_value("secondary_cambium", "radius_valley_side", 0.22 + n_layers * tomato_cell_diameter)
     tomato_secondary_2.set_value("secondary_cambium", "n_layers",   3)
 
-    # ── Endodermis / pericycle ─────────────────────────────────────────────
+    # -- Endodermis / pericycle ---------------------------------------------
     tomato_secondary_2.set_value("endodermis", "cell_diameter", 0.015)
     tomato_secondary_2.set_value("endodermis", "cell_width",    0.038)
     tomato_secondary_2.set_value("pericycle", "cell_diameter",  0.01)
     tomato_secondary_2.set_value("pericycle", "cell_width",     0.012)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     tomato_secondary_2.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.02,
@@ -330,11 +330,11 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     tomato_secondary_2.set_value("epidermis", "cell_diameter", 0.021)
     tomato_secondary_2.set_value("epidermis", "cell_width",    0.046)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     tomato_secondary_2.set_value("inter_cellular_spaces", "smoothness", 0.05)
     tomato_secondary_2.set_value("inter_cellular_spaces", "tissue",
                      ["inner_cortex", "cortex", "outer_cortex"])

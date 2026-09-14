@@ -72,12 +72,12 @@ def anatomy_metrics(root: RootAnatomy) -> dict:
 def main(show=True):
     maize = OrganInputData.for_root()  # monocot preset (planttype=1)
 
-    # ── Stele size + radial parenchyma (pith) gradient ─────────────────────
+    # -- Stele size + radial parenchyma (pith) gradient ---------------------
     maize.set_value("stele", "thickness",            0.245)
     maize.set_value("stele", "cell_diameter",        0.006)
     maize.set_value("stele", "cell_diameter_center", 0.014)
 
-    # ── Vasculature: ring of metaxylem vessels + protoxylem (no star) ──────
+    # -- Vasculature: ring of metaxylem vessels + protoxylem (no star) ------
     maize.set_value("xylem", "xylem_shape",              "default")
     maize.set_value("xylem", "n_vascular_bundles",       4)      # polyarch metaxylem ring
     maize.set_value("xylem", "vessel_diameter",          0.056)
@@ -87,18 +87,18 @@ def main(show=True):
     maize.set_value("xylem", "protoxylem_cluster_width", 0.021)
     maize.set_value("xylem", "protoxylem_cluster_height", 0.021)
 
-    # ── Phloem bundles (between the xylem poles) ───────────────────────────
+    # -- Phloem bundles (between the xylem poles) ---------------------------
     maize.set_value("phloem", "sieve_diameter", 0.010)
     maize.set_value("phloem", "cluster_width",  0.012)
     maize.set_value("phloem", "cluster_height", 0.012)
 
-    # ── Endodermis / pericycle (stele boundary) ────────────────────────────
+    # -- Endodermis / pericycle (stele boundary) ----------------------------
     maize.set_value("endodermis", "cell_diameter", 0.0096)
     maize.set_value("endodermis", "cell_width",    0.016)
     maize.set_value("pericycle", "cell_diameter",  0.0127)
     maize.set_value("pericycle", "cell_width",     0.0087)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     maize.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.022,
@@ -121,13 +121,13 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     maize.set_value("exodermis", "cell_diameter", 0.025)
     maize.set_value("exodermis", "cell_width",    0.036)
     maize.set_value("epidermis", "cell_diameter", 0.024)
     maize.set_value("epidermis", "cell_width",    0.028)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     maize.set_value("inter_cellular_spaces", "smoothness", 0.05)
     maize.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])
@@ -143,12 +143,12 @@ def main(show=True):
     # Other anatomy of maize
     maize_b73 = OrganInputData.for_root()  # monocot preset (planttype=1)
 
-    # ── Stele size + radial parenchyma (pith) gradient ─────────────────────
+    # -- Stele size + radial parenchyma (pith) gradient ---------------------
     maize_b73.set_value("stele", "thickness",            0.293)
     maize_b73.set_value("stele", "cell_diameter",        0.006)
     maize_b73.set_value("stele", "cell_diameter_center", 0.014)
 
-    # ── Vasculature: ring of metaxylem vessels + protoxylem (no star) ──────
+    # -- Vasculature: ring of metaxylem vessels + protoxylem (no star) ------
     maize_b73.set_value("xylem", "xylem_shape",              "default")
     maize_b73.set_value("xylem", "n_vascular_bundles",       6)      # polyarch metaxylem ring
     maize_b73.set_value("xylem", "vessel_diameter",          0.074)
@@ -158,18 +158,18 @@ def main(show=True):
     maize_b73.set_value("xylem", "protoxylem_cluster_width", 0.021)
     maize_b73.set_value("xylem", "protoxylem_cluster_height", 0.021)
 
-    # ── Phloem bundles (between the xylem poles) ───────────────────────────
+    # -- Phloem bundles (between the xylem poles) ---------------------------
     maize_b73.set_value("phloem", "sieve_diameter", 0.014)
     maize_b73.set_value("phloem", "cluster_width",  0.016)
     maize_b73.set_value("phloem", "cluster_height", 0.03)
 
-    # ── Endodermis / pericycle (stele boundary) ────────────────────────────
+    # -- Endodermis / pericycle (stele boundary) ----------------------------
     maize_b73.set_value("endodermis", "cell_diameter", 0.016)
     maize_b73.set_value("endodermis", "cell_width",    0.028)
     maize_b73.set_value("pericycle", "cell_diameter",  0.0139)
     maize_b73.set_value("pericycle", "cell_width",     0.0127)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     maize_b73.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.027,
@@ -192,18 +192,18 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     maize_b73.set_value("exodermis", "cell_diameter", 0.029)
     maize_b73.set_value("exodermis", "cell_width",    0.027)
     maize_b73.set_value("epidermis", "cell_diameter", 0.018)
     maize_b73.set_value("epidermis", "cell_width",    0.031)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     maize_b73.set_value("inter_cellular_spaces", "smoothness", 0.05)
     maize_b73.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])
 
-    # ── Aerenchyma — lysigenous air spaces across the cortex (B73 only) ────
+    # -- Aerenchyma — lysigenous air spaces across the cortex (B73 only) ----
     # `tissue` accepts a list: the cortex sub-layers are treated as one
     # contiguous band (only its innermost ring is preserved). Runs at
     # generation time, before the inner/outer cortex are retagged to "cortex".
