@@ -52,7 +52,7 @@ class MonocotRootAnatomy(RootAnatomy):
             "protoxylem_width":       float(xylem.get("protoxylem_cluster_width",  0.03)),
             "protoxylem_height":      float(xylem.get("protoxylem_cluster_height", 0.05)),
             "n_vascular_bundles":     int(xylem.get("n_vascular_bundles",       5)),
-            "ratio_proto_meta":       float(xylem.get("ratio_proto_meta",       2.2)),
+            "n_protoxylem":           int(xylem.get("n_protoxylem",           10)),
             "phloem_diameter":        float(phloem.get("sieve_diameter",        0.005)),
             "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",     0.001)),
             "phloem_width":           float(phloem.get("cluster_width",         0.02)),
@@ -378,10 +378,21 @@ class MonocotRootAnatomy(RootAnatomy):
                 self.vascular_polygons.append(ring_polygon)
 
     def fit_phloem_protoxylem_elements(self, polygon):
-        n_protoxylem = int(np.ceil(
-            self.vascular_params["ratio_proto_meta"] * self.vascular_params["n_vascular_bundles"]
-        ))
-        n_phloem = n_protoxylem - 1
+        # The protoxylem count is set directly, not scaled off the metaxylem:
+        # poles are specified early at the apex while metaxylem differentiate
+        # later, so a section can carry protoxylem and phloem with no metaxylem
+        # left at all (the apex of a developmental series).
+        n_protoxylem = int(self.vascular_params.get("n_protoxylem", 10))
+        # One phloem strand per pole, alternating around the ring.  An EVEN
+        # number of wedges is what makes the alternation wrap cleanly (an odd
+        # count seats two protoxylem side by side at the seam), so the ring is
+        # sliced 2 * n_protoxylem ways and every wedge is used -- n_protoxylem
+        # poles and n_protoxylem strands, exactly as asked for.
+        n_phloem = n_protoxylem
+        if n_protoxylem == 0:
+            self.protoxylem_polygons = []
+            self.phloem_polygons = []
+            return
         buffing_dist = max(
             self.vascular_params["protoxylem_diameter"],
             self.vascular_params["phloem_diameter"],
@@ -395,7 +406,7 @@ class MonocotRootAnatomy(RootAnatomy):
         self.protoxylem_polygons = []
         self.phloem_polygons = []
 
-        for i, poly_slice in enumerate(slices[1:]):
+        for i, poly_slice in enumerate(slices):
             kind = "protoxylem" if i % 2 == 0 else "phloem"
             cells_in_slice, list_polygons = self._bundle_elements_in_slice(poly_slice, kind)
             self.vascular_cells.extend_cells(cells_in_slice.cells)

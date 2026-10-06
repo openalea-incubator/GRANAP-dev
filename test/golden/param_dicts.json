@@ -46,7 +46,7 @@
    "protoxylem_pole_width_inner": 0.0,
    "protoxylem_pole_width_outer": 0.0,
    "n_vascular_bundles": 5,
-   "ratio_proto_meta": 2.2,
+   "n_protoxylem": 10,
    "xylem_shape": "default",
    "n_metaxylem": 0,
    "outer_radius": 0.15
@@ -695,7 +695,7 @@
    "protoxylem_pole_width_inner": 0.0,
    "protoxylem_pole_width_outer": 0.0,
    "n_vascular_bundles": 5,
-   "ratio_proto_meta": 2.2,
+   "n_protoxylem": 10,
    "xylem_shape": "default",
    "n_metaxylem": 0,
    "outer_radius": 0.15

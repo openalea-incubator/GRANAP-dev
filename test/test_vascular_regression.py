@@ -84,9 +84,14 @@ def monocot_stem() -> StemAnatomy:
 
 GOLDEN = {
     "monocot_default": (monocot_default, {
+        # stele 410 -> 406 when n_protoxylem became a literal count: the ring
+        # used to be sliced 2n-1 ways with one wedge dropped, leaving an empty
+        # gap; it is now sliced 2n ways with every wedge used, so the bundles
+        # cover the full circle and displace 4 more stele cells. Vascular
+        # counts themselves are unchanged.
         "air space": 367, "cortex": 206, "endodermis": 32, "epidermis": 168,
         "exodermis": 79, "metaxylem": 5, "pericycle": 97, "phloem": 10,
-        "protoxylem": 10, "stele": 410,
+        "protoxylem": 10, "stele": 406,
     }),
     "dicot_primary": (dicot_primary, {
         "air space": 621, "cambium": 81, "cortex": 355, "endodermis": 72,

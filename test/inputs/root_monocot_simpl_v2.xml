@@ -12,7 +12,7 @@
     <!-- protoxylem_diameter = protoxylem bundle diameter [mm]                            -->
     <!-- phloem_diameter   = phloem bundle diameter [mm]                                  -->
     <!-- n_vascular_bundles = number of metaxylem/phloem bundle pairs                    -->
-    <!-- ratio_proto_meta  = number of protoxylem bundles per metaxylem vessel            -->
+    <!-- n_protoxylem      = number of protoxylem bundles (set directly, not a ratio)     -->
     <!-- n_protoxylem_per_bundle / n_phloem_per_bundle = cells packed inside each bundle  -->
     <stele thickness              = "0.25"
            cell_diameter          = "0.01"
@@ -26,7 +26,7 @@
            n_phloem_per_bundle    = "5"
            n_protoxylem_per_bundle= "2"
            n_vascular_bundles     = "5"
-           ratio_proto_meta       = "3.3"
+           n_protoxylem           = "16"
            size_gradient_inflection = "0.3"
            size_gradient_steepness  = "3.0"
            size_gradient_asymmetry  = "1.0" />

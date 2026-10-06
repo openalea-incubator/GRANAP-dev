@@ -1,3 +1,4 @@
+import math
 import xml.etree.ElementTree as ET
 import copy
 import warnings
@@ -457,8 +458,8 @@ _root_xylem_extra_fields: Dict[str, Any] = {
     "protoxylem_band_depth":   (float, Field(default=0.0, ge=0.0, title="Protoxylem Band Depth", description="Arch mode: radial depth of the outer band holding the protoxylem chains + phloem; 0 defaults to 35%% of the span.")),
     "protoxylem_pole_width_inner": (float, Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (inner)", description="Arch mode: tangential width of each protoxylem pole at its inner end; 0 defaults to 3 * protoxylem_diameter.")),
     "protoxylem_pole_width_outer": (float, Field(default=0.0, ge=0.0, title="Protoxylem Pole Width (outer)", description="Arch mode: tangential width of each protoxylem pole at its outer end; 0 defaults to 3 * protoxylem_diameter.")),
-    "n_vascular_bundles": (int,   Field(default=5, ge=1, title="Number of Vascular Bundles", description="Number of metaxylem vessels.")),
-    "ratio_proto_meta":   (float, Field(default=2.2, ge=0.0, title="Ratio Protoxylem/Metaxylem", description="Ratio controlling protoxylem bundle count relative to metaxylem vessels.")),
+    "n_vascular_bundles": (int,   Field(default=5, ge=0, title="Number of Vascular Bundles", description="Number of metaxylem vessels. 0 is legal: the apex of a developmental series can run out of metaxylem while still carrying protoxylem and phloem (see n_protoxylem).")),
+    "n_protoxylem":       (int,   Field(default=10, ge=0, title="Number of Protoxylem", description="Protoxylem bundle count, set directly. Independent of the metaxylem count: protoxylem poles are specified early at the root apex and metaxylem differentiate later, so the apex of a developmental series can carry protoxylem and phloem with no metaxylem left at all. 0 means no protoxylem (and no phloem).")),
     "xylem_shape":        (Literal["default", "arch", "star"], Field(default="default", title="Xylem Shape", description="'default' = ring of discrete vessels; 'arch' = metaxylem ring + graded protoxylem chains + valley phloem; 'star' = actinostele arms with a radial size gradient.")),
     "n_metaxylem":        (int,   Field(default=0, ge=0, title="Number of Metaxylem", description="Arch mode: metaxylem count in the central ring; 0 defaults to n_vascular_peak.")),
     "outer_radius":       (float, Field(default=0.15, ge=0.00001, title="Outer Radius", description="Arch mode: radius of the pericycle side where the poles reach; capped at the stele radius.")),
@@ -1520,7 +1521,6 @@ class OrganInputData(BaseModel):
                 "cell_diameter": "protoxylem_diameter",
                 "max_size":      "cell_diameter",
                 "n_files":       "n_vascular_bundles",
-                "ratio":         "ratio_proto_meta",
             },
             "aerenchyma": {
                 "proportion": "aerenchyma_proportion",
@@ -1546,6 +1546,15 @@ class OrganInputData(BaseModel):
             for old_key, new_key in renames.items():
                 if old_key in param_dict:
                     param_dict[new_key] = param_dict.pop(old_key)
+            # Legacy GRANAR XML expressed the protoxylem count as a ratio to the
+            # metaxylem ("ratio"). That parameter is gone -- protoxylem poles are
+            # now set directly -- so convert old files to the count they used to
+            # produce rather than silently falling back to the default.
+            if child.tag == "xylem" and "ratio" in param_dict:
+                ratio = param_dict.pop("ratio")
+                if "n_protoxylem" not in param_dict:
+                    n_meta = param_dict.get("n_vascular_bundles", 0)
+                    param_dict["n_protoxylem"] = max(0, int(math.ceil(float(ratio) * float(n_meta))) - 1)
             raw[child.tag] = param_dict
             ordered_tags.append(child.tag)
 
@@ -1556,7 +1565,7 @@ class OrganInputData(BaseModel):
         _XYLEM_TO_STELE: Dict[str, str] = {
             "cell_diameter":      "xylem_diameter",
             "n_vascular_bundles": "n_vascular_bundles",
-            "ratio_proto_meta":   "ratio_proto_meta",
+            "n_protoxylem":       "n_protoxylem",
         }
         if "stele" in raw and "xylem" in raw:
             xylem_raw = raw["xylem"]

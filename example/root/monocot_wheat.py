@@ -69,7 +69,7 @@ def main(show=True):
     wheat.set_value("xylem", "n_vascular_bundles",       3)      # polyarch metaxylem ring
     wheat.set_value("xylem", "vessel_diameter",          0.0945)
     wheat.set_value("xylem", "vessel_diameter_sd",       0.0065)
-    wheat.set_value("xylem", "ratio_proto_meta",         3.3)
+    wheat.set_value("xylem", "n_protoxylem",              9)     # protoxylem poles
     wheat.set_value("xylem", "protoxylem_diameter",      0.022)
     wheat.set_value("xylem", "protoxylem_cluster_width", 0.023)
     wheat.set_value("xylem", "protoxylem_cluster_height", 0.025)
@@ -140,7 +140,7 @@ def main(show=True):
     wheat_watde.set_value("xylem", "n_vascular_bundles",       7)      # polyarch metaxylem ring
     wheat_watde.set_value("xylem", "vessel_diameter",          0.0675)
     wheat_watde.set_value("xylem", "vessel_diameter_sd",       0.00625)
-    wheat_watde.set_value("xylem", "ratio_proto_meta",         2)
+    wheat_watde.set_value("xylem", "n_protoxylem",             13)     # protoxylem poles
     wheat_watde.set_value("xylem", "protoxylem_diameter",      0.020)
     wheat_watde.set_value("xylem", "protoxylem_cluster_width", 0.021)
     wheat_watde.set_value("xylem", "protoxylem_cluster_height", 0.021)
