@@ -357,7 +357,7 @@ class RootAnatomy(Organ):
     # See ROOT_SERIES_PLAN.  When ``self._prescribed_vessels`` is set (a list of
     # (x, y, r, track_id)), the vascular recipe places exactly these xylem vessels
     # at the given positions/radii carrying their persistent track_id, instead of
-    # packing random ones — so a vessel keeps its identity across the apex->collet
+    # packing random ones — so a vessel keeps its identity across the apex->collar
     # series.  The surrounding tissue still generates around them (the "refit").
     def prescribe_vessels(self, vessels) -> "RootAnatomy":
         """Prescribe the exact xylem vessel set for this section: an iterable of

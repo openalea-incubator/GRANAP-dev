@@ -1208,7 +1208,12 @@ class Organ(AbstractNetwork, ABC):
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 10))
         
-        cells_gdf.plot(
+        # `categories` pins the type -> colour mapping.  Without it the mapping is
+        # built from the types present in THIS organ, so a section that happens to
+        # lack one (a series apex with no metaxylem left) shifts every other
+        # colour and reads as a different plant.  Callers drawing several organs
+        # together should pass the union of their types.
+        plot_kwargs = dict(
             ax=ax,
             column='type',
             categorical=True,
@@ -1217,8 +1222,12 @@ class Organ(AbstractNetwork, ABC):
             linewidth=0.5,
             alpha=0.5,
             legend=True,
-            legend_kwds={'title': 'Cell Type', 'loc': 'best'}
+            legend_kwds={'title': 'Cell Type', 'loc': 'best'},
         )
+        categories = kwargs.get('categories')
+        if categories is not None:
+            plot_kwargs['categories'] = list(categories)
+        cells_gdf.plot(**plot_kwargs)
         
         ax.set_aspect("equal", "box")
         ax.set_xlabel("x (mm)")

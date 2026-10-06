@@ -7,6 +7,8 @@ ring with a stele sheath and graded protoxylem poles).  Instantiate via
 dispatches to this class when ``planttype == 1``.
 """
 
+import logging
+
 import numpy as np
 from typing import List, Dict, Any
 from collections import defaultdict
@@ -35,6 +37,9 @@ from openalea.granap.root_class import RootAnatomy
 # ---------------------------------------------------------------------------
 # Monocot subclass
 # ---------------------------------------------------------------------------
+
+log = logging.getLogger(__name__)
+
 
 class MonocotRootAnatomy(RootAnatomy):
     """Monocot root: 'default' ring of metaxylem bundles, or 'arch' (an
@@ -132,7 +137,7 @@ class MonocotRootAnatomy(RootAnatomy):
         recipe = TissueRecipe().bind(lambda: self.vascular_cells, self.rng)
         # Developmental series: place the prescribed tracked vessels instead of
         # packing (see ROOT_SERIES_PLAN / RootAnatomy.prescribe_vessels).
-        if getattr(self, "_prescribed_vessels", None):
+        if getattr(self, "_prescribed_vessels", None) is not None:
             # Developmental series: the metaxylem are the prescribed (tracked) vessels;
             # the protoxylem + phloem are regenerated per section around them (untracked),
             # reusing the same default-mode steps — their count follows n_vascular_bundles,
@@ -400,6 +405,16 @@ class MonocotRootAnatomy(RootAnatomy):
 
         polygon = polygon.difference(polygon.buffer(-buffing_dist * 1.1))
         polygon = polygon.difference(unary_union(self.vascular_polygons))
+
+        if polygon.is_empty:
+            # The metaxylem fill the band the bundles would sit in — a heavily
+            # fused series section can do this.  Nothing to place; say so rather
+            # than dying inside pizza_slice on an empty centroid.
+            log.warning("no room left for protoxylem/phloem: the vascular "
+                           "elements fill the band (vessels too large for the stele)")
+            self.protoxylem_polygons = []
+            self.phloem_polygons = []
+            return
 
         slices = GeometryProcessor.pizza_slice(polygon, n_phloem + n_protoxylem)
 
