@@ -63,6 +63,20 @@ def _dicot_series(**kw):
     return DicotRootSeries(base, seed=0, **kw)
 
 
+def test_prescribed_metaxylem_keeps_requested_size():
+    """Prescribed (series) vessels are seeded against the same metaxylem sheath as
+    the default ring, so they get the same sheath-gap inset: each realised vessel
+    matches its prescribed radius to within a few percent, small ones included."""
+    vessels = [(-0.06, 0.0, 0.03, 10), (0.06, 0.0, 0.0175, 20), (0.0, 0.07, 0.01, 30)]
+    g = RootAnatomy(OrganInputData.for_root(), seed=0).prescribe_vessels(vessels).generate_cells()
+    ratios = []
+    for (_x, _y, r, tid) in vessels:
+        area = g[g["track_id"] == tid].geometry.area.sum()
+        ratios.append(np.sqrt(area / (np.pi * r * r)))   # realised / prescribed diameter
+    assert 0.97 < min(ratios) and max(ratios) < 1.08, ratios
+    assert max(ratios) - min(ratios) < 0.04, f"size-dependent inflation: {ratios}"
+
+
 def test_dicot_extraction_is_stable_regardless_of_span():
     """The primordial set (positions + 5PL targets) is extracted from the smallest-pith
     section, so it does not depend on how the lengths are spanned/sampled."""

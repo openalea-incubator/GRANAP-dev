@@ -47,6 +47,26 @@ from openalea.granap.generate_cell import CellGenerator
 # Generative primitives
 # ---------------------------------------------------------------------------
 
+def seed_ring_inset(radius: float, gap: Optional[float] = None) -> float:
+    """How far inside a placed vessel its ring of border seeds is drawn.
+
+    A vessel is one Voronoi group seeded by a ring of points just inside its
+    outline; its final cell wall falls roughly half-way between that ring and the
+    nearest competing seeds outside it.  ``gap`` is the distance from the vessel
+    outline to those competing seeds when it is known (e.g. a sheath ring laid at a
+    fixed offset around the vessel): drawing the vessel ring the same distance
+    *inside* the outline puts the half-way wall back on the outline, so the
+    realised vessel keeps its requested size whatever that size is.  The inset is
+    capped at 90% of ``radius`` so the ring never collapses onto the centre.
+
+    ``gap=None`` (no known neighbour ring) keeps the generic inset of 15% of the
+    radius.
+    """
+    if gap is None:
+        return 0.15 * radius
+    return min(float(gap), 0.9 * radius)
+
+
 def place_packed_group(
     target: CellManager,
     packed,
@@ -58,6 +78,7 @@ def place_packed_group(
     min_diameter: Optional[float] = None,
     alt_type: Optional[str] = None,
     track_ids: Optional[list] = None,
+    seed_gap: Optional[float] = None,
 ) -> List[Tuple[Polygon, str, int]]:
     """Place border-point seeds for every circle of a circle-packing.
 
@@ -79,6 +100,10 @@ def place_packed_group(
         min_diameter: optional diameter threshold to split a single packing into
             two tags (e.g. wide vessels -> "xylem", narrow -> "stele").
         alt_type: tag assigned to circles below ``min_diameter``.
+        seed_gap: distance from each circle to the competing seeds placed
+            around it afterwards (see :func:`seed_ring_inset`); the border ring
+            is then inset by that much (capped at 0.9 r) so the realised cell
+            keeps the circle's size.  ``None`` = the generic 15% inset.
 
     Returns:
         List of ``(placed_polygon, resolved_type, id_group)`` for every circle
@@ -93,12 +118,12 @@ def place_packed_group(
             pcx, pcy, r = rec
             placed = Point(pcx, pcy).buffer(r, resolution=32)
             actual_diam = r * 2
-            inset = r * 0.15
+            inset = seed_ring_inset(r, seed_gap)
         else:
             pcx, pcy, a_ax, b_ax, ang = rec
             placed = GeometryProcessor.ellipse_to_polygon(pcx, pcy, a_ax, b_ax, ang)
             actual_diam = 2.0 * np.sqrt(a_ax * b_ax)   # area-equivalent diameter
-            inset = min(a_ax, b_ax) * 0.15
+            inset = seed_ring_inset(min(a_ax, b_ax), seed_gap)
         placed_buff = placed.buffer(-inset)
         if placed_buff.is_empty:
             continue

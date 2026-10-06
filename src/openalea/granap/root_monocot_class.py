@@ -27,7 +27,7 @@ from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.tissue_class import (
     place_packed_group, fill_by_packing, fill_along, fill_by_rings,
-    TissueRecipe, Tissue,
+    TissueRecipe, Tissue, seed_ring_inset,
 )
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
@@ -150,7 +150,8 @@ class MonocotRootAnatomy(RootAnatomy):
             # reusing the same default-mode steps — their count follows n_vascular_bundles,
             # which the series sets to the metaxylem count for scaling.
             recipe.special("prescribed metaxylem",
-                           lambda: self._place_prescribed_xylem(polygon),
+                           lambda: self._place_prescribed_xylem(
+                               polygon, seed_gap=self._metaxylem_sheath_gap()),
                            produces=("metaxylem",))
             recipe.special("metaxylem sheath",
                            lambda: self.fit_metaxylem_sheath(polygon),
@@ -348,7 +349,11 @@ class MonocotRootAnatomy(RootAnatomy):
                 "metaxylem",
                 GeometryProcessor.fit_inner_ellipse(slice, xylem_diameter / 2)["polygon"],
             )
-            xylem_polygon_buff = GeometryProcessor.buffer_polygon(metaxylem.shape, -(xylem_diameter / 2) * 0.15)
+            # Seed ring drawn one sheath gap inside the vessel, so the wall between
+            # it and the sheath ring added by fit_metaxylem_sheath lands on the vessel
+            # outline (see seed_ring_inset).
+            inset = seed_ring_inset(xylem_diameter / 2, self._metaxylem_sheath_gap())
+            xylem_polygon_buff = GeometryProcessor.buffer_polygon(metaxylem.shape, -inset)
             x, y = xylem_polygon_buff.exterior.coords.xy
             center = metaxylem.shape.centroid
             coords = np.column_stack((x, y))
@@ -362,6 +367,13 @@ class MonocotRootAnatomy(RootAnatomy):
             list_xylem_polygons.append(metaxylem.shape)
         return cells_in_slices, list_xylem_polygons
 
+    def _metaxylem_sheath_gap(self) -> float:
+        """Offset of the sheath seed ring from each metaxylem outline: half a stele
+        cell.  The single source for both :meth:`fit_metaxylem_sheath` (which lays
+        the ring there) and the metaxylem seed rings (inset by the same amount so
+        the vessel/sheath wall lands on the vessel outline)."""
+        return self.vascular_params["cell_diameter"] / 2.0
+
     def fit_metaxylem_sheath(self, stele_polygon: Polygon):
         """Add a ring of xylem parenchyma cells around each metaxylem vessel."""
         cell_diameter = self.vascular_params["cell_diameter"]
@@ -374,7 +386,7 @@ class MonocotRootAnatomy(RootAnatomy):
             outer = xylem_polygon.buffer(cell_diameter*0.8).intersection(stele_polygon)
             if outer.is_empty:
                 continue
-            mid_ring = xylem_polygon.buffer(cell_diameter / 2).intersection(stele_polygon)
+            mid_ring = xylem_polygon.buffer(self._metaxylem_sheath_gap()).intersection(stele_polygon)
             if mid_ring.is_empty or mid_ring.geom_type != "Polygon":
                 continue
 

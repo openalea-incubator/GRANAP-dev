@@ -10,7 +10,7 @@ depending on the ``planttype`` value in the input.  Both subclasses are
 import warnings
 import numpy as np
 import shapely as sp
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
 from shapely.geometry import Point, Polygon, LineString, MultiPoint, box
@@ -366,9 +366,13 @@ class RootAnatomy(Organ):
         self._prescribed_vessels = [tuple(v) for v in vessels]
         return self
 
-    def _place_prescribed_xylem(self, stele_polygon: Polygon) -> None:
+    def _place_prescribed_xylem(self, stele_polygon: Polygon,
+                                seed_gap: Optional[float] = None) -> None:
         """Place the prescribed xylem vessels as tracked cells + feed the vascular
-        mask, so downstream tissue clears around them."""
+        mask, so downstream tissue clears around them.
+
+        ``seed_gap`` is the offset of the sheath ring laid around each vessel
+        afterwards, when there is one (see ``tissue_class.seed_ring_inset``)."""
         vessels = getattr(self, "_prescribed_vessels", None)
         if not vessels:
             return
@@ -378,6 +382,7 @@ class RootAnatomy(Organ):
         placed = place_packed_group(
             self.vascular_cells, circles, "metaxylem",
             id_base=0, angle_center=(cx, cy), track_ids=track_ids,
+            seed_gap=seed_gap,
         )
         for placed_poly, _rtype, _gid in placed:
             self.vascular_polygons.append(placed_poly)
