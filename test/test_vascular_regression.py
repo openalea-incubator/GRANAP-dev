@@ -145,9 +145,17 @@ def _check(name: str) -> None:
     )
 
 
+# Reproducibility is a property of the RNG plumbing (does the jitter draw from the
+# organ's seeded rng, or from the global one?), not of a preset — so it is checked on
+# one organ of each kind rather than on all seven, which cost 54 s and caught nothing
+# the three below would miss.
+REPRO = ("monocot_default", "needle_default", "dicot_stem")
+
+
 def test_seed0_reproducible():
     """Two builds of the same config must be identical (no global-RNG leakage)."""
-    for name, (make_organ, _) in GOLDEN.items():
+    for name in REPRO:
+        make_organ, _ = GOLDEN[name]
         assert _census(make_organ) == _census(make_organ), f"{name} not reproducible"
 
 

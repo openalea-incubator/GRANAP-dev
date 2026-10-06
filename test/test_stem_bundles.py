@@ -11,8 +11,10 @@ the arrangement that defines each bundle type:
     amphicribral  -> phloem rings a xylem core (phloem farther from centre)
     face (monocot)-> metaxylem outer of protoxylem, + a lacuna void
 
-Two whole-organ smoke tests then confirm the dicot eustele and monocot
-atactostele presets generate, and that a hollow pith leaves the centre empty.
+Two whole-organ tests then confirm the monocot atactostele preset generates and
+that a hollow pith leaves the centre empty.  (The dicot eustele is not re-checked
+here: ``test_vascular_regression.test_dicot_stem_golden`` builds the same preset at
+the same seed and pins its exact census.)
 """
 
 import os
@@ -204,15 +206,6 @@ def _census(organ):
     for cell in organ.all_cells.cells:
         c[cell.type] = c.get(cell.type, 0) + 1
     return c
-
-
-def test_dicot_eustele_generates():
-    c = _census(StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED))
-    # Central ground tissue is tagged 'parenchyma' (the stem pith); xylem is a single
-    # 'xylem' tag (no metaxylem/protoxylem split).
-    for t in ("xylem", "sieve element", "cambium", "parenchyma", "cortex", "epidermis"):
-        assert c.get(t, 0) > 0, f"dicot stem missing {t}"
-    assert c.get("aerenchyma", 0) == 0, "a plain dicot stem must not default to aerenchyma"
 
 
 def test_monocot_atactostele_generates():

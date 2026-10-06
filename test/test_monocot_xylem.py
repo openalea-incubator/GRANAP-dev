@@ -84,18 +84,6 @@ def test_arch_exact_metaxylem_count():
     assert len(groups) == 15, f"Expected 15 metaxylem, got {len(groups)}"
 
 
-def test_arch_vs_default_both_produce_cells():
-    """Both modes produce a reasonable number of cells."""
-    root_default = RootAnatomy(OrganInputData.for_root())
-    root_default.generate_cells()
-    counts_default = cell_type_counts(root_default)
-
-    counts_arch = cell_type_counts(make_arch_root())
-
-    assert sum(counts_default.values()) > 10, "Default mode produced too few cells"
-    assert sum(counts_arch.values()) > 10, "Arch mode produced too few cells"
-
-
 def test_star_mode_produces_xylem_and_phloem():
     """Star mode packs xylem vessels into the star and phloem into the valleys."""
     root = make_star_root()

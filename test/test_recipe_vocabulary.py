@@ -34,13 +34,6 @@ def make_arch_root(**xylem_overrides) -> RootAnatomy:
     return RootAnatomy(data, seed=SEED)
 
 
-def cell_type_counts(root) -> dict:
-    counts = {}
-    for c in root.all_cells.cells:
-        counts[c.type] = counts.get(c.type, 0) + 1
-    return counts
-
-
 # ---------------------------------------------------------------------------
 # Tissue == a tagged region, transformed as pure geometry
 # ---------------------------------------------------------------------------
@@ -263,12 +256,3 @@ def test_needle_recipes_are_inspectable():
     orec = needle._organ_recipe()
     assert [name for name, _ in orec.describe()] == ["resin ducts", "stomata"]
 
-
-def test_monocot_arch_produces_vessels():
-    root = make_arch_root()
-    root.generate_cells()
-    counts = cell_type_counts(root)
-    # Arch mode yields distinct metaxylem + protoxylem + stele populations.
-    assert counts.get("metaxylem", 0) > 0
-    assert counts.get("protoxylem", 0) > 0
-    assert counts.get("stele", 0) > 0

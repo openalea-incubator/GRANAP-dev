@@ -13,10 +13,17 @@ def _dicot_input():
     return OrganInputData.for_dicot_leaf()
 
 
+_BUILT: dict = {}
+
+
 def _build():
-    leaf = LeafAnatomy(seed=0)
-    leaf.generate_cells()
-    return leaf
+    """The generated monocot leaf, built once: seven tests read this same organ, and
+    none of them mutates it (``find_gaps`` and the cell lists are read-only)."""
+    if "monocot" not in _BUILT:
+        leaf = LeafAnatomy(seed=0)
+        leaf.generate_cells()
+        _BUILT["monocot"] = leaf
+    return _BUILT["monocot"]
 
 
 def test_monocot_is_uniform_mesophyll():
@@ -103,9 +110,12 @@ def test_veins_have_a_lacuna_air_space():
 # ---------------------------------------------------------------------------
 
 def _build_dicot():
-    leaf = LeafAnatomy(_dicot_input(), seed=0)
-    leaf.generate_cells()
-    return leaf
+    """The generated dicot leaf, built once (six tests read it; see :func:`_build`)."""
+    if "dicot" not in _BUILT:
+        leaf = LeafAnatomy(_dicot_input(), seed=0)
+        leaf.generate_cells()
+        _BUILT["dicot"] = leaf
+    return _BUILT["dicot"]
 
 
 def test_factory_dispatches_on_planttype():
