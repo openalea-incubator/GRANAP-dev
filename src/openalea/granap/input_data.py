@@ -203,7 +203,7 @@ class VascularBundleParams(BaseParams):
         """v2 nested authoring: accept grouped sub-model kwargs (``envelope=...``,
         ``xylem_face=...``, ``sheath=...`` — see ``BUNDLE_GROUP_MODELS``) and flatten
         them into the flat fields, so the storage/emission/consumer contract stays flat
-        (69 flat fields) while construction can be nested.  Pure flat construction (no
+        (70 flat fields) while construction can be nested.  Pure flat construction (no
         group key present) passes through untouched; an explicit flat kwarg wins over a
         value coming from a group block."""
         if not isinstance(data, dict):
@@ -278,7 +278,8 @@ class VascularBundleParams(BaseParams):
     # -- sclerenchyma sheath ------------------------------------------------
     sheath           : Literal["none", "ring", "caps", "both"] = Field(default="none", title="Sclerenchyma Sheath", description="Fibre sheath around the bundle. 'ring' = full envelope ring; 'caps' = fibre caps at the two radial poles; 'both' = caps + thin ring; 'none' = no fibres, but a thin parenchyma bundle-sheath ring is still placed (every bundle gets a sheath).")
     sheath_thickness : float = Field(default=0.0055, ge=0.00001, title="Sheath Thickness", description="Radial/tangential depth of the bundle sheath ring / caps (mm).")
-    n_caps_layers_outward : int = Field(default=0, ge=0, title="Fibre Cap Layers (outward pole)", description="Asymmetric sclerenchyma cap on the OUTWARD (surface-facing) radial pole — the phloem pole when phloem_outward=True. The cap extends the bundle outside its envelope by this many fibre-cell layers (depth = n × sclerenchyma_cell_diameter), hugging the pole contour and tapering toward the flanks. 0 = no outward cap. Independent of the symmetric 'caps'/'ring' sheath; use a different count here than n_caps_layers_inward for an asymmetric cap (e.g. a fibre cap only over the phloem).")
+    n_caps_layers_outward : int = Field(default=0, ge=0, title="Fibre Cap Layers (outward pole)", description="Asymmetric sclerenchyma cap on the OUTWARD (surface-facing) radial pole — the phloem pole when phloem_outward=True. The cap extends the bundle outside its envelope by this many fibre-cell layers (depth = n × sclerenchyma_cell_diameter), hugging the outward half of the envelope contour. This is the layer count at the pole itself; by default the cap keeps it all the way to the flanks — see n_caps_layers_outward_flank to thin it toward them. 0 = no outward cap. Independent of the symmetric 'caps'/'ring' sheath; use a different count here than n_caps_layers_inward for an asymmetric cap (e.g. a fibre cap only over the phloem).")
+    n_caps_layers_outward_flank : Optional[int] = Field(default=None, ge=0, title="Fibre Cap Layers (outward flanks)", description="Layer count of the outward fibre cap at its flanks — the bundle's two tangential sides, where the outward half of the envelope meets the inward half. Between the flanks (0°) and the outward pole (90°, n_caps_layers_outward layers) the count changes linearly with the angle around the envelope centre, each layer stopping where the interpolated count rounds below it; so the cap is thickest over the pole and thins toward the sides (e.g. 2 here and 5 at the pole gives 2 / 3 / 4 / 5 layers at about 0° / 30° / 60° / 90°). None (default) = no taper: n_caps_layers_outward layers everywhere. Values above n_caps_layers_outward are clamped to it. Ignored when n_caps_layers_outward is 0.")
     n_caps_layers_inward  : int = Field(default=0, ge=0, title="Fibre Cap Layers (inward pole)", description="Asymmetric sclerenchyma cap on the INWARD (centre-facing) radial pole — the xylem pole when phloem_outward=True. Extends the bundle outside its envelope by this many fibre-cell layers (depth = n × sclerenchyma_cell_diameter). 0 = no inward cap. See n_caps_layers_outward.")
     sclerenchyma_cell_diameter : float = Field(default=0.005, ge=0.00001, title="Sheath Cell Diameter", description="Diameter (radial) of the sclerenchyma (fibre) cells in the sheath.")
     sclerenchyma_cell_width : float = Field(default=0.005, ge=0.00001, title="Sheath Cell Width", description="Tangential width of the sclerenchyma (fibre) cells in the sheath. Raise it (with the diameter) to use fewer, larger fibres.")
@@ -1030,7 +1031,7 @@ def default_dicot_leaf_params() -> List[BaseParams]:
 # ===========================================================================
 # Parameter metadata registry (sidecar — no change to the emitted params)
 # ===========================================================================
-# ``VascularBundleParams`` carries 69 flat fields, but only ~8 matter for any one
+# ``VascularBundleParams`` carries 70 flat fields, but only ~8 matter for any one
 # bundle; the rest are either mode-gated (active only for a given bundle_type /
 # xylem_layout / sheath / placement) or advanced tuning.  This registry records,
 # per field: which **group** it belongs to, its **tier** (primary vs advanced),
@@ -1057,7 +1058,8 @@ def _build_bundle_field_meta() -> Dict[str, Dict[str, Any]]:
                                "metaxylem_gap", "n_protoxylem", "protoxylem_diameter", "protoxylem_diameter_sd",
                                "protoxylem_diameter_min", "protoxylem_width", "protoxylem_height",
                                "protoxylem_relative_distance", "lacuna", "lacuna_width", "lacuna_height"]),
-        "sheath":            (None, ["sheath", "sheath_thickness", "n_caps_layers_outward", "n_caps_layers_inward",
+        "sheath":            (None, ["sheath", "sheath_thickness", "n_caps_layers_outward",
+                               "n_caps_layers_outward_flank", "n_caps_layers_inward",
                                "sclerenchyma_cell_diameter", "sclerenchyma_cell_width", "outer_sheath", "outer_sheath_clearance"]),
         "composition":       (None, ["prop_vessel", "prop_sieve", "phloem_width", "phloem_height", "phloem_relative_distance",
                                "parenchyma_diameter", "parenchyma_width", "sieve_diameter_min",
@@ -1214,7 +1216,7 @@ def _field_kind(field: str) -> str:
 def describe_params(model, *, tier: Optional[str] = None, active_only: bool = False,
                     hide_rendering: bool = False) -> str:
     """A grouped, human-readable view of a param model's fields — the antidote to a
-    69-field flat wall.  ``tier='primary'`` shows only the primary knobs; ``active_only``
+    70-field flat wall.  ``tier='primary'`` shows only the primary knobs; ``active_only``
     hides fields whose mode gate is off for the current values; ``hide_rendering`` drops
     the algorithm-tuning knobs.  Works for any param model: the bundle uses its curated
     groups/gates, every other class falls back to auto-tiering (preset-derived) with a

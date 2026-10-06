@@ -142,6 +142,60 @@ def test_caps_are_asymmetric_and_scale_with_count():
         "the 4-layer outward cap must extend the bundle farther than the 2-layer inward cap"
 
 
+# -- tapered outward cap (n_caps_layers_outward_flank) ------------------------
+# At theta=0 the outward pole is +x and the flanks are the +/-y sides.
+
+def _fibre_xy(cells):
+    return np.array([(c.x, c.y) for c in cells.cells if c.type == "sclerenchyma"])
+
+
+def test_outward_flank_unset_or_equal_is_the_uniform_cap():
+    # None (default) and a flank count equal to the pole count are both "no taper":
+    # the same fibres in the same places as the plain uniform cap.
+    ref = _fibre_xy(_build(sheath="none", n_caps_layers_outward=4)[0])
+    for flank in (None, 4):
+        got = _fibre_xy(_build(sheath="none", n_caps_layers_outward=4,
+                               n_caps_layers_outward_flank=flank)[0])
+        assert got.shape == ref.shape and np.allclose(got, ref), \
+            f"flank={flank} must reproduce the uniform 4-layer cap"
+
+
+def test_outward_flank_above_pole_is_clamped():
+    ref = _fibre_xy(_build(sheath="none", n_caps_layers_outward=3)[0])
+    got = _fibre_xy(_build(sheath="none", n_caps_layers_outward=3,
+                           n_caps_layers_outward_flank=7)[0])
+    assert got.shape == ref.shape and np.allclose(got, ref), \
+        "a flank count above the pole count is clamped to it (uniform cap)"
+
+
+def test_tapered_cap_keeps_pole_depth_and_thins_at_flanks():
+    # 5 layers over the pole, 1 at the flanks: the cap reaches as far out at the
+    # pole as the uniform 5-layer cap, but holds fewer fibres and stays thin on the
+    # tangential sides.
+    _, uni = _build(sheath="none", n_caps_layers_outward=5)
+    _, tap = _build(sheath="none", n_caps_layers_outward=5, n_caps_layers_outward_flank=1)
+    uni_cells, _ = _build(sheath="none", n_caps_layers_outward=5)
+    tap_cells, _ = _build(sheath="none", n_caps_layers_outward=5, n_caps_layers_outward_flank=1)
+    n_uni, n_tap = len(_fibre_xy(uni_cells)), len(_fibre_xy(tap_cells))
+    assert 0 < n_tap < n_uni, "the tapered cap must hold fewer fibres than the uniform one"
+
+    _, uy0, ux1, uy1 = uni.envelope.bounds
+    _, ty0, tx1, ty1 = tap.envelope.bounds
+    scl = _params()[0]["sclerenchyma_cell_diameter"]
+    assert abs(tx1 - ux1) < 0.5 * scl, "the pole (+x) keeps the full cap depth"
+    assert (ty1 - ty0) < (uy1 - uy0) - scl, "the flanks (+/-y) carry a thinner cap"
+
+
+def test_tapered_cap_layer_count_follows_the_angle():
+    # Layer i survives where the linearly interpolated count rounds above it:
+    # flank 2, pole 5 -> 2 / 3 / 4 / 5 layers at 0 / 30 / 60 / 90 degrees.
+    from openalea.granap.vascular_bundle import _cap_layer_threshold
+    def count(deg):
+        a = np.radians(deg)
+        return sum(1 for i in range(5) if a >= _cap_layer_threshold(i, 5, 2))
+    assert [count(d) for d in (0, 30, 60, 90)] == [2, 3, 4, 5]
+
+
 # -- whole-organ smoke -------------------------------------------------------
 
 def _census(organ):

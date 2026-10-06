@@ -864,6 +864,30 @@ def _sheath_zones(working, bp):
     return working, zones
 
 
+def _cap_layer_threshold(i: int, n_pole: int, n_flank: int) -> float:
+    """Angle (radians, 0 = flank .. pi/2 = pole) above which cap layer ``i`` exists.
+
+    The layer count is interpolated linearly with the angle around the envelope
+    centre, ``n(a) = n_flank + (n_pole - n_flank) * a / (pi/2)``, and layer ``i``
+    (0-based, innermost first) is kept where ``n(a)`` rounds to more than ``i``,
+    i.e. ``n(a) > i + 0.5``.  Rounding (rather than flooring) makes the flank carry
+    exactly ``n_flank`` layers and the pole exactly ``n_pole``, each intermediate
+    layer covering the angles nearest its own count.  Layers below ``n_flank`` run
+    the whole hemisphere (threshold 0).
+    """
+    if i < n_flank or n_pole <= n_flank:
+        return 0.0
+    return 0.5 * np.pi * (i + 0.5 - n_flank) / (n_pole - n_flank)
+
+
+def _outward_sector(a_min: float, reach: float) -> Polygon:
+    """The part of the ``+y`` half-plane seen from the origin at an angle of at least
+    ``a_min`` above the tangential (x) axis on either side: a circular sector of
+    radius ``reach`` spanning polar angles ``[a_min, pi - a_min]``."""
+    angles = np.linspace(a_min, np.pi - a_min, 65)
+    return Polygon([(0.0, 0.0)] + [(reach * np.cos(a), reach * np.sin(a)) for a in angles])
+
+
 def _outward_caps(env_local: Polygon, bp: dict):
     """Asymmetric sclerenchyma fibre caps at the radial pole(s), outside the envelope.
 
@@ -878,35 +902,62 @@ def _outward_caps(env_local: Polygon, bp: dict):
     gaps open — and a single-layer cap still renders one clean file.
 
     ``n_caps_layers_outward`` / ``n_caps_layers_inward`` set the per-pole layer count;
-    independent counts give the asymmetry.  Both default 0 → no caps.  Returns
-    ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter, cell_width)``
-    (innermost first) that the fibres are seeded along, and ``region`` the clean
-    contour-following cap polygon(s) — envelope buffered outward by ``n × scl`` at
-    each pole — so the caller can unify it with the envelope for the bundle-sheath
-    wrap / removal mask.  ``region`` is ``None`` when there are no caps.
+    independent counts give the asymmetry.  Both default 0 → no caps.
+
+    ``n_caps_layers_outward_flank`` tapers the outward cap: the layer count falls
+    linearly with the angle around the envelope centre, from
+    ``n_caps_layers_outward`` over the pole (90°) to this many at the flanks (0°).
+    Each file beyond the flank count is clipped to the sector where it is still
+    present (:func:`_cap_layer_threshold`), so the outer files shorten one by one
+    toward the sides.  Unset (``None``), the cap is uniform — exactly the untapered
+    geometry.  The inward cap is always uniform.
+
+    Returns ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter,
+    cell_width)`` (innermost first) that the fibres are seeded along, and ``region``
+    the clean contour-following cap polygon(s) — the envelope grown outward by each
+    layer over the angles that layer covers — so the caller can unify it with the
+    envelope for the bundle-sheath wrap / removal mask.  ``region`` is ``None`` when
+    there are no caps.
     """
     scl = bp.get("sclerenchyma_cell_diameter", 0.008)
     scl_w = bp.get("sclerenchyma_cell_width", scl)
     minx, miny, maxx, maxy = env_local.bounds
     n_out = int(bp.get("n_caps_layers_outward", 0))
     n_in = int(bp.get("n_caps_layers_inward", 0))
+    flank = bp.get("n_caps_layers_outward_flank")
+    n_out_flank = n_out if flank is None else min(int(flank), n_out)
     span = max(maxx - minx, maxy - miny) + (max(n_out, n_in) + 1) * scl + 1.0
 
     files, regions = [], []
-    # (layer count, hemisphere the pole occupies) — +y outward, −y inward.
+    # (pole layer count, flank layer count, hemisphere the pole occupies) — +y
+    # outward (optionally tapered), −y inward (uniform).
     poles = []
     if n_out > 0:
-        poles.append((n_out, box(minx - span, 0.0, maxx + span, maxy + span)))
+        poles.append((n_out, n_out_flank, box(minx - span, 0.0, maxx + span, maxy + span)))
     if n_in > 0:
-        poles.append((n_in, box(minx - span, miny - span, maxx + span, 0.0)))
-    for n, hemisphere in poles:
-        # clean cap region: the pole-side band of the envelope grown out by n cells.
-        band = _largest(env_local.buffer(n * scl).difference(env_local).intersection(hemisphere))
+        poles.append((n_in, n_in, box(minx - span, miny - span, maxx + span, 0.0)))
+    for n, n_flank, hemisphere in poles:
+        # Where each layer runs: the whole hemisphere for the first n_flank layers,
+        # a sector around the pole (narrowing with i) for the tapered outer ones.
+        # Only the outward hemisphere is ever tapered, so the sectors are +y.
+        def layer_zone(i):
+            a = _cap_layer_threshold(i, n, n_flank)
+            return hemisphere if a <= 0.0 else hemisphere.intersection(_outward_sector(a, span))
+
+        # clean cap region: the full-width band of the first n_flank layers, plus
+        # each tapered layer's one-cell band over its own sector.
+        parts = []
+        if n_flank > 0:
+            parts.append(env_local.buffer(n_flank * scl).difference(env_local).intersection(hemisphere))
+        for i in range(n_flank, n):
+            ring = env_local.buffer((i + 1) * scl).difference(env_local.buffer(i * scl))
+            parts.append(ring.intersection(layer_zone(i)))
+        band = _largest(parts[0] if len(parts) == 1 else unary_union(parts))
         if band is not None and not band.is_empty:
             regions.append(band)
         # one fibre file per layer: concentric pole arcs, file 0 on the envelope edge.
         for i in range(n):
-            arc = env_local.buffer(i * scl).exterior.intersection(hemisphere)
+            arc = env_local.buffer(i * scl).exterior.intersection(layer_zone(i))
             if arc is not None and not arc.is_empty:
                 files.append((arc, scl, scl_w))
     region = unary_union(regions) if regions else None
