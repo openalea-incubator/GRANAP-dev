@@ -230,3 +230,24 @@ def test_hollow_pith_leaves_cavity_empty():
     covering = [c for c in organ.all_cells.cells
                 if c.polygon is not None and c.polygon.contains(center)]
     assert not covering, "no cell should fill the hollow medullary cavity"
+
+
+def test_outline_ring_follows_a_square_stem():
+    # ring_shape='outline' lays the bundle ring on the pith/cortex boundary itself,
+    # so on a square stem the bundles follow the square into its corners instead of
+    # sitting on a circle of the same area, and every bundle cell stays inside.
+    from shapely.geometry import Point
+    data = OrganInputData.for_dicot_stem()
+    data.set_value("vascular_bundle", "ring_shape", "outline")
+    data.params.append({"name": "base_shape", "shape": "square", "width": 1.4})
+    organ = StemAnatomy(data, seed=SEED)
+    organ.generate_cells()
+    outline = organ.generate_base_shape()
+    vascular = [c for c in organ.all_cells.cells
+                if c.type in ("xylem", "sieve element", "cambium")]
+    assert vascular, "the square stem should carry bundles"
+    assert all(outline.contains(Point(c.x, c.y)) for c in vascular)
+    # The corners are farther from the centre than the side middles: the outline
+    # ring reaches ~0.85 here, the default circle ring stops at ~0.69.
+    r = max(np.hypot(c.x - outline.centroid.x, c.y - outline.centroid.y) for c in vascular)
+    assert r > 0.7, f"bundles should follow the square into its corners (max r = {r:.2f})"

@@ -96,7 +96,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
         boundary in the ``vascular_cylinder.ring_shape`` family."""
         cyl = self._get_param("vascular_cylinder")
         cx, cy = polygon.centroid.x, polygon.centroid.y
-        return self._ring_contour(cx, cy, self._primary_ring_radius(polygon), cyl)
+        return self._ring_contour(cx, cy, self._primary_ring_radius(polygon), cyl, polygon)
 
     def _n_xylem_files(self, cyl: dict, xylem: dict, circumference: float) -> int:
         """Number of radial xylem files (0 unless the layout is ``files``).

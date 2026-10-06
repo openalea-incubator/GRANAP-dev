@@ -301,7 +301,7 @@ class VascularBundleParams(BaseParams):
     # bundle is oriented along the contour's outward normal with its *cambium*
     # sitting on the contour, so in secondary growth the fascicular cambia join
     # into one continuous ring (see DicotStemAnatomy._build_cambium_ring).
-    ring_shape       : Literal["circle", "ellipse", "star"] = Field(default="circle", title="Cambium Ring Shape", description="Dicot eustele: outline the bundle ring follows. 'circle' = the pith/cortex boundary (radius auto-derived); 'ellipse' = that circle flattened by ring_ellipse_ratio; 'star' = a lobed ring set by the same absolute peak/valley radii + arcs as the root xylem/cambium star (below).")
+    ring_shape       : Literal["circle", "ellipse", "star", "outline"] = Field(default="circle", title="Cambium Ring Shape", description="Dicot eustele: outline the bundle ring follows. 'circle' = the pith/cortex boundary (radius auto-derived); 'ellipse' = that circle flattened by ring_ellipse_ratio; 'star' = a lobed ring set by the same absolute peak/valley radii + arcs as the root xylem/cambium star (below); 'outline' = the pith/cortex boundary itself, so the ring follows any base_shape.")
     ring_ellipse_ratio : float = Field(default=0.75, gt=0.0, le=1.0, title="Ring Ellipse Ratio", description="ring_shape='ellipse' only: height/width of the ring ellipse (1 = circle, <1 = flattened vertically).")
     # Star ring (ring_shape='star'): the SAME parameterisation as the root xylem /
     # cambium and the stem secondary cambium — absolute radii (mm from the organ
@@ -359,7 +359,7 @@ class VascularCylinderParams(BaseParams):
     xylem_thickness  : float = Field(default=0.13, ge=0.00001, title="Xylem Thickness", description="Radial extent (mm) of the xylem annulus, measured inward from the cambium ring toward the pith.")
     phloem_thickness : float = Field(default=0.055, ge=0.00001, title="Phloem Thickness", description="Radial extent (mm) of the phloem annulus, measured outward from the cambium ring toward the cortex.")
     # -- ring shape (shared with the eustele ring_shape family) -------------
-    ring_shape       : Literal["circle", "ellipse", "star"] = Field(default="circle", title="Cylinder Ring Shape", description="Outline the cylinder follows. 'circle' = the pith/cortex boundary (radius auto-derived); 'ellipse' = flattened by ring_ellipse_ratio; 'star' = a lobed ring set by the same absolute peak/valley radii + arcs as the root/eustele star (below).")
+    ring_shape       : Literal["circle", "ellipse", "star", "outline"] = Field(default="circle", title="Cylinder Ring Shape", description="Outline the cylinder follows. 'circle' = the pith/cortex boundary (radius auto-derived); 'ellipse' = flattened by ring_ellipse_ratio; 'star' = a lobed ring set by the same absolute peak/valley radii + arcs as the root/eustele star (below); 'outline' = the pith/cortex boundary itself, so the cylinder follows any base_shape.")
     ring_ellipse_ratio : float = Field(default=0.75, gt=0.0, le=1.0, title="Ring Ellipse Ratio", description="ring_shape='ellipse' only: height/width of the ring ellipse (1 = circle, <1 = flattened vertically).")
     # Star ring (ring_shape='star'): same absolute peak/valley parameterisation as
     # the root and the eustele bundle ring.
