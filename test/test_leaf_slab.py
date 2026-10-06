@@ -260,3 +260,66 @@ def test_monocot_inter_bundle_aerenchyma():
     assert len(big) >= len(mids) - 1               # ~one lacuna per inter-vein gap
     for c in big:                                   # each sits between two veins
         assert min(abs(c.x - xm) for xm in mids) < 0.12
+
+
+# -- arc (cylinder-slice) vein: sclerenchyma arc + vessel-gradient side --------
+# Built directly with build_arc_bundle at the origin, theta=-pi/2 (abaxial = -y),
+# so the curvature centre sits above the vein at (0, oy) and "farther from the
+# centre" means outward (abaxial) along the arc.
+
+def _arc(**over):
+    from openalea.granap.cell_manager import CellManager
+    from openalea.granap.vascular_bundle import build_arc_bundle
+    bp = dict(arc_degrees=120.0, arc_radius=0.3, arc_xylem_thickness=0.08,
+              arc_cambium_thickness=0.01, arc_phloem_thickness=0.03,
+              xylem_layout="packed", prop_vessel=0.5,
+              parenchyma_diameter=0.008, parenchyma_width=0.008)
+    bp.update(over)
+    xylem = {"vessel_diameter": 0.02, "vessel_diameter_min": 0.006, "vessel_diameter_sd": 0.0}
+    phloem = {"sieve_diameter": 0.006, "sieve_diameter_sd": 0.0}
+    cambium = {"cell_diameter": 0.005}
+    cells = CellManager()
+    res = build_arc_bundle(cells, np.random.default_rng(0), 0.0, 0.0, -np.pi / 2,
+                           bp, xylem, phloem, cambium)
+    return cells, res
+
+
+def _arc_centre(res):
+    """Curvature centre of the arc: on the x=0 axis, one cambium radius above the
+    cambium zone's lowest point."""
+    cam = dict(res.zone_polygons)["cambium"]
+    return 0.0, cam.bounds[1] + 0.01 / 2 + 0.3
+
+
+def test_arc_sclerenchyma_band_caps_the_phloem():
+    cells, res = _arc()
+    assert "sclerenchyma" not in dict(res.zone_polygons), "default: no sclerenchyma arc"
+
+    cells, res = _arc(arc_sclerenchyma_thickness=0.04, arc_sclerenchyma_cell_diameter=0.008,
+                      arc_sclerenchyma_cell_width=0.008)
+    zones = dict(res.zone_polygons)
+    fib = [c for c in cells.cells if c.type == "sclerenchyma"]
+    assert "sclerenchyma" in zones and len(fib) > 20, "the band is filled with fibres"
+    ox, oy = _arc_centre(res)
+    def r(geom):
+        return np.hypot(geom.centroid.x - ox, geom.centroid.y - oy)
+    assert r(zones["sclerenchyma"]) > r(zones["phloem"]) > r(zones["xylem"]), \
+        "radial order from the centre: xylem -> phloem -> sclerenchyma"
+    assert res.envelope.contains(zones["sclerenchyma"].representative_point()), \
+        "the band is part of the vein envelope (mesophyll cleared for it)"
+
+
+def test_arc_xylem_large_side_flips_the_vessel_gradient():
+    def inner_vs_cambium(side):
+        _, res = _arc(arc_xylem_large_side=side)
+        ox, oy = _arc_centre(res)
+        v = res.vessel_polygons
+        r = np.array([np.hypot(p.centroid.x - ox, p.centroid.y - oy) for p in v])
+        d = np.array([2.0 * np.sqrt(p.area / np.pi) for p in v])
+        mid = np.median(r)
+        return d[r < mid].mean(), d[r >= mid].mean()
+
+    inner, outer = inner_vs_cambium("cambium")
+    assert outer > inner, "default: large vessels toward the cambium"
+    inner, outer = inner_vs_cambium("inner")
+    assert inner > outer, "'inner': large vessels on the inner (curvature-centre) face"
