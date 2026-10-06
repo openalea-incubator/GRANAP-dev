@@ -34,9 +34,9 @@ def _layer_params(clsname: str, name: str, label: str, *, cell_diameter: float,
     mesophyll / hypodermis / ...).  ``label`` is woven into the field descriptions
     (e.g. "Diameter of the cortical cells").  ``cell_width=None`` omits the width
     field (the needle epidermis / hypodermis have no separate tangential width).
-    ``axial_height`` is the out-of-plane (longitudinal) cell extent for the 3D
-    pipeline (see ROOT_3D_PLAN); left unset (None) it has no effect on 2D
-    generation.
+    ``axial_height`` is the out-of-plane (longitudinal) cell extent used by the
+    3D extrusion pipeline (see generate_cell_3d); left unset (None) it has no
+    effect on 2D generation.
     """
     fields: Dict[str, Any] = {
         "name": (str, name),
@@ -103,8 +103,8 @@ class LayerDefaultParams(BaseParams):
     shift_default       : float = Field(default=0.0,   ge=0.0, le=1.0)
     n_layers_default    : int   = Field(default=1,     ge=1) # No upper limit
     order_default       : int   = Field(default=0,     ge=0) # No upper limit
-    # Out-of-plane (longitudinal) cell extent for the 3D pipeline — see
-    # ROOT_3D_PLAN. None = no 3D axial subdivision configured (2D behaviour).
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
     axial_height_default: Optional[float] = Field(default=None, ge=0.00001)
 
 

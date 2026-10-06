@@ -335,18 +335,22 @@ class Organ(AbstractNetwork, ABC):
 
     def generate_cells_3d(self, n_axial_repeats: float = 8.0,
                           default_axial_height: Optional[float] = None,
+                          aerenchyma_mode: str = "before",
                           seed: Optional[int] = None) -> Cells3DResult:
         """Build a 3D model of this organ by extruding its 2D cross-section.
 
         Generates a fresh 2D cross-section — *ordinary* intercellular space
-        disabled (3D intercellular space isn't modelled yet), aerenchyma left
-        as configured (it's real tissue cells retyped "air space", not a
-        separate feature, so it extrudes like any other cell) — and stacks
-        literal copies of each cell's real 2D polygon along Z at its own
-        tissue-type height; vessels get one extrusion spanning the whole
-        segment. See :mod:`generate_cell_3d` for the full mechanics and the
-        reasoning behind this design (it replaced an earlier 3D-Voronoi
-        approach that proved too fragile/expensive).
+        disabled (3D intercellular space isn't modelled yet), aerenchyma
+        handled per ``aerenchyma_mode`` — and stacks literal copies of each
+        cell's real 2D polygon along Z at its own tissue-type height; vessels
+        get one extrusion spanning the whole segment. See
+        :mod:`generate_cell_3d` for the full mechanics and the reasoning
+        behind this design (it replaced an earlier 3D-Voronoi approach that
+        proved too fragile/expensive).
+
+        This organ is left as it was found — the parameters overridden for the
+        2D pass are restored and cached geometry is invalidated, so a later
+        :meth:`generate_cells` returns this organ's own 2D section.
 
         Args:
             n_axial_repeats: segment length as a multiple of the tallest
@@ -354,11 +358,19 @@ class Organ(AbstractNetwork, ABC):
             default_axial_height: override for any tissue whose own
                 ``axial_height`` isn't explicitly configured (else each
                 falls back to ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``).
+            aerenchyma_mode: when aerenchyma is applied relative to the
+                extrusion. ``"before"`` (default) builds it in 2D and extrudes
+                each lacuna as one full-span prism — continuous axial
+                channels, the rice-root case. ``"after"`` suppresses the 2D
+                pass and instead retypes individual extruded prisms to "air
+                space" — a distributed void network, the leaf case.
+                ``"none"`` disables it entirely.
             seed: RNG seed for the per-cell axial phase shift; defaults to
                 this organ's own seeded ``self.rng``.
         """
         return _generate_cells_3d(self, n_axial_repeats=n_axial_repeats,
-                                  default_axial_height=default_axial_height, seed=seed)
+                                  default_axial_height=default_axial_height,
+                                  aerenchyma_mode=aerenchyma_mode, seed=seed)
 
     def retag_cells(self, old_tag: str, new_tag: str) -> int:
         """Rename every cell tagged ``old_tag`` to ``new_tag``.

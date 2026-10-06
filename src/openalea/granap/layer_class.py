@@ -26,8 +26,8 @@ class LayerPolygon:
     cell_width: float = 0.0
     id_layer: int = 0
     shift: float = 0.0
-    # Out-of-plane (longitudinal) cell extent — see ROOT_3D_PLAN. None = no 3D
-    # axial subdivision configured (2D behaviour unaffected).
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
     axial_height: Optional[float] = None
     # Transfusion-tissue fields (needle-specific)
     transfusion_type: bool = False
@@ -70,8 +70,8 @@ class Layer:
     order: int = 0
     cell_width: Optional[float] = None
     shift: float = 0.0
-    # Out-of-plane (longitudinal) cell extent — see ROOT_3D_PLAN. None = no 3D
-    # axial subdivision configured (2D behaviour unaffected).
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
     axial_height: Optional[float] = None
     additional_params: Dict[str, Any] = field(default_factory=dict)
     cells: List[Cell] = field(default_factory=list)
