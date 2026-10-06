@@ -22,6 +22,7 @@ from openalea.granap.organ_class import Organ
 from openalea.granap.layer_class import Layer, LayerPolygon
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
+from openalea.granap.distribution import draw
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.tissue_class import (
@@ -52,14 +53,17 @@ class MonocotRootAnatomy(RootAnatomy):
         self.vascular_params.update({
             "xylem_diameter":         float(xylem.get("vessel_diameter",        0.06)),
             "xylem_diameter_sd":      float(xylem.get("vessel_diameter_sd",     0.005)),
+            "xylem_diameter_distribution":      xylem.get("vessel_diameter_distribution"),
             "protoxylem_diameter":    float(xylem.get("protoxylem_diameter",    0.01)),
             "protoxylem_diameter_sd": float(xylem.get("protoxylem_diameter_sd", 0.002)),
+            "protoxylem_diameter_distribution": xylem.get("protoxylem_diameter_distribution"),
             "protoxylem_width":       float(xylem.get("protoxylem_cluster_width",  0.03)),
             "protoxylem_height":      float(xylem.get("protoxylem_cluster_height", 0.05)),
             "n_vascular_bundles":     int(xylem.get("n_vascular_bundles",       5)),
             "n_protoxylem":           int(xylem.get("n_protoxylem",           10)),
             "phloem_diameter":        float(phloem.get("sieve_diameter",        0.005)),
             "phloem_diameter_sd":     float(phloem.get("sieve_diameter_sd",     0.001)),
+            "phloem_diameter_distribution":     phloem.get("sieve_diameter_distribution"),
             "phloem_width":           float(phloem.get("cluster_width",         0.02)),
             "phloem_height":          float(phloem.get("cluster_height",        0.03)),
             "relative_phloem":        float(phloem.get("relative_distance",     0.5)),
@@ -83,6 +87,7 @@ class MonocotRootAnatomy(RootAnatomy):
                 "xylem_diameter_max":        float(xylem.get("vessel_diameter",        0.06)),
                 "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",    0.01)),
                 "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",     0.005)),
+                "xylem_diameter_distribution":         xylem.get("vessel_diameter_distribution"),
                 "xylem_gradient_function":   str(xylem.get("gradient_function",        "five_pl")),
                 "xylem_gradient_inflection": float(xylem.get("gradient_inflection",    0.7)),
                 "xylem_gradient_steepness":  float(xylem.get("gradient_steepness",     5.0)),
@@ -101,6 +106,7 @@ class MonocotRootAnatomy(RootAnatomy):
                 "xylem_diameter_max":        float(xylem.get("vessel_diameter",        0.06)),
                 "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",    0.01)),
                 "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",     0.005)),
+                "xylem_diameter_distribution":         xylem.get("vessel_diameter_distribution"),
                 "n_vascular_peak":           int(xylem.get("n_vascular_peak",          5)),
                 "n_metaxylem":               int(xylem.get("n_metaxylem",             0)),
                 "outer_radius_xylem":        float(xylem.get("outer_radius",           0.15)),
@@ -110,6 +116,7 @@ class MonocotRootAnatomy(RootAnatomy):
                 # Protoxylem chain (outer band) + its size gradient.
                 "protoxylem_diameter":       float(xylem.get("protoxylem_diameter",     0.01)),
                 "protoxylem_diameter_sd":    float(xylem.get("protoxylem_diameter_sd",  0.001)),
+                "protoxylem_diameter_distribution":    xylem.get("protoxylem_diameter_distribution"),
                 "protoxylem_band_depth":     float(xylem.get("protoxylem_band_depth",   0.0)),
                 "protoxylem_diameter_min":   float(xylem.get("protoxylem_diameter_min", 0.0)),
                 "protoxylem_pole_width_inner": float(xylem.get("protoxylem_pole_width_inner", 0.0)),
@@ -278,6 +285,7 @@ class MonocotRootAnatomy(RootAnatomy):
             proportion=1.0, direction=None,
             diameter_max=cell_diam, diameter_min=cell_diam,
             diameter_sd=cell_sd, gradient_function="normal",
+            distribution=p["phloem_diameter_distribution"],
         )
 
     # ------------------------------------------------------------------
@@ -325,14 +333,13 @@ class MonocotRootAnatomy(RootAnatomy):
         list_xylem_polygons = []
         cells_in_slices = CellManager()
         for i_slice, slice in enumerate(slices):
-            xylem_diameter = float(np.clip(
-                self.rng.normal(
-                    self.vascular_params["xylem_diameter"],
-                    self.vascular_params["xylem_diameter_sd"],
-                ),
-                self.vascular_params["xylem_diameter"] * 0.1,
-                np.inf,
-            ))
+            xylem_diameter = draw(
+                self.rng,
+                self.vascular_params["xylem_diameter"],
+                self.vascular_params["xylem_diameter_sd"],
+                self.vascular_params["xylem_diameter"] * 0.1, None,
+                self.vascular_params["xylem_diameter_distribution"],
+            )
 
             # Region: a single metaxylem vessel inscribed in the pizza slice.
             # (One big vessel per slice — its cells are seeded along the vessel
@@ -463,6 +470,7 @@ class MonocotRootAnatomy(RootAnatomy):
             n_border=24, id_base=self.vascular_cells.next_group_id(), angle_center=None,
             proportion=1.0, direction=None,
             diameter_max=diameter, diameter_sd=p[f"{kind}_diameter_sd"] * scale,
+            distribution=p[f"{kind}_diameter_distribution"],
             gradient_function="normal",
         )
 
@@ -532,7 +540,8 @@ class MonocotRootAnatomy(RootAnatomy):
         eggs = []
         for j in range(n_meta):
             theta = 2.0 * np.pi * j / n_meta
-            target_r = 0.5 * float(np.clip(self.rng.normal(d_meta, d_sd), d_floor, np.inf))
+            target_r = 0.5 * draw(self.rng, d_meta, d_sd, d_floor, None,
+                                  p["xylem_diameter_distribution"])
 
             # Full circle if it fits with a gap; otherwise elongate radially,
             # KEEPING the area (a*b = target_r**2), just enough to open the gap,
@@ -646,6 +655,7 @@ class MonocotRootAnatomy(RootAnatomy):
                 proportion=1.0, direction="center",
                 diameter_max=d_max, diameter_min=d_min,
                 diameter_sd=p["protoxylem_diameter_sd"],
+                distribution=p["protoxylem_diameter_distribution"],
                 gradient_function=p["xylem_gradient_function"],
                 gradient_inflection=p["xylem_gradient_inflection"],
                 gradient_steepness=p["xylem_gradient_steepness"],
@@ -711,6 +721,7 @@ class MonocotRootAnatomy(RootAnatomy):
                 n_border=16, id_base=next_id, angle_center=(cx, cy),
                 proportion=1.0, direction=None,
                 diameter_max=sieve_d, diameter_sd=p["phloem_diameter_sd"],
+                distribution=p["phloem_diameter_distribution"],
                 gradient_function="normal",
             )
             next_id += len(placed)

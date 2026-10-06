@@ -227,6 +227,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
                 diameter_max=xylem.get("vessel_diameter", 0.045),
                 diameter_min=xylem.get("vessel_diameter_min", 0.012),
                 diameter_sd=xylem.get("vessel_diameter_sd", 0.004),
+                distribution=xylem.get("vessel_diameter_distribution"),
                 gradient_function=xylem.get("gradient_function", "five_pl"),
                 gradient_inflection=xylem.get("gradient_inflection", 0.5),
                 gradient_steepness=xylem.get("gradient_steepness", 3.0),

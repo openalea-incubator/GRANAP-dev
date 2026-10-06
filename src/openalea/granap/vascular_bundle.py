@@ -38,6 +38,7 @@ from shapely.prepared import prep
 
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
+from openalea.granap.distribution import draw
 from openalea.granap.geometry_collection import GeometryProcessor
 from shapely.ops import unary_union
 
@@ -486,6 +487,7 @@ def _fill_xylem_packed(cells, rng, zone, cx, cy, xylem, bp, result) -> None:
         diameter_max=xylem.get("vessel_diameter", 0.06),
         diameter_min=xylem.get("vessel_diameter_min", 0.02),
         diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+        distribution=xylem.get("vessel_diameter_distribution"),
         gradient_function=xylem.get("gradient_function", "five_pl"),
         gradient_inflection=xylem.get("gradient_inflection", 0.5),
         gradient_steepness=xylem.get("gradient_steepness", 3.0),
@@ -587,6 +589,7 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
             diameter_max=xylem.get("vessel_diameter", 0.045),
             diameter_min=xylem.get("vessel_diameter_min", 0.012),
             diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+            distribution=xylem.get("vessel_diameter_distribution"),
             gradient_function=xylem.get("gradient_function", "five_pl"),
             gradient_inflection=xylem.get("gradient_inflection", 0.5),
             gradient_steepness=xylem.get("gradient_steepness", 3.0),
@@ -650,7 +653,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
     n_meta = int(bp.get("n_metaxylem", 2))
     m_gap = float(bp.get("metaxylem_gap", 0.04))
     for k in range(n_meta):
-        d = float(np.clip(rng.normal(dm, dm_sd), dm_min, np.inf))
+        d = draw(rng, dm, dm_sd, dm_min, None, bp.get("metaxylem_diameter_distribution"))
         poly = _largest(Point(*at(0.0, (k - (n_meta - 1) / 2.0) * (dm + m_gap)))
                         .buffer(d / 2, resolution=32).intersection(zone))
         if poly is None:
@@ -691,6 +694,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
                 diameter_max=float(bp.get("protoxylem_diameter", 0.012)),
                 diameter_min=float(bp.get("protoxylem_diameter_min", 0.006)),
                 diameter_sd=float(bp.get("protoxylem_diameter_sd", 0.0015)),
+                distribution=bp.get("protoxylem_diameter_distribution"),
                 gradient_function="normal",
             )
             if not vessels:
@@ -769,6 +773,7 @@ def _place_phloem_cells(cells, rng, sieve_zone, cx, cy, phloem, bp):
         proportion=proportion, direction=None,
         diameter_max=sieve_d, diameter_min=sieve_min,
         diameter_sd=phloem.get("sieve_diameter_sd", 0.001), gradient_function="normal",
+        distribution=phloem.get("sieve_diameter_distribution"),
     )
     comps = _place_companions(cells, rng, sieve_zone, centers, comp_d, comp_w, voronoi_grow, cx, cy)
     return unary_union(sieves + comps) if (sieves or comps) else None
@@ -1298,6 +1303,7 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
                 diameter_max=xylem.get("vessel_diameter", 0.045),
                 diameter_min=xylem.get("vessel_diameter_min", 0.012),
                 diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+                distribution=xylem.get("vessel_diameter_distribution"),
                 gradient_function=xylem.get("gradient_function", "five_pl"),
                 gradient_inflection=xylem.get("gradient_inflection", 0.5),
                 gradient_steepness=xylem.get("gradient_steepness", 3.0),

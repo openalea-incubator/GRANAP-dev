@@ -1,7 +1,7 @@
 """Tests for the parameter-metadata layer (grouping / tiering / dead-knob lint).
 
 These guard the sidecar ``FIELD_META`` registry and the ``describe_params`` /
-``OrganInputData.lint`` helpers that tame ``VascularBundleParams`` (70 flat fields).
+``OrganInputData.lint`` helpers that tame ``VascularBundleParams`` (72 flat fields).
 The registry is metadata only — it must not change the emitted params (that
 invariant is covered by ``test_param_schema_equivalence``); here we check the
 *views* and the *lint* behave.
@@ -27,10 +27,10 @@ def test_registry_covers_every_bundle_field():
 
 
 def test_primary_tier_is_small():
-    """The point of the tiering: a handful of primary knobs, not 70."""
+    """The point of the tiering: a handful of primary knobs, not 72."""
     meta = FIELD_META["VascularBundleParams"]
     primary = [f for f, m in meta.items() if m["tier"] == "primary"]
-    assert 5 <= len(primary) <= 15          # a curated few, well under the 70 total
+    assert 5 <= len(primary) <= 15          # a curated few, well under the 72 total
     # the fields presets actually move must all be primary
     for f in ("bundle_type", "width", "height", "xylem_layout", "n_bundles", "sheath"):
         assert meta[f]["tier"] == "primary"

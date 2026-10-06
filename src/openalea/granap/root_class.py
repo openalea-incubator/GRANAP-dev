@@ -327,6 +327,7 @@ class RootAnatomy(Organ):
             diameter_max=p["xylem_diameter_max"],
             diameter_min=p["xylem_diameter_min"],
             diameter_sd=p["xylem_diameter_sd"],
+            distribution=p.get("xylem_diameter_distribution"),
             gradient_function=p["xylem_gradient_function"],
             gradient_inflection=p["xylem_gradient_inflection"],
             gradient_steepness=p["xylem_gradient_steepness"],

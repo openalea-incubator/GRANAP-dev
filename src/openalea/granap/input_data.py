@@ -5,6 +5,8 @@ import warnings
 from typing import List, Dict, Any, Tuple, Optional, Union, Literal
 from pydantic import BaseModel, Field, create_model, model_validator
 
+from openalea.granap.distribution import Distribution
+
 
 # ===========================================================================
 # Base config
@@ -12,6 +14,17 @@ from pydantic import BaseModel, Field, create_model, model_validator
 
 class BaseParams(BaseModel):
     model_config = {"validate_assignment": True}
+
+
+def _distribution_field(label: str):
+    """``(type, FieldInfo)`` of an optional size-distribution field: the shape of the
+    per-element jitter of ``label`` (see :mod:`openalea.granap.distribution`).  None =
+    normal, exactly as before the field existed."""
+    return (Optional[Distribution], Field(default=None, title=f"{label} Distribution",
+        description=f"Shape of the per-element {label.lower()} jitter, moment-matched to its "
+                    f"mean and SD: None/'normal' (default), 'lognormal', 'gamma', 'logistic', "
+                    f"'uniform' or 'empirical' (with measured values). E.g. "
+                    f"{{'family': 'lognormal'}}."))
 
 
 # ===========================================================================
@@ -203,7 +216,7 @@ class VascularBundleParams(BaseParams):
         """v2 nested authoring: accept grouped sub-model kwargs (``envelope=...``,
         ``xylem_face=...``, ``sheath=...`` — see ``BUNDLE_GROUP_MODELS``) and flatten
         them into the flat fields, so the storage/emission/consumer contract stays flat
-        (70 flat fields) while construction can be nested.  Pure flat construction (no
+        (72 flat fields) while construction can be nested.  Pure flat construction (no
         group key present) passes through untouched; an explicit flat kwarg wins over a
         value coming from a group block."""
         if not isinstance(data, dict):
@@ -264,11 +277,13 @@ class VascularBundleParams(BaseParams):
     metaxylem_diameter    : float = Field(default=0.04, ge=0.00001, title="Metaxylem Diameter", description="Metaxylem vessel diameter (mm). Keep it under the bundle size so there is room for the protoxylem, lacuna and phloem.")
     metaxylem_diameter_sd : float = Field(default=0.003, ge=0.0,     title="Metaxylem Diameter SD", description="SD of metaxylem diameter (per-vessel size jitter).")
     metaxylem_diameter_min : float = Field(default=0.02, ge=0.00001, title="Metaxylem Diameter (min)", description="Lower clip on the jittered metaxylem diameter.")
+    metaxylem_diameter_distribution : Optional[Distribution] = _distribution_field("Metaxylem Diameter")[1]
     metaxylem_gap    : float = Field(default=0.04, ge=0.0, title="Metaxylem Gap", description="Tangential spacing between the metaxylem vessels (mm).")
     n_protoxylem     : int   = Field(default=1, ge=0, title="Number of Protoxylem", description="Number of protoxylem bundles in the inner half. Each is a small region packed with protoxylem vessels; the bundles are spread tangentially. Default 1.")
     protoxylem_diameter    : float = Field(default=0.03, ge=0.00001, title="Protoxylem Diameter", description="Protoxylem vessel diameter (mm) when packing a protoxylem bundle — smaller than the metaxylem.")
     protoxylem_diameter_sd : float = Field(default=0.00001, ge=0.0,     title="Protoxylem Diameter SD", description="SD of protoxylem vessel diameter.")
     protoxylem_diameter_min : float = Field(default=0.025, ge=0.00001, title="Protoxylem Diameter (min)", description="Lower clip on the packed protoxylem vessel diameter.")
+    protoxylem_diameter_distribution : Optional[Distribution] = _distribution_field("Protoxylem Diameter")[1]
     protoxylem_width  : float = Field(default=0.032, ge=0.00001, title="Protoxylem Bundle Width",  description="Tangential extent of each protoxylem bundle region (mm) — the region packed with protoxylem vessels.")
     protoxylem_height : float = Field(default=0.032, ge=0.00001, title="Protoxylem Bundle Height", description="Radial extent of each protoxylem bundle region (mm).")
     protoxylem_relative_distance : float = Field(default=0.6, ge=0.0, le=1.0, title="Protoxylem Relative Distance", description="Where the protoxylem bundle sits along the inner (centre-facing) half of the bundle: 0 = bundle centre (near the metaxylem), 1 = inner edge (near the organ centre).")
@@ -401,11 +416,13 @@ SteleParams = _ground_region_params("SteleParams", "stele",
 
 def _vessel_sizing_fields(*, vessel_diameter: float, vessel_diameter_min: float,
                           vessel_diameter_sd: float) -> Dict[str, Any]:
-    """Vessel diameter + its min floor + per-vessel jitter (every xylem uses these)."""
+    """Vessel diameter + its min floor + per-vessel jitter and its shape (every xylem
+    uses these)."""
     return {
         "vessel_diameter":     (float, Field(default=vessel_diameter, ge=0.00001, title="Vessel Diameter", description="Metaxylem vessel diameter (upper bound of the size gradient).")),
         "vessel_diameter_min": (float, Field(default=vessel_diameter_min, ge=0.00001, title="Vessel Diameter (min)", description="Lower bound / floor of the vessel size gradient.")),
         "vessel_diameter_sd":  (float, Field(default=vessel_diameter_sd, ge=0.0, title="Vessel Diameter SD", description="Standard deviation added per vessel.")),
+        "vessel_diameter_distribution": _distribution_field("Vessel Diameter"),
     }
 
 
@@ -454,6 +471,7 @@ _root_xylem_extra_fields: Dict[str, Any] = {
     "protoxylem_diameter":     (float, Field(default=0.01, ge=0.00001, title="Protoxylem Diameter", description="Diameter of protoxylem elements.")),
     "protoxylem_diameter_sd":  (float, Field(default=0.001, ge=0.0, title="Protoxylem Diameter SD", description="Standard deviation of protoxylem element diameter.")),
     "protoxylem_diameter_min": (float, Field(default=0.0, ge=0.0, title="Protoxylem Diameter (min)", description="Arch mode: smallest protoxylem diameter (outer edge of the band); 0 defaults to 0.4 * protoxylem_diameter.")),
+    "protoxylem_diameter_distribution": _distribution_field("Protoxylem Diameter"),
     "protoxylem_cluster_width":  (float, Field(default=0.015, ge=0.00001, title="Protoxylem Bundle Width", description="Tangential width of the protoxylem ellipse.")),
     "protoxylem_cluster_height": (float, Field(default=0.01, ge=0.00001, title="Protoxylem Bundle Height", description="Radial height of the protoxylem ellipse.")),
     "protoxylem_band_depth":   (float, Field(default=0.0, ge=0.0, title="Protoxylem Band Depth", description="Arch mode: radial depth of the outer band holding the protoxylem chains + phloem; 0 defaults to 35%% of the span.")),
@@ -494,6 +512,7 @@ def _phloem_params(clsname: str, *, sieve_diameter: float, sieve_diameter_sd: fl
             title="Sieve Diameter", description="Diameter of phloem sieve elements.")),
         "sieve_diameter_sd": (float, Field(default=sieve_diameter_sd, ge=0.0,
             title="Sieve Diameter SD", description="Standard deviation of phloem sieve diameter.")),
+        "sieve_diameter_distribution": _distribution_field("Sieve Diameter"),
     }
     if cluster_width is not None:
         fields["cluster_width"] = (float, Field(default=cluster_width, ge=0.00001,
@@ -572,6 +591,7 @@ class DicotSecondaryXylemParams(BaseParams):
     vessel_diameter     : float = Field(default=0.1,  ge=0.00001, title="Vessel Diameter (max)",         description="Maximum secondary xylem vessel diameter (upper bound of the size gradient).")
     vessel_diameter_sd  : float = Field(default=0.005, ge=0.0,     title="Vessel Diameter SD",           description="Standard deviation added to each vessel diameter after gradient sampling.")
     vessel_diameter_min : float = Field(default=0.03,  ge=0.00001, title="Vessel Diameter (min)",        description="Minimum secondary xylem vessel diameter (lower bound of the size gradient).")
+    vessel_diameter_distribution : Optional[Distribution] = _distribution_field("Vessel Diameter")[1]
     gradient_function   : Literal["five_pl", "linear", "uniform", "gaussian"] = Field(default="five_pl", title="Gradient Function",        description="Vessel diameter distribution: five_pl/linear use a centre-to-edge gradient; uniform samples from [min, max]; gaussian samples from N((max+min)/2, sd).")
     gradient_inflection : float = Field(default=0.5,   ge=0.001, le=1.0,  title="Gradient Inflection",  description="Normalized distance of the gradient inflection point (0 = centre, 1 = tip). Used by five_pl.")
     gradient_steepness  : float = Field(default=8.0,   ge=0.1,            title="Gradient Steepness",   description="Hill coefficient — sharpness of the vessel size transition. Used by five_pl.")
@@ -627,6 +647,7 @@ class DicotSecondaryPhloemParams(BaseParams):
     sieve_diameter:     float = Field(default=0.022, ge=0.00001, title="Sieve Diameter")
     sieve_diameter_sd:  float = Field(default=0.001, ge=0.0,     title="Sieve Diameter SD")
     sieve_diameter_min: float = Field(default=0.020, ge=0.00001, title="Sieve Diameter Min")
+    sieve_diameter_distribution: Optional[Distribution] = _distribution_field("Sieve Diameter")[1]
     prop_sieve:         float = Field(default=0.3,  ge=0.0, le=1.0, title="Sieve Proportion",
         description="Stop packing sieve circles when their area reaches this fraction of the zone.")
 
@@ -1038,7 +1059,7 @@ def default_dicot_leaf_params() -> List[BaseParams]:
 # ===========================================================================
 # Parameter metadata registry (sidecar — no change to the emitted params)
 # ===========================================================================
-# ``VascularBundleParams`` carries 70 flat fields, but only ~8 matter for any one
+# ``VascularBundleParams`` carries 72 flat fields, but only ~8 matter for any one
 # bundle; the rest are either mode-gated (active only for a given bundle_type /
 # xylem_layout / sheath / placement) or advanced tuning.  This registry records,
 # per field: which **group** it belongs to, its **tier** (primary vs advanced),
@@ -1062,8 +1083,9 @@ def _build_bundle_field_meta() -> Dict[str, Dict[str, Any]]:
         "xylem_face":        (("xylem_layout", {"face"}),
                               ["xylem_layout", "n_xylem_files", "xylem_file_jitter", "n_metaxylem",
                                "metaxylem_diameter", "metaxylem_diameter_sd", "metaxylem_diameter_min",
+                               "metaxylem_diameter_distribution",
                                "metaxylem_gap", "n_protoxylem", "protoxylem_diameter", "protoxylem_diameter_sd",
-                               "protoxylem_diameter_min", "protoxylem_width", "protoxylem_height",
+                               "protoxylem_diameter_min", "protoxylem_diameter_distribution", "protoxylem_width", "protoxylem_height",
                                "protoxylem_relative_distance", "lacuna", "lacuna_width", "lacuna_height"]),
         "sheath":            (None, ["sheath", "sheath_thickness", "n_caps_layers_outward",
                                "n_caps_layers_outward_flank", "n_caps_layers_inward",
@@ -1223,7 +1245,7 @@ def _field_kind(field: str) -> str:
 def describe_params(model, *, tier: Optional[str] = None, active_only: bool = False,
                     hide_rendering: bool = False) -> str:
     """A grouped, human-readable view of a param model's fields — the antidote to a
-    70-field flat wall.  ``tier='primary'`` shows only the primary knobs; ``active_only``
+    72-field flat wall.  ``tier='primary'`` shows only the primary knobs; ``active_only``
     hides fields whose mode gate is off for the current values; ``hide_rendering`` drops
     the algorithm-tuning knobs.  Works for any param model: the bundle uses its curated
     groups/gates, every other class falls back to auto-tiering (preset-derived) with a

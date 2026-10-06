@@ -52,6 +52,7 @@ class DicotRootAnatomy(RootAnatomy):
             "xylem_diameter_max":        float(xylem.get("vessel_diameter",      0.09)),
             "xylem_diameter_min":        float(xylem.get("vessel_diameter_min",  0.01)),
             "xylem_diameter_sd":         float(xylem.get("vessel_diameter_sd",   0.002)),
+            "xylem_diameter_distribution":         xylem.get("vessel_diameter_distribution"),
             "n_vascular_peak":           int(xylem.get("n_vascular_peak",        3)),
             "inner_radius_xylem":        float(xylem.get("radius_valley_side",   0.05)),
             "outer_radius_xylem":        float(xylem.get("radius_peak_side",     0.22)),
@@ -70,6 +71,7 @@ class DicotRootAnatomy(RootAnatomy):
             "xylem_direction":           str(xylem.get("direction",              "center")),
             "phloem_diameter":           float(phloem.get("sieve_diameter",      0.005)),
             "phloem_diameter_sd":        float(phloem.get("sieve_diameter_sd",   0.001)),
+            "phloem_diameter_distribution":        phloem.get("sieve_diameter_distribution"),
             "phloem_width":              float(phloem.get("cluster_width",       0.15)),
             "phloem_height":             float(phloem.get("cluster_height",      0.2)),
             "relative_phloem":           float(phloem.get("relative_distance",   0.2)),
@@ -95,6 +97,7 @@ class DicotRootAnatomy(RootAnatomy):
                 "cell_width":             float(sec_xylem.get("cell_width",             0.01)),
                 "vessel_diameter":        float(sec_xylem.get("vessel_diameter",        0.06)),
                 "vessel_diameter_sd":     float(sec_xylem.get("vessel_diameter_sd",     0.005)),
+                "vessel_diameter_distribution":     sec_xylem.get("vessel_diameter_distribution"),
                 "vessel_diameter_min":    float(sec_xylem.get("vessel_diameter_min",    0.02)),
                 "gradient_function":      str(sec_xylem.get("gradient_function",        "five_pl")),
                 "gradient_inflection":    float(sec_xylem.get("gradient_inflection",    0.7)),
@@ -143,6 +146,7 @@ class DicotRootAnatomy(RootAnatomy):
                     "alive_distance":      float(sec_phloem.get("alive_distance",      0.05)),
                     "sieve_diameter":      float(sec_phloem.get("sieve_diameter",      0.015)),
                     "sieve_diameter_sd":   float(sec_phloem.get("sieve_diameter_sd",   0.001)),
+                    "sieve_diameter_distribution":   sec_phloem.get("sieve_diameter_distribution"),
                     "sieve_diameter_min":  float(sec_phloem.get("sieve_diameter_min",  0.008)),
                     "prop_sieve":          float(sec_phloem.get("prop_sieve",          0.35)),
                     "companion_diameter":  float(sec_phloem.get("companion_diameter",  0.008)),
@@ -322,6 +326,7 @@ class DicotRootAnatomy(RootAnatomy):
             proportion=1.0, direction=None,
             diameter_max=cell_diam, diameter_min=cell_diam,
             diameter_sd=cell_sd, gradient_function="normal",
+            distribution=p["phloem_diameter_distribution"],
         )
 
     # ------------------------------------------------------------------
@@ -1230,6 +1235,7 @@ class DicotRootAnatomy(RootAnatomy):
                         diameter_max=sx["vessel_diameter"],
                         diameter_min=sx["vessel_diameter_min"],
                         diameter_sd=sx["vessel_diameter_sd"],
+                        distribution=sx.get("vessel_diameter_distribution"),
                         gradient_function=sx["gradient_function"],
                         gradient_inflection=sx["gradient_inflection"],
                         gradient_steepness=sx["gradient_steepness"],
@@ -1429,6 +1435,7 @@ class DicotRootAnatomy(RootAnatomy):
                 diameter_max=sp["sieve_diameter"],
                 diameter_min=sp["sieve_diameter_min"],
                 diameter_sd=sp["sieve_diameter_sd"],
+                distribution=sp.get("sieve_diameter_distribution"),
                 gradient_function="normal",
                 rng=self.rng,
             )

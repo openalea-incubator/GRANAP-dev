@@ -13,6 +13,7 @@ from scipy.spatial import Delaunay, ConvexHull
 from shapely.ops import unary_union
 
 from openalea.granap.math_functions import GRADIENT_FUNCTIONS, rescale
+from openalea.granap.distribution import draw
 
 
 class GeometryProcessor:
@@ -788,6 +789,7 @@ class GeometryProcessor:
         ellipse_max_aspect:  float                       = 2.0,
         pack_strategy:       str                         = "space",
         rng                                              = None,
+        distribution                                     = None,
     ) -> List[Tuple[float, float, float]]:
         """
         Unified Apollonian circle packing with proportion stop, directional gradient,
@@ -804,6 +806,9 @@ class GeometryProcessor:
                                  max(diameter_max - 3*diameter_sd, diameter_max * 0.01).
             diameter_sd:         Per-circle diameter noise std-dev.  For direction=None with
                                  gradient_function="normal" this is the sampling std-dev.
+            distribution:        Shape of that noise (a Distribution or its dict; see
+                                 openalea.granap.distribution), moment-matched to the same
+                                 mean and sd.  None = normal, as before.
             gradient_function:   "five_pl" | "linear" (spatial) or "normal" | "uniform" (random).
                                  "gaussian" is accepted as an alias for "normal".
             gradient_inflection: Inflection point in [0, 1] for five_pl.
@@ -936,9 +941,8 @@ class GeometryProcessor:
             if direction is None or base_fn is None:
                 if gradient_function == "normal":
                     mean_diam   = (diameter_max + diameter_min) / 2.0
-                    target_diam = float(np.clip(
-                        _rng.normal(mean_diam, diameter_sd), diameter_min, diameter_max
-                    ))
+                    target_diam = draw(_rng, mean_diam, diameter_sd,
+                                       diameter_min, diameter_max, distribution)
                 elif gradient_function == "uniform":
                     target_diam = float(_rng.uniform(diameter_min, diameter_max))
                 else:
@@ -961,9 +965,8 @@ class GeometryProcessor:
                 gradient_t = t
                 target_diam = base_fn(t)
                 if diameter_sd > 0.0:
-                    target_diam = float(np.clip(
-                        _rng.normal(target_diam, diameter_sd), diameter_min, np.inf
-                    ))
+                    target_diam = draw(_rng, target_diam, diameter_sd,
+                                       diameter_min, None, distribution)
 
             r = min(r_ins, target_diam / 2)
 
