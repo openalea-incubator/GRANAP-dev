@@ -1148,13 +1148,15 @@ class GeometryProcessor:
         for i in range(n_slices):
             angle_start = 2 * np.pi * i / n_slices
             angle_end = 2 * np.pi * (i + 1) / n_slices
-            
-            # Create a wedge polygon
-            # Points: center, point at angle_start, point at angle_end
-            p1 = (cx + radius * np.cos(angle_start), cy + radius * np.sin(angle_start))
-            p2 = (cx + radius * np.cos(angle_end), cy + radius * np.sin(angle_end))
-            
-            wedge = sp.Polygon([(cx, cy), p1, p2])
+
+            # Create a wedge polygon: the center plus points along the arc, at
+            # most 45 deg apart.  A plain triangle (center, start, end) collapses
+            # to zero area when the wedge spans 180 deg (n_slices == 2).
+            n_arc = max(1, int(np.ceil((angle_end - angle_start) / (np.pi / 4))))
+            arc = [(cx + radius * np.cos(a), cy + radius * np.sin(a))
+                   for a in np.linspace(angle_start, angle_end, n_arc + 1)]
+
+            wedge = sp.Polygon([(cx, cy), *arc])
             
             slice_polygon = polygon.intersection(wedge)
             if not slice_polygon.is_empty:

@@ -192,3 +192,39 @@ def test_default_metaxylem_keeps_requested_size():
         ratios.append(np.sqrt(f.area / p.area))  # realised / placed diameter
     assert 0.97 < min(ratios) and max(ratios) < 1.08, ratios
     assert max(ratios) - min(ratios) < 0.03, f"size-dependent inflation: {ratios}"
+
+
+# -- two-way pizza slice -------------------------------------------------------
+# pizza_slice used to build each wedge as a triangle (centre, start, end); at
+# n_slices == 2 those points are collinear, the halves had zero area and both
+# metaxylem collapsed onto the centre (then vanished from the mesh).
+
+def test_pizza_slice_two_halves():
+    from openalea.granap.geometry_collection import GeometryProcessor
+    disc = Point(0, 0).buffer(0.3)
+    halves = GeometryProcessor.pizza_slice(disc, 2)
+    assert len(halves) == 2
+    for h in halves:
+        assert np.isclose(h.area, disc.area / 2, rtol=1e-6)
+
+
+def test_default_two_metaxylem():
+    """Default mode with 2 metaxylem: both exist, opposite each other."""
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "xylem_shape", "default")
+    data.set_value("xylem", "n_vascular_bundles", 2)
+    root = RootAnatomy(data, seed=SEED)
+    root.generate_cells()
+    meta = [c.polygon for c in root.all_cells.cells if c.type == "metaxylem"]
+    assert len(meta) == 2, f"Expected 2 metaxylem, got {len(meta)}"
+    a, b = (np.array(p.centroid.coords[0]) for p in meta)
+    assert np.linalg.norm(a - b) > 0.1, "metaxylem should sit apart, not at the centre"
+    assert np.dot(a, b) < 0, "the two metaxylem should be on opposite sides"
+
+
+def test_metaxylem_positions_two():
+    from openalea.granap.root_monocot_class import MonocotRootAnatomy
+    pts = MonocotRootAnatomy.metaxylem_positions(Point(0, 0).buffer(0.3), 2, 0.06)
+    assert len(pts) == 2
+    assert np.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) > 0.1
+
