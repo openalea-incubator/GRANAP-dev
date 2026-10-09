@@ -9,10 +9,31 @@ import shapely
 
 class CellManager:
     def __init__(self):
-        self.cells: List[Cell] = []
+        self._cells: List[Cell] = []
+        # Cache for get_last_id_group: the running max id_group and the list length
+        # it was computed at.  next_group_id() is called once per seeded Voronoi
+        # group all through vascular building, so scanning every cell each time was
+        # O(n^2).  The cache is O(1) on the append-only build path and self-heals
+        # (recomputes) whenever the list is mutated behind our back (a direct
+        # ``cells = [...]`` / ``cells.append`` changes the length).
+        self._max_gid: int = 0
+        self._gid_len: int = 0
+
+    @property
+    def cells(self) -> List[Cell]:
+        return self._cells
+
+    @cells.setter
+    def cells(self, value: List[Cell]):
+        self._cells = value
+        self._max_gid = max((c.id_group for c in value), default=0)
+        self._gid_len = len(value)
 
     def add_cell(self, cell: Cell):
-        self.cells.append(cell)
+        self._cells.append(cell)
+        if cell.id_group > self._max_gid:
+            self._max_gid = cell.id_group
+        self._gid_len = len(self._cells)
 
     def get_cells(self):
         return self.cells
@@ -121,9 +142,26 @@ class CellManager:
     def remove_cells_by_ids(self, ids: []):
         # filter cells
         self.cells = [cell for cell in self.cells if not cell.id_cell in ids]
-    
+
+    def remove_cells(self, cells):
+        """Remove exactly these cell objects, matched by identity.
+
+        Unlike :meth:`remove_cells_by_ids`, this is safe when ``id_cell`` is not
+        unique across the list (e.g. air-space cells seeded with ``id_cell =
+        len(cells) + k`` can collide with a contiguous block of earlier layer-seed
+        ids): removing by value would then delete unrelated cells that happen to
+        share an id.  Matching on ``id(cell)`` deletes only the intended objects.
+        """
+        drop = {id(c) for c in cells}
+        self.cells = [cell for cell in self.cells if id(cell) not in drop]
+
     def get_last_id_group(self):
-        return max((c.id_group for c in self.cells), default=0)
+        # O(1) on the append-only build path; recompute only if the list was
+        # mutated outside add_cell / the cells setter (detected by a length change).
+        if len(self._cells) != self._gid_len:
+            self._max_gid = max((c.id_group for c in self._cells), default=0)
+            self._gid_len = len(self._cells)
+        return self._max_gid
 
     def next_group_id(self):
         """Next free ``id_group`` for appending a new cell group.

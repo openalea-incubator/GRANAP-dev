@@ -24,7 +24,8 @@ description = "Todo"
 readme = "README.md"
 license = "CECILL-C"
 license-files = ["LICEN[CS]E*"]
-requires-python = ">=3.8"
+# geos 3.14 / numpy 2.x are not available for python < 3.11
+requires-python = ">=3.11"
 dynamic = ["version"]
 classifiers = [
   "Development Status :: 1 - Planning",
@@ -35,11 +36,9 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
   "Framework :: PEPA",
 ]
@@ -51,18 +50,37 @@ dependencies = []
 # section specific to conda-only distributed package (not used by pip yet)
 [tool.conda.environment]
 
+# These bounds are load-bearing, not hygiene.  test/test_vascular_regression.py
+# pins an exact cell-type census, and that census is decided by the geometry
+# stack: the `air space` cells are the connected components of a GEOS boolean
+# difference (Organ._apply_intercellular), filtered by an absolute area cut, so
+# a different GEOS build shifts the census by a cell or two and the golden test
+# fails on one OS but not another.
+#
+# Pinning `shapely` alone does NOT pin GEOS: a single shapely version ships ~20
+# conda builds linked against different GEOS releases, and the solver is free to
+# pick a different one per OS.  Hence the explicit `geos` pin.  As it happens
+# shapely 2.1.2 only has geos-3.14 builds (2.1.1 has both 3.13 and 3.14 builds,
+# which is exactly the trap), but the pin makes that explicit rather than lucky.
+#
+# geos 3.14 requires python >= 3.11: the py3.10 geospatial stack (pyogrio/proj)
+# was never rebuilt against it, so the CI matrix drops 3.10.  See
+# .github/workflows/conda-package-build.yml.
 dependencies = [
-    "geopandas",
-    "lxml",
-    "matplotlib",
-    "numpy",
-    "pandas",
-    "scikit-learn", # not sure if it is still needed
-    "scipy",
-    "shapely",
-    "pydantic",
-    "roifile",
-    "opencv"
+    "geos ==3.14.1",         # geometry engine — decides the golden census
+    "shapely ==2.1.2",       # GEOS bindings
+    "opencv ==4.13.0",       # cv2.fitEllipse in geometry_collection
+    "scipy >=1.13,<1.18",    # vendored Qhull — Voronoi / Delaunay / cKDTree
+    "numpy >=1.26,<3",
+    "geopandas >=1.0,<2",
+    "pandas >=2.0,<4",
+    "matplotlib >=3.8,<4",
+    "networkx >=3.1,<4",     # network_base
+    "munkres >=1.1,<2",      # shapes
+    "pydantic >=2.7,<3",
+    "roifile >=2023.8",      # roi_organ
+    "lxml >=5,<7",           # no usage in src/ — kept for compatibility
+    "scikit-learn >=1.3,<2", # no usage in src/ — kept for compatibility
 ]
 
 [project.optional-dependencies]

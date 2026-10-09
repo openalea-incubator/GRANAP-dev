@@ -260,8 +260,31 @@ def test_needle_recipes_are_inspectable():
     vrec = needle._vascular_recipe(Polygon())          # lambda not run until build()
     assert [name for name, _ in vrec.describe()] == ["vascular ellipse grid"]
 
+    # The organ recipe is an append-only feature registry -- it grew from 2 steps to
+    # 5 as transfusion tissue, the corner retag and layer-count zoning were added.
+    # So assert the *vocabulary contract* and the ordering invariant rather than an
+    # inventory: a 6th needle feature should not fail this test, but breaking the
+    # order contract must.
     orec = needle._organ_recipe()
-    assert [name for name, _ in orec.describe()] == ["resin ducts", "stomata"]
+    names = [name for name, _ in orec.describe()]
+    assert names and all(names), "every step must carry a non-empty name"
+    assert len(set(names)) == len(names), "step names must be unique (dict(describe()))"
+    # Needle tissues are all cell-relative post-fill placements, never plain fills.
+    assert {kind for _, kind, _ in orec.plan()} == {"special"}
+    assert {"resin ducts", "stomata"} <= set(names)
+
+    # Ordering contract, justified at length in NeedleAnatomy._organ_recipe's
+    # docstring: "transfusion tissue" must precede "stomata" (add_stomata calls
+    # recenter_cells(), which cannot retroactively shift the already-computed
+    # transfusion zone), and "layer-count zoning" must follow it (it reads
+    # cell.angle as recenter_cells leaves it).
+    assert names.index("transfusion tissue") < names.index("stomata")
+    assert names.index("stomata") < names.index("layer-count zoning")
+
+    # format_plan() previews the recipe; inspecting must never place cells.
+    txt = orec.format_plan()
+    assert "[special] resin ducts -> " in txt
+    assert needle.all_cells.cells == []
 
 
 def test_monocot_arch_produces_vessels():

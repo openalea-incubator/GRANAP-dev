@@ -116,7 +116,8 @@ class LayerManager:
                     "name": layer.name,
                     "cell_diameter": layer.cell_diameter,
                     "cell_width": layer.cell_width or 0,
-                    "shift": layer.shift
+                    "shift": layer.shift,
+                    **layer.additional_params,
                 })
         return expanded
     

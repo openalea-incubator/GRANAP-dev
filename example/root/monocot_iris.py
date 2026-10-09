@@ -58,12 +58,12 @@ def anatomy_metrics(root: RootAnatomy) -> dict:
 def main(show=True):
     iris = OrganInputData.for_root()  # monocot preset (planttype=1)
 
-    # ── Stele size + radial parenchyma (pith) gradient ─────────────────────
+    # -- Stele size + radial parenchyma (pith) gradient ---------------------
     iris.set_value("stele", "thickness",            0.7)
     iris.set_value("stele", "cell_diameter",        0.009)
     iris.set_value("stele", "cell_diameter_center", 0.022)
 
-    # ── Vasculature: ARCH mode ─────────────────────────────────────────────
+    # -- Vasculature: ARCH mode ---------------------------------------------
     # Layout is set by just outer_radius (pericycle) + protoxylem_band_depth.
     iris.set_value("xylem", "xylem_shape", "arch")
     iris.set_value("xylem", "n_vascular_peak", 19)          # 19 poles (+ 19 phloem valleys)
@@ -86,18 +86,18 @@ def main(show=True):
     iris.set_value("xylem", "gradient_steepness", 2)
     iris.set_value("xylem", "gradient_asymmetry", 1)
 
-    # ── Phloem in the valleys between the poles ────────────────────────────
+    # -- Phloem in the valleys between the poles ----------------------------
     iris.set_value("phloem", "sieve_diameter", 0.015)
     iris.set_value("phloem", "cluster_width",  0.045)
     iris.set_value("phloem", "cluster_height", 0.040)
 
-    # ── Endodermis / pericycle (stele boundary) ────────────────────────────
+    # -- Endodermis / pericycle (stele boundary) ----------------------------
     iris.set_value("endodermis", "cell_diameter", 0.019)
     iris.set_value("endodermis", "cell_width",    0.019)
     iris.set_value("pericycle", "cell_diameter",  0.039)
     iris.set_value("pericycle", "cell_width",     0.020)
 
-    # ── Cortex layers (inner / main / outer) ───────────────────────────────
+    # -- Cortex layers (inner / main / outer) -------------------------------
     iris.params.append({
         "name": "inner_cortex",
         "cell_diameter": 0.022,
@@ -120,14 +120,14 @@ def main(show=True):
         "order": 4.5,
     })
 
-    # ── Exodermis / epidermis ──────────────────────────────────────────────
+    # -- Exodermis / epidermis ----------------------------------------------
     iris.set_value("exodermis", "cell_diameter", 0.036)
     iris.set_value("exodermis", "cell_width",    0.030)
     iris.set_value("exodermis", "n_layers",    3)
     iris.set_value("epidermis", "cell_diameter", 0.016)
     iris.set_value("epidermis", "cell_width",    0.027)
 
-    # ── Intercellular spaces across the cortex tissues ─────────────────────
+    # -- Intercellular spaces across the cortex tissues ---------------------
     iris.set_value("inter_cellular_spaces", "smoothness", 0.05)
     iris.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])
