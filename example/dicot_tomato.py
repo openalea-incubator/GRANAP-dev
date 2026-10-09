@@ -21,6 +21,7 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 
 SEED = 0
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 
 
 def anatomy_metrics(root: RootAnatomy) -> dict:
@@ -360,6 +361,9 @@ def main(show=True):
     axs_flat = axs.flatten()
 
     labels = ["Tomato primary", "Tomato secondary (variant 1)", "Tomato secondary (variant 2)"]
+    stems = ["tomato_primary", "tomato_secondary_1", "tomato_secondary_2"]
+    os.makedirs(OUT_DIR, exist_ok=True)
+
     for i, root in enumerate(tomato_roots):
         m = anatomy_metrics(root)
         title = (
@@ -369,6 +373,9 @@ def main(show=True):
             f"xylem area = {m['xylem_area']:.4f}"
         )
         root.plot_cells(show=False, ax=axs_flat[i], title=title)
+
+        root.write_to_obj(os.path.join(OUT_DIR, f"{stems[i]}.obj"), membrane = True, wall= False)
+
         legend = axs_flat[i].get_legend()
         if legend:
             legend.remove()

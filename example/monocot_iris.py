@@ -21,7 +21,7 @@ from openalea.granap.root_class import RootAnatomy
 from openalea.granap.input_data import OrganInputData
 
 SEED = 0
-
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
 
 def anatomy_metrics(root: RootAnatomy) -> dict:
     """Geometry summary of a generated root: root/stele diameters and total
@@ -147,6 +147,9 @@ def main(show=True):
     n_rows = 1
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
     axs_flat = np.atleast_1d(axs).flatten()
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    iris_anatomy.write_to_obj(os.path.join(OUT_DIR, "iris.obj"))
 
     labels = ["Iris"]
     for i, root in enumerate(iris_roots):

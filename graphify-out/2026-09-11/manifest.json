@@ -1,0 +1,547 @@
+{
+  "doc/generate_callgraph.py": {
+    "mtime": 1781633887.8938584,
+    "ast_hash": "8faa3917193c76d431dca83a50fca97f",
+    "semantic_hash": ""
+  },
+  "doc/perf_baseline.json": {
+    "mtime": 1787646696.1644063,
+    "ast_hash": "c319fc5b76ef6265e7d2134c24c49ae6",
+    "semantic_hash": ""
+  },
+  "doc/perf_characterize.py": {
+    "mtime": 1787646696.1728027,
+    "ast_hash": "015717705039cd9c59c5e2ab7a0c6e50",
+    "semantic_hash": ""
+  },
+  "doc/perf_profile_nettle.py": {
+    "mtime": 1787646696.1811805,
+    "ast_hash": "4237bf8372f3a4f5f4ca113fa714b82c",
+    "semantic_hash": ""
+  },
+  "example/roi_loading.py": {
+    "mtime": 1787646696.3061113,
+    "ast_hash": "e6b4fda531ab89729f1aa9d02d0ddc34",
+    "semantic_hash": ""
+  },
+  "pyproject.toml": {
+    "mtime": 1787837249.8102083,
+    "ast_hash": "1199550dfe7f882c697e4a720f620254",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/__init__.py": {
+    "mtime": 1781633887.9270084,
+    "ast_hash": "167145d0e928439333ed2931be211277",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/anatomy_writer.py": {
+    "mtime": 1787918356.705523,
+    "ast_hash": "872cb86de370cc3bc7fe4743842ae74a",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/cell_class.py": {
+    "mtime": 1787730900.56243,
+    "ast_hash": "354e694ca230385d73e4974380c51a7c",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/cell_manager.py": {
+    "mtime": 1787730900.5709906,
+    "ast_hash": "ef3bb87db2c95f8e26e8e2b693e39f3f",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/generate_cell.py": {
+    "mtime": 1788164194.9735105,
+    "ast_hash": "acfaf7cd334d3adecf965de1106f9d36",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/geometry_collection.py": {
+    "mtime": 1787828838.8183987,
+    "ast_hash": "1350536acff2d935ccc5d53bf63f3f86",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/input_data.py": {
+    "mtime": 1788185275.9219277,
+    "ast_hash": "a14d64fa6921452a0707bb79923a6630",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/layer_class.py": {
+    "mtime": 1787646696.4636376,
+    "ast_hash": "5cedbc50c5a55c972e1d9f738076cbb6",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/layer_manager.py": {
+    "mtime": 1787754471.575148,
+    "ast_hash": "085633acdf1ca2ebec52e94ed08721a8",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/math_functions.py": {
+    "mtime": 1787730900.6877942,
+    "ast_hash": "52fd4a00f888758ebfa77493749832a4",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/needle_class.py": {
+    "mtime": 1788170173.9318922,
+    "ast_hash": "32896d6364442f7d9720f7ab788d0446",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/network_base.py": {
+    "mtime": 1787744882.2551923,
+    "ast_hash": "df8016b2070afff173a886b1504927f8",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/organ_class.py": {
+    "mtime": 1787754445.178437,
+    "ast_hash": "0a794e2d4dabb7843585611bc5e78d78",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/roi_organ.py": {
+    "mtime": 1787646696.4896965,
+    "ast_hash": "c35499b101951b283bdce619253fbc9d",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/root_class.py": {
+    "mtime": 1787730900.7306747,
+    "ast_hash": "69265ff9b19a8cb071018a2f3fe124b8",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/root_dicot_class.py": {
+    "mtime": 1787730900.7379987,
+    "ast_hash": "c74661a8d9a0de8a52fd8566f023467b",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/root_monocot_class.py": {
+    "mtime": 1787730900.7492957,
+    "ast_hash": "016e4082d97e3a8867f0d0c959472664",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/shapes.py": {
+    "mtime": 1781633887.9938588,
+    "ast_hash": "8584c5874a12acb9f0cd7ff320af98b6",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/special_tissues.py": {
+    "mtime": 1787923282.4030492,
+    "ast_hash": "3cf22e0fb3f8cf966b7a3c2146c785e7",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/tissue_class.py": {
+    "mtime": 1787730900.887784,
+    "ast_hash": "d5bf1ab9d0d0cf5193f169a68ce7ad07",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/visualization.py": {
+    "mtime": 1787918356.7303426,
+    "ast_hash": "e2a6796094dfc4a9a8e0fda93f00c8b6",
+    "semantic_hash": ""
+  },
+  "test/inputs/param_pinus.py": {
+    "mtime": 1781264948.2787056,
+    "ast_hash": "e839492c905ac3bbc5172c9767c4a592",
+    "semantic_hash": "e839492c905ac3bbc5172c9767c4a592"
+  },
+  "test/test_growth_modes.py": {
+    "mtime": 1787646696.5227423,
+    "ast_hash": "0d0ee4a827e6cafdfa7cca9f333f2635",
+    "semantic_hash": ""
+  },
+  "test/test_monocot_xylem.py": {
+    "mtime": 1787646696.5310998,
+    "ast_hash": "600d78094a9aeb9881c3e1474bb4edb2",
+    "semantic_hash": ""
+  },
+  "test/test_plot_tissues.py": {
+    "mtime": 1787646696.5415812,
+    "ast_hash": "527b6e04f271504894ffabc996a59cdc",
+    "semantic_hash": ""
+  },
+  "test/test_recipe_vocabulary.py": {
+    "mtime": 1787646696.5496163,
+    "ast_hash": "ae865496eee94d984221555e0631dce4",
+    "semantic_hash": ""
+  },
+  "test/test_root_dicot_features.py": {
+    "mtime": 1787646696.5496163,
+    "ast_hash": "069c10915b18df48dafaa62c8ea4fe2b",
+    "semantic_hash": ""
+  },
+  "test/test_root_needle_network.py": {
+    "mtime": 1787646696.556111,
+    "ast_hash": "e7ffe9525b852b95c0f04f23fba9f9fb",
+    "semantic_hash": ""
+  },
+  "test/test_secondary_phloem.py": {
+    "mtime": 1787646696.556111,
+    "ast_hash": "0bc20a12a77ce67343bf86778a2d1350",
+    "semantic_hash": ""
+  },
+  "test/test_special_tissues.py": {
+    "mtime": 1787646696.5644238,
+    "ast_hash": "962720128896e8d799d3da6237648fdc",
+    "semantic_hash": ""
+  },
+  "test/test_vascular_regression.py": {
+    "mtime": 1788248399.7012312,
+    "ast_hash": "3dedac2bb072f8a74ae38a4971b58e5b",
+    "semantic_hash": ""
+  },
+  ".github/workflows/conda-package-build.yml": {
+    "mtime": 1787837249.7935405,
+    "ast_hash": "aa6162e4a5fa11c7f4883888f07bbd52",
+    "semantic_hash": ""
+  },
+  "Granap_diagram.md": {
+    "mtime": 1773173200.0902393,
+    "ast_hash": "9adf55077bead0add6b6e5c48f05bece",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1781685154.8268175,
+    "ast_hash": "a726a7af20bfe460d31803396c9aae09",
+    "semantic_hash": ""
+  },
+  "conda/environment.yaml": {
+    "mtime": 1787837249.8018372,
+    "ast_hash": "434845ddc8133cd26a760b1b4463cb64",
+    "semantic_hash": ""
+  },
+  "conda/meta.yaml": {
+    "mtime": 1781633887.8875508,
+    "ast_hash": "509ba66a70050d004ce95db3005b6e94",
+    "semantic_hash": ""
+  },
+  "doc/callgraph/index.html": {
+    "mtime": 1773227488.3102503,
+    "ast_hash": "fdd3d03c5a884db038f53b82465ba2da",
+    "semantic_hash": ""
+  },
+  "doc/performance_proposals.md": {
+    "mtime": 1787646696.1895025,
+    "ast_hash": "fa8b3624bb009d1389a18322ab03bc8f",
+    "semantic_hash": ""
+  },
+  "doc/tissue_refactor.md": {
+    "mtime": 1787646696.1977308,
+    "ast_hash": "6ba621c4a412d1646f9b2e9a8ad6dfe5",
+    "semantic_hash": ""
+  },
+  "doc/tissue_roadmap.md": {
+    "mtime": 1787646696.2060666,
+    "ast_hash": "6fbdfc03ec3b4e974eb26640a8f64a71",
+    "semantic_hash": ""
+  },
+  "doc/callgraph/preview.svg": {
+    "mtime": 1773227488.3112514,
+    "ast_hash": "cb29e24ccb5412c3024fda01cf14937b",
+    "semantic_hash": ""
+  },
+  "example/gallery_pack_circles_directions.py": {
+    "mtime": 1787730900.3383172,
+    "ast_hash": "cbbdace4fc27c2607b95445f549a9226",
+    "semantic_hash": ""
+  },
+  "example/gallery_root_needle_network.py": {
+    "mtime": 1787730900.3383172,
+    "ast_hash": "48fbd80032816ed0c1b3634b58bd54b9",
+    "semantic_hash": ""
+  },
+  "example/leaf/dicot_nerium.py": {
+    "mtime": 1787730900.3541646,
+    "ast_hash": "a9b8c2b28eb8d80589d1ea0968fac781",
+    "semantic_hash": ""
+  },
+  "example/leaf/gallery_dicot_leaf.py": {
+    "mtime": 1787730900.36317,
+    "ast_hash": "028c43d4f6ca7f5f73a1cb9e11622e49",
+    "semantic_hash": ""
+  },
+  "example/leaf/gallery_leaf.py": {
+    "mtime": 1787730900.3709943,
+    "ast_hash": "14695c9d6e5b8091d20485218ef1ee63",
+    "semantic_hash": ""
+  },
+  "example/leaf/gallery_leaf_features.py": {
+    "mtime": 1787744882.2214365,
+    "ast_hash": "c98335c5610b9a398ef62ccd01c777fa",
+    "semantic_hash": ""
+  },
+  "example/leaf/gallery_monocot_leaf.py": {
+    "mtime": 1787730900.3791504,
+    "ast_hash": "99ecf80f3b94f6c974ffb578bd3b36d9",
+    "semantic_hash": ""
+  },
+  "example/leaf/monocot_snowdrop.py": {
+    "mtime": 1787730900.3791504,
+    "ast_hash": "7179ed8696c9e1854c034e9409e4f908",
+    "semantic_hash": ""
+  },
+  "example/needle/_diagnose.py": {
+    "mtime": 1788250352.8476493,
+    "ast_hash": "e018cbec79f43f83074f6bae5dec33ad",
+    "semantic_hash": ""
+  },
+  "example/needle/gallery_needle_features.py": {
+    "mtime": 1788250044.0713198,
+    "ast_hash": "9d393283b6c65fb6e356c96f849cde0b",
+    "semantic_hash": ""
+  },
+  "example/needle/pinus_pinaster.py": {
+    "mtime": 1788186032.3897243,
+    "ast_hash": "ad2285146a8c661b211db4d900e7cc0d",
+    "semantic_hash": ""
+  },
+  "example/root/dicot_nettle.py": {
+    "mtime": 1787730900.4040804,
+    "ast_hash": "7a6bd8c3cf9632dd6a717c37e3d95270",
+    "semantic_hash": ""
+  },
+  "example/root/dicot_oak.py": {
+    "mtime": 1787730900.4040804,
+    "ast_hash": "ab28bd750371e8ace05a968a251cee31",
+    "semantic_hash": ""
+  },
+  "example/root/dicot_renoncule.py": {
+    "mtime": 1787730900.4124098,
+    "ast_hash": "3997db468b8a9c2b4af899c73684000a",
+    "semantic_hash": ""
+  },
+  "example/root/dicot_tomato.py": {
+    "mtime": 1787730900.42077,
+    "ast_hash": "449d90c5669d0fd0d41b84c79b0d774d",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_base_shapes.py": {
+    "mtime": 1787730900.42077,
+    "ast_hash": "2ec4a21c1907e791c4c2e3084e14b15c",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_dicot_features.py": {
+    "mtime": 1787730900.42077,
+    "ast_hash": "e130dacfc9284faca8189c9e91595ed8",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_medullar_rays_rate.py": {
+    "mtime": 1787730900.42077,
+    "ast_hash": "a595d8fd849c065c146275408658e7be",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_monocot_xylem.py": {
+    "mtime": 1787730900.4291613,
+    "ast_hash": "d3d736ff6dc59d3af7c20dcd7a5a9f43",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_root_features.py": {
+    "mtime": 1787730900.432496,
+    "ast_hash": "e3e8a8e07e381d92d41ac6529ac7429d",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_secondary_phloem.py": {
+    "mtime": 1787730900.432496,
+    "ast_hash": "49576fe6638a12b1ea3ef4700c535751",
+    "semantic_hash": ""
+  },
+  "example/root/gallery_secondary_xylem.py": {
+    "mtime": 1787730900.4378443,
+    "ast_hash": "6d960d1521a2744c00f132f30fa71917",
+    "semantic_hash": ""
+  },
+  "example/root/monocot_iris.py": {
+    "mtime": 1787730900.4506392,
+    "ast_hash": "9a1ddfd2e2ad26924e4ff7cf02a026db",
+    "semantic_hash": ""
+  },
+  "example/root/monocot_maize.py": {
+    "mtime": 1787730900.4591894,
+    "ast_hash": "f14dc324e01b4c1cb3d9b198626eab55",
+    "semantic_hash": ""
+  },
+  "example/root/monocot_wheat.py": {
+    "mtime": 1787730900.468904,
+    "ast_hash": "a5e8412ecccc36f0fefe800cf328818f",
+    "semantic_hash": ""
+  },
+  "example/root/series_dicot.py": {
+    "mtime": 1787730900.4709063,
+    "ast_hash": "7bbfc3da0aab956d497d006de3f0e7c1",
+    "semantic_hash": ""
+  },
+  "example/root/series_monocot_wheat.py": {
+    "mtime": 1787730900.480527,
+    "ast_hash": "932bc2798e3bbacdb472b175e1534685",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_continuous_cylinder.py": {
+    "mtime": 1787730900.4941657,
+    "ast_hash": "71fb48f1b96b676c4f89ab1bfb61d3af",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_dicot_growth.py": {
+    "mtime": 1787730900.5005393,
+    "ast_hash": "7e04e6de06dc47b3676181d46a9d64d7",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_stem_shapes.py": {
+    "mtime": 1787730900.5097346,
+    "ast_hash": "7c3f0412559e6e5f90c67d8f0f05b788",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_vascular_band_packing.py": {
+    "mtime": 1787730900.5201669,
+    "ast_hash": "38ecdd43da727f40f6a1a7bb5a61bfa4",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_vascular_bundles.py": {
+    "mtime": 1787730900.529097,
+    "ast_hash": "1867dcf07a28cf34d07ce3a51f3d59a1",
+    "semantic_hash": ""
+  },
+  "example/stem/gallery_vascular_bundles_tissues.py": {
+    "mtime": 1787730900.5374618,
+    "ast_hash": "73d551cb6e9e3f75e2dd1ebb19b9f19e",
+    "semantic_hash": ""
+  },
+  "example/stem/monocot_maize.py": {
+    "mtime": 1787730900.544642,
+    "ast_hash": "795a8b53fd5b9cf4ae1552d6eba2c26f",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/leaf_class.py": {
+    "mtime": 1787744882.247733,
+    "ast_hash": "83d0e59cd10efb99deb5cce8cf793246",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/root_series.py": {
+    "mtime": 1787730900.7624812,
+    "ast_hash": "24811bc50926b2ed913960cf7b72b286",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/secondary_growth.py": {
+    "mtime": 1787730900.7693439,
+    "ast_hash": "a7ab33e36426a1b500c78a8fb12ffcef",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/stem_class.py": {
+    "mtime": 1787730900.779608,
+    "ast_hash": "8a1841e0bed580d7e3bd1a501e1d7e91",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/stem_dicot_class.py": {
+    "mtime": 1787730900.7957675,
+    "ast_hash": "2b6c72bb8c44fa4043206ec5abf2fd5b",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/stem_dicot_continuous_class.py": {
+    "mtime": 1787730900.873849,
+    "ast_hash": "de0172b012b07b958439232bf24a8e8f",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/stem_monocot_class.py": {
+    "mtime": 1787730900.883041,
+    "ast_hash": "5f30426e83e818d3f1c5340d7c66d808",
+    "semantic_hash": ""
+  },
+  "src/openalea/granap/vascular_bundle.py": {
+    "mtime": 1787837249.8185022,
+    "ast_hash": "9e43235ba28954b113065b539deaebba",
+    "semantic_hash": ""
+  },
+  "test/golden/param_dicts.json": {
+    "mtime": 1787837249.8268418,
+    "ast_hash": "29af9c0aeac8700b5c3db76d60f5fd86",
+    "semantic_hash": ""
+  },
+  "test/test_leaf_slab.py": {
+    "mtime": 1787730900.9238472,
+    "ast_hash": "aa2ec78da79422d15ea18b5a53c5cf5a",
+    "semantic_hash": ""
+  },
+  "test/test_medullar_rays.py": {
+    "mtime": 1787646696.5310998,
+    "ast_hash": "e156a9cf16c3e671b4e63f1ea0da61a8",
+    "semantic_hash": ""
+  },
+  "test/test_param_metadata.py": {
+    "mtime": 1787730900.9295259,
+    "ast_hash": "46f779e9b02935687fddbf8aad36f5fa",
+    "semantic_hash": ""
+  },
+  "test/test_param_schema_equivalence.py": {
+    "mtime": 1787730900.9377997,
+    "ast_hash": "2302c93c79235c09d68019aa6bc52c8a",
+    "semantic_hash": ""
+  },
+  "test/test_root_series.py": {
+    "mtime": 1787730900.952392,
+    "ast_hash": "5c6970605380c0b8ed8dbdf8c860adac",
+    "semantic_hash": ""
+  },
+  "test/test_stem_bundles.py": {
+    "mtime": 1787730900.9549198,
+    "ast_hash": "9d613716aa58d9ee082bf442b218a181",
+    "semantic_hash": ""
+  },
+  "test/test_stem_continuous.py": {
+    "mtime": 1787730900.9631007,
+    "ast_hash": "360d89bf1fad9d93df157fed2fc341e2",
+    "semantic_hash": ""
+  },
+  "test/test_stem_features.py": {
+    "mtime": 1787730900.9790697,
+    "ast_hash": "910f8601c00d44cbd0480c18cb99f9fe",
+    "semantic_hash": ""
+  },
+  ".github/workflows/enforce-source-branch.yml": {
+    "mtime": 1787646696.1560853,
+    "ast_hash": "01b9dbd54017008307de71fd365bdf12",
+    "semantic_hash": ""
+  },
+  "doc/TUTORIAL.md": {
+    "mtime": 1787730900.3299997,
+    "ast_hash": "ff881289ea8883723b5cfd2070bdfa0f",
+    "semantic_hash": ""
+  },
+  "doc/bundle_sclerenchyma_caps.md": {
+    "mtime": 1787730900.3383172,
+    "ast_hash": "a008446c6696a92422a20ad38976b6f3",
+    "semantic_hash": ""
+  },
+  "example/needle/pinaster_bugs.md": {
+    "mtime": 1788250352.8622513,
+    "ast_hash": "ea8f3aa3d1af5d5b1b474eb3c07e4410",
+    "semantic_hash": ""
+  },
+  "example/needle/Pine needle stoma cuticle hypodermis.jpg": {
+    "mtime": 1788250352.845646,
+    "ast_hash": "315d3c8d0dd2aa027e156cb2e019f5de",
+    "semantic_hash": ""
+  },
+  "example/needle/Str place blue.png": {
+    "mtime": 1788250352.845646,
+    "ast_hash": "e14bfea38377380acf13bc04d532fc3a",
+    "semantic_hash": ""
+  },
+  "example/needle/Transfusion_tissue.png": {
+    "mtime": 1788250352.8476493,
+    "ast_hash": "5c3213dee15f91d99547da164b436fc1",
+    "semantic_hash": ""
+  },
+  "example/needle/outputs/pinus_pinaster_test03.png": {
+    "mtime": 1788250352.849652,
+    "ast_hash": "fa579fc41877983082916c999853cd54",
+    "semantic_hash": ""
+  },
+  "example/needle/outputs/pinus_pinaster_test04.png": {
+    "mtime": 1788250352.857663,
+    "ast_hash": "d74b4e9e169964ee1b91b411e9b3347f",
+    "semantic_hash": ""
+  },
+  "example/needle/outputs/pinus_pinaster_test04_zoom.png": {
+    "mtime": 1788250352.8622513,
+    "ast_hash": "fbfefce84a484c632fa5a8918e5adc3f",
+    "semantic_hash": ""
+  },
+  "example/needle/resin_duct.png": {
+    "mtime": 1788250352.8667073,
+    "ast_hash": "841df5d52684764d21ef8cfffcb3806c",
+    "semantic_hash": ""
+  }
+}
