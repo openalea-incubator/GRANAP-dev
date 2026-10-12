@@ -410,7 +410,15 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
     - The DataStructure with its junctions, 0.7 s; the graph view, 0.09 s.
 - **Found, to decide:**
   - **F-P3a — vessels in thinner roots.** The default rule scales the vessel diameters with the stele, so a thinner root gets *more*, smaller vessels: 61 conducting cells at 0.6 mm against 25 at 1.1 mm. Keep the vessel sizes fixed instead (the stele and xylem radii still scale), so that thinner roots get fewer vessels? **Recommendation:** yes. The number of metaxylem poles stays the preset's unless a class overrides it.
-    - → answer:
+    - → answer: For now, I want the same scaling rules as the version of GRANAP we're reimplementing from.
   - **F-P3b — `convert_properties_to_arraydict` at seedling scale (14.6 s).** Speed it up in metafspm, e.g. a bulk conversion from dicts to arrays per property, or create the properties as arrays during the bulk instantiation? **Recommendation:** convert in bulk (one `np.fromiter` per property) in metafspm, the change being local to the MPG.
-    - → answer:
+    - → answer: yes to recommendation
+- **F-P3b, done (metafspm `ArrayDict.from_items`):** the seedling's conversion takes 3.6 s instead of 14.6 s.
+- **F-P3a, your answer: "the same scaling rules as the version of GRANAP we're reimplementing from".** GRANAP has no rule from a root's diameter to its parameters. Its only rules for parameters varying along a root are the root series' schedules (`RootSeries` / `DicotRootSeries`): the stele radius, the vessel radius, the vessel counts (`n_fused`, terminators, creators) and any field (`param_schedules`), as functions of the position along the root. Which do you mean?
+  - (a) **The series' schedules:** a class is evaluated through a `RootSeries` at its distance from the tip (the series' `length` axis), with GRANAP's own vessel tracking and fusions, and the diameter only selects the series (e.g. one per root order).
+  - (b) **No scaling at all:** a class gets the preset's parameters unchanged (every root the same anatomy), unless a user function changes them.
+  - (c) **Another rule,** in the R GRANAR or elsewhere: tell me where.
+
+  **Recommendation:** (a). It is GRANAP's own model of how a root's anatomy varies, and its `track_id`s then give the vessel junctions between successive sections directly.
+  - → answer:
 - **Next (Q12):** emergence (new segments getting their class's anatomy) and replacement (a segment changing class), with metafspm's partial rewiring.
