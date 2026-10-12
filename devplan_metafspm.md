@@ -337,3 +337,49 @@ The MPG becomes the record of every stage once cells exist. The GRANAP `Cell` ob
   - **The other writers:** OBJ, SVG, gmsh and `Geometry.xml` use only the cell polygons and types, which come from the MPG since P1.
   - **A direct `AnatomyWriter(organ).write_to_xml`** still snaps, exact on the MPG's polygons.
   - **Tests:** the cross-check compares the XML byte for byte (monocot root; needle, with protected air spaces): both pass.
+- **P2, closed:** the full comparison folder passes, **176 tests, in 16 min** (36 min before P2.3: the export and the XML read the stored topology instead of snapping again).
+  - **P2.4** needed no code of its own: the stage hooks and the stored topology are generic. Stems, leaves and needles go through them in the cross-checks and replays; the CellSet and ROI organs, with their own `generate_cells`, record the final stage and store their network.
+
+## 9. P3: new capabilities — design (2026-10-12)
+
+Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for roots in the component), Q12 (initiation first), Q13 (a few segments in 2–3 classes; a separate benchmark).
+
+- **The component.** `mpg/component.py`, `GranapAnatomy(StructuralComponent)`, for root segments. Its `initiate_plant(g, plant, parameters)` runs after the architecture's initiator, so the segments and their diameter and distances exist.
+  - **Class:** each root segment's class is binned from its `radius`, distance from tip and distance from the root–shoot junction. The bins are component parameters.
+  - **Library:** each class gets its anatomy from the library. A class's template is generated once, from `class → OrganInputData` (a function the user can give; a default for roots), and then instantiated on every segment of the class.
+- **Templates.** A template is the section of one MPG-backed organ, kept as arrays: its Layers, Cells, protoplasts, walls, junctions and Connections, with their properties.
+  - **Instantiation:** a segment gets its own copy, one bulk call per scale and Connection endpoints offset. Its Cells hold `template` and `template_row`, and share the template's polygons instead of copying them, so the geometry is stored once per class (your Q-A4 answer).
+- **Vessels.** Every xylem and phloem conducting cell (metaxylem, protoxylem, xylem, phloem, sieve element) gets a `vessel_id`, unique in its section, and a `pole_id`. `track_id` is kept where the series prescribed vessels.
+- **Junctions between successive sections.** `wire_junctions` with a callable rule pairs the conducting cells of the same family (xylem with xylem, phloem with phloem):
+  - by equal `track_id` where both have one;
+  - else each child vessel with its nearest parent vessel in (angle, relative radius), and each parent vessel with its nearest child vessel, so that a fusion or split gives one-to-many links.
+- **The hydraulic graph.** `MPGDataStructure(g, from_scale=SubOrgan, nodes="Compartment", wiring=…)` over the plant: every Compartment a node, and every Connection, junctions included, an edge. GraphView and incidence come from metafspm.
+- **Tests,** in `test/mpg_capabilities/`:
+  - a small root system (a main root and two laterals, 2–3 classes, built by a test initiator);
+  - templates shared per class, with copies per segment;
+  - vessel ids and junctions;
+  - the GraphView's sizes;
+  - one graph-system solve on it (a steady flow, checked against a linear solve);
+  - a benchmark script for a full seedling (Q13).
+
+## 10. Questions on P3
+
+- **Q-P3a — where pole and bundle ids come from.** GRANAP keeps no grouping on the cells. Changing its bundle, slice and arch loops would change the original modules, which P2 keeps untouched. Should the ids be recovered after generation instead?
+  - stems and leaves: the bundle envelope (`vascular_tissue_polygons["bundle"]`) containing the cell;
+  - dicot root phloem: the phloem-pole polygon containing it;
+  - root xylem, and monocot phloem: the angular sector of the `n_vascular_bundles` poles.
+
+  **Recommendation:** recover them now. Seeding them in the loops can come with P5, when the pipeline itself moves into the MPG.
+  - → answer:
+- **Q-P3b — matching without `track_id`.** Nearest vessel of the same family, in both directions, in (angle, radius / section radius)? Or also restricted to the same pole?
+  - **Recommendation:** nearest in both directions, without the pole restriction. Successive sections of different classes may have different pole counts, which makes poles hard to match.
+  - → answer:
+- **Q-P3c — the default `class → parameters` for roots.** A thinner root could get either:
+  - (a) every length scaled by the diameter ratio: the same cells, smaller;
+  - (b) the cell sizes kept, with fewer cortex layers (`cortex.n_layers`) and a thinner stele (`stele.thickness`), both scaled with the diameter.
+
+  **Recommendation:** (b). Thinner roots have fewer cortical layers and a smaller stele with cells of similar size. The distances from the tip and the junction change nothing by default; a user function can use them (e.g. aerenchyma, barrier maturation).
+  - → answer:
+- **Q-P3d — geometry in the copies.** Should a segment's Cells point to their template's polygons (`template`, `template_row`), as in the design above? Or should they hold their own copy, which would be needed if a segment's cells later deform on their own (growth in girth)?
+  - **Recommendation:** point to the template now. A segment that deforms can get its own polygons later.
+  - → answer:
