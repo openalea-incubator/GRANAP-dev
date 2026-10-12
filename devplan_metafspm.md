@@ -420,5 +420,7 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - (c) **Another rule,** in the R GRANAR or elsewhere: tell me where.
 
   **Recommendation:** (a). It is GRANAP's own model of how a root's anatomy varies, and its `track_id`s then give the vessel junctions between successive sections directly.
-  - → answer:
+  - → answer: rather (b) to have a more flexible logic. If diameter is supposed to change anatomy, that's a differentiation we will introduce in the parametrization of this given class.
+- **F-P3a, done (your answer b):** `default_root_parameters` returns the preset unchanged, plus the class's overrides; the provisional diameter rule is removed. A class's own parametrization comes from `AnatomyLibrary(class_parameters={key: {param: {field: value}}})` or a callable key → overrides.
+  - Test: the lateral class, given a 2-layer cortex, has fewer cells; the same class without parametrization gets the preset. 6 capability tests pass.
 - **Next (Q12):** emergence (new segments getting their class's anatomy) and replacement (a segment changing class), with metafspm's partial rewiring.

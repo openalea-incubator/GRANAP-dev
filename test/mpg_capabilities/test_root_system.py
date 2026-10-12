@@ -22,8 +22,12 @@ DOC = dict(unit="", unit_comment="", description="", min_value=-1e9, max_value=1
            references="", DOI=[])
 
 
+LATERAL = (0.6, 0., 0.)                            # the lateral's class: 0.6 mm, distances not binned
+
+
 class Anatomy(GranapAnatomy):
-    library = AnatomyLibrary()                     # a library of its own, shared by the tests of this module
+    # a library of its own; the lateral class parametrized with a thinner cortex (its own differentiation)
+    library = AnatomyLibrary(class_parameters={LATERAL: {"cortex": {"n_layers": 2}}})
 
 
 @pytest.fixture(scope="module")
@@ -148,3 +152,12 @@ def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
     expected = spsolve(A.tocsr(), rhs)
     np.testing.assert_allclose(ds.get("psi"), expected, rtol=1e-8, atol=1e-10)
     assert -1. <= ds.get("psi").min() and ds.get("psi").max() <= -0.2
+
+
+def test_a_class_differs_only_by_its_own_parametrization(plant):
+    g, _, ds = plant
+    main = Anatomy.library.template((1.1, 0., 0.))
+    lateral = Anatomy.library.template(LATERAL)
+    assert len(lateral.cell_layer) < len(main.cell_layer)          # two cortex layers instead of five
+    unchanged = AnatomyLibrary().template((0.6, 0., 0.))            # without a parametrization: the preset
+    assert len(unchanged.cell_layer) == len(main.cell_layer)

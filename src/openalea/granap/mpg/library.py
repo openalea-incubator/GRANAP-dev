@@ -3,7 +3,7 @@ The anatomy library (devplan_metafspm.md, P3): one template per anatomy class, g
 segment of the class.
 
     key = ClassBins().key(diameter_mm, tip_mm, junction_mm)     a class: binned diameter and distances (mm)
-    library = AnatomyLibrary(parameters=default_root_parameters)
+    library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
     template = library.template(key)                             generated at the first request (MPG-backed organ)
     written = template.instantiate(g, segment)                   the segment's own Layers, Cells, protoplasts,
                                                                  walls, junctions and Connections, in bulk
@@ -39,44 +39,14 @@ class ClassBins:
         return binned(diameter, self.diameter), binned(tip, self.tip), binned(junction, self.junction)
 
 
-def _layer_thickness(record) -> float:
-    return float(record.get("cell_diameter", 0.)) * int(record.get("n_layers", 1) or 1)
-
-
-def reference_diameter(data: OrganInputData) -> float:
-    """The diameter (mm) a root parameter set gives: twice the stele thickness and every peeled layer."""
-    params = data.to_dict_list()
-    stele = next(p for p in params if p["name"] == "stele")
-    layers = [p for p in params if p.get("order") and p["name"] not in ("stele", "xylem", "phloem", "aerenchyma")]
-    return 2. * (float(stele["thickness"]) + sum(_layer_thickness(p) for p in layers))
-
-
-XYLEM_LENGTHS = ("radius_valley_side", "radius_peak_side", "pith_radius", "outer_radius", "vessel_diameter",
-                 "vessel_diameter_min", "vessel_diameter_sd", "protoxylem_diameter", "protoxylem_cluster_width")
-
-
 def default_root_parameters(key, base: OrganInputData = None, overrides: dict = None) -> OrganInputData:
     """
-    A root's parameters for the class *key* (diameter, distance from tip, distance from the junction, in mm), from
-    *base* (default: OrganInputData.for_root()), as Q-P3c (b): the cell sizes are kept; the stele thickness and the
-    lengths of the xylem arrangement scale with the diameter; the cortex gets the number of layers that fills the
-    rest of the radius. The distances change nothing here (a user function can use them). *overrides*
-    ({param: {field: value}}, e.g. {"stele": {"thickness": 0.2}, "cortex": {"n_layers": 3}}) are set last.
+    A root's parameters for the class *key*: *base* (default OrganInputData.for_root()) unchanged, then *overrides*
+    ({param: {field: value}}, e.g. {"stele": {"thickness": 0.2}, "cortex": {"n_layers": 3}}) set on it. No rule
+    derives parameters from the class (F-P3a, your answer b): a class whose anatomy differs (a thinner lateral, a
+    maturing segment) says so in its own parametrization (AnatomyLibrary's class_parameters).
     """
     data = OrganInputData.for_root() if base is None else copy.deepcopy(base)
-    diameter = float(key[0])
-    ratio = diameter / reference_diameter(data)
-    params = {p["name"]: p for p in data.to_dict_list()}
-    stele = float(params["stele"]["thickness"]) * ratio
-    data.set_value("stele", "thickness", stele)
-    for name in XYLEM_LENGTHS:
-        value = params["xylem"].get(name)
-        if isinstance(value, (int, float)) and value:
-            data.set_value("xylem", name, float(value) * ratio)
-    fixed = sum(_layer_thickness(p) for n, p in params.items()
-                if p.get("order") and n not in ("stele", "xylem", "phloem", "aerenchyma", "cortex"))
-    cortex_cell = float(params["cortex"]["cell_diameter"])
-    data.set_value("cortex", "n_layers", max(1, int(round((diameter / 2. - stele - fixed) / cortex_cell))))
     for name, values in (overrides or {}).items():
         for field_name, value in values.items():
             data.set_value(name, field_name, value)
@@ -175,17 +145,25 @@ class Template:
 
 
 class AnatomyLibrary:
-    """Templates by class, generated at their first request from parameters(key) (an OrganInputData)."""
+    """
+    Templates by class, generated at their first request. A class's parameters: *parameters(key, overrides=...)*
+    (default: the root preset), with the class's own parametrization from *class_parameters*: {key: overrides} or
+    a callable key -> overrides (None: the base parameters), where overrides is {param: {field: value}}.
+    """
 
-    def __init__(self, parameters=default_root_parameters, seed: int = 0, organ_class=None):
+    def __init__(self, parameters=default_root_parameters, class_parameters=None, seed: int = 0, organ_class=None):
         from openalea.granap import mpg
-        self.parameters, self.seed = parameters, seed
+        self.parameters, self.class_parameters, self.seed = parameters, class_parameters or {}, seed
         self.organ_class = organ_class or mpg.RootAnatomy
         self.templates = {}
 
+    def overrides(self, key) -> dict:
+        source = self.class_parameters
+        return (source(key) if callable(source) else source.get(key)) or {}
+
     def template(self, key) -> Template:
         if key not in self.templates:
-            organ = self.organ_class(self.parameters(key), seed=self.seed)
+            organ = self.organ_class(self.parameters(key, overrides=self.overrides(key)), seed=self.seed)
             self.templates[key] = Template.from_organ(organ, key, len(self.templates))
         return self.templates[key]
 
