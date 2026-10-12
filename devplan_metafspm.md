@@ -309,11 +309,24 @@ The MPG becomes the record of every stage once cells exist. The GRANAP `Cell` ob
 
 - **Q-P2a — stage boundaries.** Write the MPG at the five boundaries above (grouping, intercellular spaces, aerenchyma, fused gaps, final)? Or only at grouping and at the end?
   - **Recommendation:** all five. Each is a point where the comparison can say which stage drifted, and the aerenchyma and gap fusions are where cells disappear.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P2b — topology at `generate_cells`.** Compute and store the walls and junctions when the cells are generated, rather than only when the network is exported? It costs one `_build_topology` and one wall walk per section (about 1–2 s on a root section). In exchange, every section in an MPG carries its hydraulic graph, and the exporter and writers stop recomputing it.
   - **Recommendation:** yes. The hydraulic graph is the point of the port, and a population of sections would otherwise recompute it per export.
-  - → answer:
+  - → answer: yes, if we need optimisation we'll consider it later.
 - **Q-P2c — a stable cell id.** Add `cell_uid`, set once when a cell is grouped and kept through every stage, alongside GRANAP's `id_cell` and `id_group` (both unchanged)?
   - **Recommendation:** yes. It is what lets a stage write update the same vertex instead of rebuilding the section.
-  - → answer:
+  - → answer: yes to recommendation
 
+
+## 8. P2 progress
+
+- **Your answers (2026-10-12):** Q-P2a, Q-P2b and Q-P2c, yes to the recommendations ("if we need optimisation we'll consider it later" for Q-P2b).
+- **P2.1, done:** stage writes at grouping, intercellular, aerenchyma, fused_gaps and final.
+  - **How:** instead of a copy of `generate_cells`, the mixin overrides the methods GRANAP's pipeline calls at those boundaries (`add_intercellular_spaces`, `_add_aerenchyma_to_proportion`, `fuse_gaps`). The calls, their order and the rng stream are GRANAP's own, so the stages are exact by construction, for every organ.
+  - **Writing a stage:** `write_cells(…, written, stage)` keeps each surviving cell's vertex (by `cell_uid`, carried on the cells during the pipeline and stored as a vertex property, never on the rebuilt Cells). Gone cells are removed with their protoplast and properties, new cells are added, and Layers are rebuilt per stage, with Cells moved into them (metafspm `MPG.move_components`, `f606241`).
+  - **Tests:** `test/mpg_comparison/test_stages.py` checks that at every stage the MPG equals the live cells; on an aerenchymatous root (proportion 0.2, where cells are fused away), that surviving cells keep their vertex; and that the final cells equal the original pipeline's. Full folder: **176 passed**.
+- **P2.2, done:** the network is stored when the cells are generated.
+  - GRANAP's exporter runs once into a scratch network, without bridges, and writes into the MPG.
+  - `export_to_adjencymatrix` reads the stored network for a default export with no bridge to add. Otherwise (needle bridges, a custom air-link radius or wall thickness) it reruns the exporter and replaces the stored network.
+  - Found: replacing it took 301 s, all in per-key deletions of array-backed properties. metafspm now deletes in bulk (`e0656f1`): 3.6 s.
+  - Single checks pass: the monocot and needle cross-checks, and the replayed transfusion network (10).

@@ -7,10 +7,16 @@ GRANAP's organ classes backed by the MPG (devplan_metafspm.md, P1).
     root.export_to_adjencymatrix()   # the exporter, then its walls, junctions and edges written and read back
     root.mpg, root.segment           # the MPG and the section's SubOrgan
 
-The pipeline itself is GRANAP's, unchanged. What the rest of GRANAP reads afterwards (all_cells, the layers' cells,
-the cell GeoDataFrame, the network graph, its counts and wall map) is rebuilt from the MPG, so every result is the
-MPG's. The conversion of the pipeline into MPG arrays follows, module by module (P2).
+The pipeline itself is GRANAP's, unchanged; its cells are written into the MPG at each stage boundary (P2: the
+Voronoi grouping, the intercellular spaces, the aerenchyma, the fused gaps, the final cells), each cell keeping its
+vertex through the stages. What the rest of GRANAP reads afterwards (all_cells, the layers' cells, the cell
+GeoDataFrame, the network graph, its counts and wall map) is rebuilt from the MPG, so every result is the MPG's. The
+MPG becomes the storage itself in P5.
 """
+from types import SimpleNamespace
+
+import networkx as nx
+
 from openalea.granap.cellset_organ import CellSetOrgan as _CellSetOrgan
 from openalea.granap.leaf_class import (DicotLeafAnatomy as _DicotLeaf, LeafAnatomy as _Leaf,
                                         MonocotLeafAnatomy as _MonocotLeaf)
@@ -35,15 +41,41 @@ class MPGBacked:
     mpg = None
     segment = None
     _mpg_written = None
+    mpg_stage_hooks = ()             # callables (organ, stage) after each stage write (tests, diagnostics)
 
     def generate_cells(self):
         if getattr(self, "_cells_gdf", None) is not None:
             return self._cells_gdf
         super().generate_cells()
-        self.mpg, self.segment = single_plant_mpg()
-        self._mpg_written = write_cells(self.mpg, self.segment, self)
+        self._mpg_stage("final")
         self._read_cells_back()
+        self._store_network()
         return self._cells_gdf
+
+    # ── Stages (P2): the pipeline's cells written into the MPG at each boundary, GRANAP's own calls unchanged ──
+
+    def _mpg_stage(self, stage: str) -> None:
+        """Write the current cells into the section's MPG (created at the first stage) as the record of *stage*."""
+        if self.mpg is None:
+            self.mpg, self.segment = single_plant_mpg()
+        self._mpg_written = write_cells(self.mpg, self.segment, self, self._mpg_written, stage)
+        for hook in getattr(self, "mpg_stage_hooks", ()):
+            hook(self, stage)
+
+    def add_intercellular_spaces(self):
+        self._mpg_stage("grouping")                    # the Voronoi groups, simplified, nested cells removed
+        return super().add_intercellular_spaces()
+
+    def _add_aerenchyma_to_proportion(self, *args, **kwargs):
+        self._mpg_stage("intercellular")
+        result = super()._add_aerenchyma_to_proportion(*args, **kwargs)
+        self._mpg_stage("aerenchyma")
+        return result
+
+    def fuse_gaps(self, *args, **kwargs):
+        fused = super().fuse_gaps(*args, **kwargs)
+        self._mpg_stage("fused_gaps")
+        return fused
 
     def _read_cells_back(self, n_real=None):
         """all_cells, the layers' cell lists and the GeoDataFrame, from the MPG (the same cells, the same order)."""
@@ -55,19 +87,38 @@ class MPGBacked:
             layer.cells[:] = [replaced.get(id(c), c) for c in layer.cells]
         self._cells_gdf = gdf_from_cells(cells, n_real)
 
+    def _store_network(self) -> None:
+        """
+        The hydraulic network of the final cells, stored in the MPG when the cells are generated (P2.2): GRANAP's
+        exporter run once into a scratch network, without bridges (which would add cells to the organ), so that
+        every section carries its walls, junctions and edges, and the export reads them instead of recomputing them.
+        """
+        from openalea.granap.anatomy_writer import NetworkExporter
+        scratch = SimpleNamespace(graph=nx.Graph(), n_walls=0, n_junctions=0, n_cells=0, _wall_to_cells={})
+        NetworkExporter(self).export(scratch, bridges=False)
+        write_network(self.mpg, self.segment, self, self._mpg_written, network=scratch)
+
+    def _stored_network_matches(self, air_link_radius, exporter_kwargs) -> bool:
+        """Whether the export asked for is the stored one: default exporter settings, and no bridge to add."""
+        if air_link_radius is not None or set(exporter_kwargs) - {"bridges", "bridge_radius"}:
+            return False
+        wants_bridges = exporter_kwargs.get("bridges", True)
+        return not (wants_bridges and self.network_bridge_specs())
+
     def _build_anatnetwork(self, air_link_radius=None, **exporter_kwargs):
-        super()._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
         if self.mpg is None:
             self.generate_cells()
-        n_real = len(self._mpg_written["cells"])
-        bridged = len(self.all_cells.cells) > n_real
-        written = write_network(self.mpg, self.segment, self, self._mpg_written)
+        written = self._mpg_written
+        if not self._stored_network_matches(air_link_radius, exporter_kwargs):
+            super()._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
+            written = write_network(self.mpg, self.segment, self, written)        # replaces the stored one
+            n_real = len(written["cells"]) - len(written.get("bridge_cells", []))
+            if len(written["cells"]) > n_real or "bridge" in self._cells_gdf.columns:
+                self._read_cells_back(n_real)
         self.graph = network_from_mpg(self.mpg, written)
         self.n_walls, self.n_junctions = written["n_walls"], written["n_junctions"]
         self.n_cells = self.graph.number_of_nodes() - self.n_walls - self.n_junctions
         self._wall_to_cells = dict(written["wall_to_cells"])
-        if bridged or "bridge" in self._cells_gdf.columns:
-            self._read_cells_back(n_real)
 
 
 def _backed(cls):

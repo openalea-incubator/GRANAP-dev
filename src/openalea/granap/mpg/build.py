@@ -75,31 +75,88 @@ def tissue_regions(cells) -> np.ndarray:
     return labels
 
 
-def write_cells(g, segment, organ) -> dict:
+UID = "cell_uid"                              # the stable id a cell carries through the stages (Q-P2c)
+
+
+def _record(cell) -> dict:
+    """A GRANAP Cell's attributes as written to its Cell vertex (cell__<name>), its pipeline uid left out."""
+    return {name: value for name, value in vars(cell).items() if name != UID}
+
+
+def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -> dict:
     """
-    The Layers, Cells and protoplasts of *organ*'s cells (organ.all_cells, after generate_cells) under *segment*.
-    Each Cell vertex holds every attribute of its GRANAP Cell (cell__<name>, the polygon included) and its row in
-    the cell list (cell_row). Returns {"layers", "cells", "protoplasts"}: vids, cells and protoplasts in row order.
+    Write the current cells of *organ* (organ.all_cells) into the section under *segment*, at a stage of the
+    pipeline (P2: grouping, intercellular, aerenchyma, fused_gaps, final). Cells are identified across stages by
+    their uid (given here to the cells that have none: those just grouped or created by the stage):
+      * a surviving cell keeps its Cell vertex and protoplast, its attributes rewritten (cell__<name>, polygon
+        included) and its row in the cell list updated (cell_row);
+      * a cell that is gone (fused, nested, carved away) is removed with its protoplast;
+      * a new cell (an air space) gets a Cell vertex and a protoplast;
+      * the Layers are the connected regions of one tissue type of the current cells: each stage builds them anew,
+        moves the Cells into them and removes the emptied ones.
+    *written* (the record of the previous stages, None at the first) is updated and returned: Layers, Cells and
+    protoplasts in row order, the uid -> vid maps, and the stages written.
     """
-    s = g.scales
+    s, L = g.scales, g.labels
+    if written is None:
+        written = {"layers": [], "cells": [], "protoplasts": [], "cell_of_uid": {}, "protoplast_of_uid": {},
+                   "next_uid": 0, "stages": []}
     cells = list(organ.all_cells.cells)
+    for cell in cells:
+        if not hasattr(cell, UID):
+            setattr(cell, UID, written["next_uid"])
+            written["next_uid"] += 1
+    uids = [getattr(c, UID) for c in cells]
+    if len(set(uids)) != len(uids):                    # a cell duplicated by a stage: the copies are new cells
+        seen = set()
+        for cell in cells:
+            if cell.cell_uid in seen:
+                cell.cell_uid = written["next_uid"]
+                written["next_uid"] += 1
+            seen.add(cell.cell_uid)
+        uids = [c.cell_uid for c in cells]
+    present = set(uids)
+    gone = [u for u in written["cell_of_uid"] if u not in present]
+    g.remove_connections([written["protoplast_of_uid"].pop(u) for u in gone])        # vertices and properties
+    g.remove_connections([written["cell_of_uid"].pop(u) for u in gone])
+    old_layers = list(written["layers"])
     regions = tissue_regions(cells)
-    order = np.argsort(regions, kind="stable")                    # the Cells of each Layer, consecutive
-    region_ids, first = np.unique(regions[order], return_index=True)
-    layer_types = [cells[order[i]].type for i in first]
-    layers = g.add_components_bulk(segment, len(region_ids), **_props(s.Layer, tissue=layer_types))
-    cell_vids = np.empty(len(cells), dtype=np.int64)
-    bounds = list(first) + [len(cells)]
-    for layer, start, stop in zip(layers, bounds[:-1], bounds[1:]):
-        rows = order[start:stop]
-        vids = g.add_components_bulk(layer, rows.size, **_props(s.Cell, cell_row=rows.tolist(),
-                                                                 tissue=[cells[r].type for r in rows]))
-        _write_present(g, "cell__", vids, [vars(cells[r]) for r in rows])
-        cell_vids[rows] = vids
-    protoplasts = g.add_components_bulk(cell_vids.tolist(), len(cells), **_props(
-        s.Compartment, kind=PROTOPLAST, label=g.labels.Compartment.Symplastic,
-        tissue=[c.type for c in cells], cell_row=list(range(len(cells)))))
-    return {"layers": layers, "cells": cell_vids.tolist(), "protoplasts": protoplasts}
+    region_ids, first = np.unique(regions, return_index=True)
+    layers = g.add_components_bulk(segment, len(region_ids), **_props(s.Layer, tissue=[cells[i].type for i in first]))
+    layer_of_row = np.asarray(layers, dtype=np.int64)[np.searchsorted(region_ids, regions)]
+    for layer in layers:                                           # the surviving Cells, moved to their region
+        rows = np.flatnonzero(layer_of_row == layer)
+        kept = [written["cell_of_uid"][uids[r]] for r in rows if uids[r] in written["cell_of_uid"]]
+        if kept:
+            g.move_components(kept, int(layer))
+    g.remove_connections(old_layers)                               # emptied: their Cells were all moved
+    new_rows = [r for r, uid in enumerate(uids) if uid not in written["cell_of_uid"]]
+    for layer in layers:
+        rows = [r for r in new_rows if layer_of_row[r] == layer]
+        if not rows:
+            continue
+        vids = g.add_components_bulk(int(layer), len(rows), **_props(s.Cell))
+        protoplasts = g.add_components_bulk(vids, len(rows), **_props(
+            s.Compartment, kind=PROTOPLAST, label=L.Compartment.Symplastic))
+        for r, v, p in zip(rows, vids, protoplasts):
+            written["cell_of_uid"][uids[r]], written["protoplast_of_uid"][uids[r]] = v, p
+    cell_vids = [written["cell_of_uid"][u] for u in uids]
+    protoplasts = [written["protoplast_of_uid"][u] for u in uids]
+    properties = g.properties()
+    for name in [n for n in properties if n.startswith("cell__")]:
+        values = properties[name]
+        for v in cell_vids:
+            values.pop(v, None)                                    # an attribute a stage removed stays removed
+    _write_present(g, "cell__", cell_vids, [_record(c) for c in cells])
+    for prop, values in (("cell_row", range(len(cells))), ("tissue", [c.type for c in cells]), (UID, uids)):
+        target = properties.setdefault(prop, {})
+        for v, p, value in zip(cell_vids, protoplasts, values):
+            target[v] = value
+            if prop != UID:
+                target[p] = value
+    written.update(layers=list(layers), cells=cell_vids, protoplasts=protoplasts)
+    written["stages"].append(stage)
+    return written
 
 
 def network_cell_rows(gdf) -> list:
@@ -112,15 +169,39 @@ def network_cell_rows(gdf) -> list:
     return [int(r) for r in gdf.index[valid & ~bridge]] + [int(r) for r in gdf.index[bridge]]
 
 
-def write_network(g, segment, organ, written: dict) -> dict:
+def clear_network(g, written: dict) -> None:
+    """Remove the stored network of the section: its Connections, walls, junctions and bridge cells, and the network
+    attributes of the protoplasts."""
+    if "connections" not in written:
+        return
+    g.remove_connections(written.pop("connections"))
+    g.remove_connections(written.pop("apoplast"))
+    bridges = written.pop("bridge_cells", [])
+    if bridges:
+        g.remove_connections(written.pop("bridge_protoplasts"))
+        g.remove_connections(bridges)
+        g.remove_connections([written.pop("bridge_layer")])
+        written["layers"] = [v for v in written["layers"] if g.has_vertex(v)]
+        keep = len(written["cells"]) - len(bridges)
+        written["cells"], written["protoplasts"] = written["cells"][:keep], written["protoplasts"][:keep]
+    for name in [n for n in g.properties() if n.startswith("node__") or n == "mecha_index"]:
+        values = g.property(name)
+        for v in written["protoplasts"]:
+            values.pop(v, None)
+
+
+def write_network(g, segment, organ, written: dict, network=None) -> dict:
     """
-    The network of *organ* (organ.graph, built by the exporter) under *segment*: its wall and junction nodes as
-    Compartments anchored to the segment, its virtual bridge cells (appended to organ.all_cells by the exporter) as
-    Cells with their protoplasts in a Layer of their own, and every edge as a Connection with its attributes. Node
-    attributes go to the Compartments (node__<name>), and each Compartment keeps its MECHA index (mecha_index).
+    The network built by the exporter into *network* (default: the organ itself, organ.graph) under *segment*,
+    replacing the one stored before: its wall and junction nodes as Compartments anchored to the segment, its
+    virtual bridge cells (appended to organ.all_cells by the exporter) as Cells with their protoplasts in a Layer of
+    their own, and every edge as a Connection with its attributes. Node attributes go to the Compartments
+    (node__<name>), and each Compartment keeps its MECHA index (mecha_index).
     """
     s, L = g.scales, g.labels
-    graph = organ.graph
+    network = organ if network is None else network
+    clear_network(g, written)
+    graph = network.graph
     cells = list(organ.all_cells.cells)
     known = len(written["cells"])
     if len(cells) > known:                                       # bridge cells, added by the export
@@ -128,14 +209,15 @@ def write_network(g, segment, organ, written: dict) -> dict:
         rows = list(range(known, len(cells)))
         vids = g.add_components_bulk(layer, len(rows), **_props(s.Cell, cell_row=rows,
                                                                 tissue=[cells[r].type for r in rows]))
-        _write_present(g, "cell__", vids, [vars(cells[r]) for r in rows])
+        _write_present(g, "cell__", vids, [_record(cells[r]) for r in rows])
         protoplasts = g.add_components_bulk(vids, len(rows), **_props(
             s.Compartment, kind=PROTOPLAST, label=L.Compartment.Symplastic,
             tissue=[cells[r].type for r in rows], cell_row=rows))
         written["layers"].append(layer)
         written["cells"] += vids
         written["protoplasts"] += protoplasts
-    n_walls, n_junctions = organ.n_walls, organ.n_junctions
+        written.update(bridge_layer=layer, bridge_cells=vids, bridge_protoplasts=protoplasts)
+    n_walls, n_junctions = network.n_walls, network.n_junctions
     gdf = organ._cells_gdf
     exported_rows = network_cell_rows(gdf)
     vid_of_node = {}
@@ -161,6 +243,6 @@ def write_network(g, segment, organ, written: dict) -> dict:
                  label=[getattr(L.Connection, PATH_LABELS.get(data.get("path"), "Apoplastic")) for _, _, data in edges]))
     _write_present(g, "edge__", connections, [data for _, _, data in edges])
     written.update(apoplast=apo_vids, connections=connections, n_walls=n_walls, n_junctions=n_junctions,
-                   wall_to_cells={int(w): list(c) for w, c in organ._wall_to_cells.items()},
+                   wall_to_cells={int(w): list(c) for w, c in network._wall_to_cells.items()},
                    gdf_columns=list(gdf.columns))
     return written
