@@ -568,13 +568,20 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 - **Q-P5a — views or arrays.** Make the pipeline's cells views of the MPG first (P5.1), with the algorithms unchanged, and turn the algorithms into array operations afterwards (P5.5)? Or write array versions of the algorithms directly?
   - **Recommendation:** views first. Every algorithm then works on the MPG at once and exactly; the array versions replace them one at a time, each checked.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P5b — converted copies.** Converted copies of GRANAP's modules under `mpg/pipeline/`, switched to one at a time, with the originals untouched until all are converted?
   - **Recommendation:** yes.
-  - → answer:
+  - → answer: yes
 - **Q-P5c — exactness.** Must every P5 step reproduce the goldens exactly? Or may P5.4 (maintained topology) and P5.5 change them, each change shown (census, the side-by-side example) and accepted by you?
   - **Recommendation:** exact for P5.1–P5.3. Explicit, reviewed golden changes allowed in P5.4–P5.5, where a maintained topology or a vectorised union may break a snapping tie differently.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P5d — the Q8 bugs.** Fix them now, before P5 (each with its golden change, in GRANAP's modules and the converted copies alike)? Or in the converted copies only, as P5 reaches each module?
   - **Recommendation:** in the converted copies, as P5 reaches each module. Fixing them in GRANAP's modules changes the original goldens too, which you may want to do in GRANAP's own history rather than in this port.
+  - → answer: in converted copies
+- **Q-P5e — order of P5.1 and P5.3 (found while starting P5.1).** GRANAP's post-grouping stages replace cells wholesale. The aerenchyma calibration restores a deep copy of every cell before each of its up to 21 attempts (`organ_class.py:680`), and the air spaces and fusions create new `Cell` objects. With views and unchanged algorithms (Q-P5a), each replacement rewrites every cell into the MPG: exact, but about 15 % slower until P5.3, and the MPG would not hold the cells through the calibration. Options:
+  - (a) P5.1 as planned, a full rewrite at each replacement;
+  - (b) P5.1 and P5.3 together, attempts editing the MPG and rolling back to a section snapshot (rollback re-creating fused cells);
+  - (c) P5.3 first, in a converted copy on plain cells: shallow copies instead of deep copies, exact since cell attributes are numbers or immutable shapely polygons. Then P5.1, where only the stages creating cells (air spaces, fusions) write into the MPG.
+
+  **Recommendation:** (c).
   - → answer:
