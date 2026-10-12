@@ -267,4 +267,53 @@ Already decided (metafspm `devplan_porting.md` §5, 2026-10-06):
 - **Packaging, open:** `openalea.granap.mpg` imports metafspm, which is not a GRANAP dependency in `pyproject.toml` (and the conda recipe still pins conda's opencv). Should metafspm become an optional extra (`granap[mpg]`), or a hard dependency? **Recommendation:** an optional extra while P1–P3 are in progress, so the package and its CI stay installable without it.
   - → answer: metafspm will definitly become the main dependency for this version, so yes should be added to the requirements, but last version is not packaged yet so for now comment it in pyproject.toml and just mention manual clone and pip install . in the readme.
 
-**Next, P2:** the module-by-module conversion of the internal state into MPG arrays, root first. The cells come first (the Cell objects read from and written to the MPG during the pipeline), then the topology (built once and stored as Connections, instead of `_build_topology` being rerun), then the writers and the exporter reading the MPG. The comparison folder guards each step.
+- **Packaging, done (your answer):** `openalea.metafspm` is listed, commented, in `pyproject.toml`; the README explains the install from source. The clone takes metafspm's `data_structure_api` branch, which holds the anatomy scales until it is merged. P0 (`99e1db7`) is not pushed yet.
+
+## 5. P2: the pipeline writes into the MPG, stage by stage (your decision, 2026-10-12: option b)
+
+The MPG becomes the record of every stage once cells exist. The GRANAP `Cell` objects remain the working copy that the algorithms edit, until P5 makes the MPG the storage itself.
+
+- **Where the code goes.** `mpg/pipeline.py` reimplements `Organ.generate_cells` in the mixin as explicit stages: the same calls, in the same order, with the same rng stream, so that the goldens stay exact. The original modules are untouched.
+- **Stage boundaries** (Q-P2a). From the first cells on, each stage's output is written to the section's MPG:
+  1. Voronoi grouping (`process_voronoi_groups`, `simplify_cells`, `remove_nested_cells`): the first cells;
+  2. the intercellular spaces;
+  3. the aerenchyma;
+  4. `fuse_gaps`;
+  5. the layer population and the cell properties (the final cells).
+
+  Before the cells exist (layer rings, seeds, recipes), the objects stay as they are; they are not cells, at about 10–25 seeds per cell.
+- **Writing a stage.** The Cells keep their vertex when they survive a stage. Removed cells (aerenchyma fusions, nested cells, fused gaps) are removed from the MPG. New ones (air spaces) are added. The Layers are recomputed at the end, from the final types.
+  - Each Cell keeps a stable id across the stages (`cell_uid`, set at grouping), which GRANAP's `id_cell` is not, since it is reset to the list index.
+- **The topology, stored once** (Q-P2b). After the final cells, the walls and junctions are computed once (`_build_topology` and the exporter's wall walk) and written as Compartments and Connections at `generate_cells` time, not only at export. The exporter and the XML writer then read them from the MPG instead of recomputing them.
+  - `simplify_cells` keeps its own topology inside the stages until P5.
+- **Order, root first:**
+  1. P2.1: the staged pipeline and the stage records, for monocot and dicot roots and the series;
+  2. P2.2: the stored topology;
+  3. P2.3: the network exporter and the writers (XML, OBJ, SVG, geo) read the MPG;
+  4. P2.4: stems, leaves, needles, CellSet and ROI organs.
+- **Tests:**
+  - the comparison folder after each step;
+  - plus per-stage cross-checks: the census and the cells of each stage, original against staged, through stage hooks on the original pipeline in the test only.
+
+## 6. Later phases
+
+- **P3 — new capabilities** (as in §2): vessel ids, wiring of successive sections, the library per class, the seedling, the hydraulic GraphView.
+- **P4 — optimisation** (as in §2).
+- **P5 — the MPG as the storage** (your request): the pipeline's algorithms read and write MPG arrays directly.
+  - The `Cell` objects become views over the Cell vertices' properties, or disappear behind the compatibility view.
+  - The topology is maintained in the MPG through the stages (`simplify_cells`, the aerenchyma fusions), instead of recomputed from the polygons.
+  - Vectorised kernels replace the per-cell loops, where shapely allows.
+  - The comparison folder still guards it. Exactness is kept, or each golden change is made explicit.
+
+## 7. Questions on P2
+
+- **Q-P2a — stage boundaries.** Write the MPG at the five boundaries above (grouping, intercellular spaces, aerenchyma, fused gaps, final)? Or only at grouping and at the end?
+  - **Recommendation:** all five. Each is a point where the comparison can say which stage drifted, and the aerenchyma and gap fusions are where cells disappear.
+  - → answer:
+- **Q-P2b — topology at `generate_cells`.** Compute and store the walls and junctions when the cells are generated, rather than only when the network is exported? It costs one `_build_topology` and one wall walk per section (about 1–2 s on a root section). In exchange, every section in an MPG carries its hydraulic graph, and the exporter and writers stop recomputing it.
+  - **Recommendation:** yes. The hydraulic graph is the point of the port, and a population of sections would otherwise recompute it per export.
+  - → answer:
+- **Q-P2c — a stable cell id.** Add `cell_uid`, set once when a cell is grouped and kept through every stage, alongside GRANAP's `id_cell` and `id_group` (both unchanged)?
+  - **Recommendation:** yes. It is what lets a stage write update the same vertex instead of rebuilding the section.
+  - → answer:
+
