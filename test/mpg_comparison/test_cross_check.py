@@ -99,13 +99,17 @@ def _check_mpg(new):
 
 
 @pytest.mark.parametrize("name", [pytest.param(n, marks=() if n in QUICK else pytest.mark.slow) for n in ORGANS])
-def test_the_mpg_backed_organ_gives_the_same_section(name):
+def test_the_mpg_backed_organ_gives_the_same_section(name, tmp_path):
     original, backed, data, network = ORGANS[name]
     old, new = original(data(), seed=SEED), backed(data(), seed=SEED)
     old.generate_cells()
     new.generate_cells()
     _check_cells(old, new)
     if network:
+        old.write_to_xml(str(tmp_path / "old.xml"))
+        new.write_to_xml(str(tmp_path / "new.xml"))                # walls numbered from the stored topology
+        assert (tmp_path / "old.xml").read_bytes() == (tmp_path / "new.xml").read_bytes()
+        assert getattr(new, "mpg_topology_reads", 0) >= 1
         old.export_to_adjencymatrix()
         new.export_to_adjencymatrix()
         _check_network(old, new)

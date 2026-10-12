@@ -32,6 +32,7 @@ from openalea.granap.stem_dicot_continuous_class import ContinuousDicotStemAnato
 from openalea.granap.stem_monocot_class import MonocotStemAnatomy as _MonocotStem
 
 from openalea.granap.mpg.build import single_plant_mpg, write_cells, write_network
+from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
 
 
@@ -94,9 +95,17 @@ class MPGBacked:
         every section carries its walls, junctions and edges, and the export reads them instead of recomputing them.
         """
         from openalea.granap.anatomy_writer import NetworkExporter
+        store_topology(self.mpg, self.segment, self, self._mpg_written)          # the one snapping of the section
         scratch = SimpleNamespace(graph=nx.Graph(), n_walls=0, n_junctions=0, n_cells=0, _wall_to_cells={})
-        NetworkExporter(self).export(scratch, bridges=False)
+        with stored_topology(self):
+            NetworkExporter(self).export(scratch, bridges=False)
         write_network(self.mpg, self.segment, self, self._mpg_written, network=scratch)
+
+    def write_to_xml(self, path: str, **kwargs):
+        """GRANAP's XML writer, its walls numbered from the topology stored in the MPG (P2.3)."""
+        self.generate_cells()
+        with stored_topology(self):
+            return super().write_to_xml(path, **kwargs)
 
     def _stored_network_matches(self, air_link_radius, exporter_kwargs) -> bool:
         """Whether the export asked for is the stored one: default exporter settings, and no bridge to add."""
@@ -110,7 +119,8 @@ class MPGBacked:
             self.generate_cells()
         written = self._mpg_written
         if not self._stored_network_matches(air_link_radius, exporter_kwargs):
-            super()._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
+            with stored_topology(self):                                           # the stored rings, not a new snap
+                super()._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
             written = write_network(self.mpg, self.segment, self, written)        # replaces the stored one
             n_real = len(written["cells"]) - len(written.get("bridge_cells", []))
             if len(written["cells"]) > n_real or "bridge" in self._cells_gdf.columns:

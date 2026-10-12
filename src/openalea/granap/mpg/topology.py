@@ -1,0 +1,109 @@
+"""
+The section's topology, built once and stored in the MPG (devplan_metafspm.md, P2.2-P2.3).
+
+GRANAP derives walls and junctions from the cell polygons with CellGenerator._build_topology: vertex snapping
+(phase 0), then the rings, the vertex and edge maps (phase 1) and the junctions (phase 2). Only phase 0 needs the
+polygons; everything else follows from the snapped rings. The rings are stored once per section (each protoplast's
+boundary), and the topology is rebuilt from them, identical to GRANAP's down to the iteration order of its dicts and
+sets, so that the walls the exporter and the XML writer number from it are the same.
+
+    store_topology(g, segment, organ, written)       snap once, store the rings
+    topology_from_mpg(g, segment, written)            GRANAP's 5-tuple, from the MPG
+    with stored_topology(organ): ...                  GRANAP's writers and exporter read the stored topology for this
+                                                      section's cells (other calls compute as before)
+"""
+from contextlib import contextmanager
+
+from openalea.granap.generate_cell import CellGenerator
+
+_DESCRIPTOR = CellGenerator.__dict__["_build_topology"]
+_ORIGINAL_BUILD = _DESCRIPTOR.__func__
+
+
+def _valid_rows(gdf):
+    """The rows the exporter and the XML writer tessellate: a valid geometry, not a bridge cell."""
+    valid = gdf["geometry"].notna() & gdf["geometry"].apply(lambda p: p is not None and not p.is_empty)
+    if "bridge" in gdf.columns:
+        valid = valid & ~gdf["bridge"].astype(bool)
+    rows = gdf[valid]
+    protect = set(rows.index[rows["protect_topology"]]) if "protect_topology" in rows.columns else None
+    return list(rows.index), list(rows["geometry"]), protect
+
+
+def store_topology(g, segment, organ, written: dict) -> tuple:
+    """Snap the final cells' vertices once (GRANAP's phase 0), store each ring on its protoplast; returns the topology."""
+    ids, polys, protect = _valid_rows(organ._cells_gdf)
+    topology = _ORIGINAL_BUILD(polys, ids, protect_ids=protect)
+    cell_vkeys = topology[0]
+    boundary = g.properties().setdefault("boundary", {})
+    for row, vkeys in cell_vkeys.items():
+        boundary[written["protoplasts"][int(row)]] = list(vkeys)
+    written["topology"] = {"rows": [int(r) for r in cell_vkeys], "ids": [int(i) for i in ids],
+                           "protect": None if protect is None else sorted(int(i) for i in protect)}
+    return topology
+
+
+def topology_from_mpg(g, segment, written: dict) -> tuple:
+    """GRANAP's (cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set), from the MPG."""
+    record = written["topology"]
+    boundary = g.property("boundary")
+    cell_vkeys = {row: list(boundary[written["protoplasts"][row]]) for row in record["rows"]}
+    vertex_to_cells = {}
+    for cid, vkeys in cell_vkeys.items():                 # phase 1, as GRANAP builds it
+        for vk in vkeys:
+            vertex_to_cells.setdefault(vk, set()).add(cid)
+    edge_to_cells = {}
+    for cid, vkeys in cell_vkeys.items():
+        n = len(vkeys)
+        for i in range(n):
+            ek = tuple(sorted((vkeys[i], vkeys[(i + 1) % n])))
+            edge_to_cells.setdefault(ek, set()).add(cid)
+    junction_set = set()                                  # phase 2
+    for vk in vertex_to_cells:
+        if len(vertex_to_cells[vk]) >= 3:
+            junction_set.add(vk)
+            continue
+        incident_pairs = set()
+        for cid in vertex_to_cells[vk]:
+            vks = cell_vkeys[cid]
+            n = len(vks)
+            for i in range(n):
+                if vks[i] != vk:
+                    continue
+                ek_prev = tuple(sorted((vks[(i - 1) % n], vk)))
+                ek_next = tuple(sorted((vk, vks[(i + 1) % n])))
+                if ek_prev in edge_to_cells:
+                    incident_pairs.add(frozenset(edge_to_cells[ek_prev]))
+                if ek_next in edge_to_cells:
+                    incident_pairs.add(frozenset(edge_to_cells[ek_next]))
+        if len(incident_pairs) > 1:
+            junction_set.add(vk)
+    protected_shape_set = set()
+    if record["protect"]:
+        for cid in record["protect"]:
+            for vk in cell_vkeys.get(cid, ()):
+                protected_shape_set.add(vk)
+    return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set
+
+
+@contextmanager
+def stored_topology(organ):
+    """
+    Within the block, CellGenerator._build_topology called on this section's final cells (the same cell ids) returns
+    the topology rebuilt from the MPG instead of snapping again; any other call computes as before. organ.mpg_topology_
+    builds counts the snaps avoided.
+    """
+    written = organ._mpg_written
+    ids = written.get("topology", {}).get("ids")
+
+    def build(polys, cell_ids, protect_ids=None):
+        if ids is not None and [int(i) for i in cell_ids] == ids:
+            organ.mpg_topology_reads = getattr(organ, "mpg_topology_reads", 0) + 1
+            return topology_from_mpg(organ.mpg, organ.segment, written)
+        return _ORIGINAL_BUILD(polys, cell_ids, protect_ids=protect_ids)
+
+    CellGenerator._build_topology = staticmethod(build)
+    try:
+        yield
+    finally:
+        CellGenerator._build_topology = _DESCRIPTOR

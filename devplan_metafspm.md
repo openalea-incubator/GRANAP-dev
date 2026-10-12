@@ -330,3 +330,10 @@ The MPG becomes the record of every stage once cells exist. The GRANAP `Cell` ob
   - `export_to_adjencymatrix` reads the stored network for a default export with no bridge to add. Otherwise (needle bridges, a custom air-link radius or wall thickness) it reruns the exporter and replaces the stored network.
   - Found: replacing it took 301 s, all in per-key deletions of array-backed properties. metafspm now deletes in bulk (`e0656f1`): 3.6 s.
   - Single checks pass: the monocot and needle cross-checks, and the replayed transfusion network (10).
+- **P2.3, done:** the topology is stored once and read by GRANAP's own exporter and XML writer.
+  - **Why:** the XML writer and the exporter number walls differently when cells are protected: the XML keys a wall by its junction pair, the exporter adds a shape signature. So the XML cannot be derived from the network's walls.
+  - **What is stored:** the topology itself, the snapped ring of each cell on its protoplast (`boundary`). `mpg/topology.py` rebuilds GRANAP's five-tuple from it (phases 1–2 replayed, down to dict and set order), and `stored_topology(organ)` answers `CellGenerator._build_topology` from the MPG for this section's cells. It serves the stored network's export, the bridge/custom reruns and `organ.write_to_xml`.
+  - **Result:** a section is snapped once at generation; the XML and the export read the MPG, with no new snap.
+  - **The other writers:** OBJ, SVG, gmsh and `Geometry.xml` use only the cell polygons and types, which come from the MPG since P1.
+  - **A direct `AnatomyWriter(organ).write_to_xml`** still snaps, exact on the MPG's polygons.
+  - **Tests:** the cross-check compares the XML byte for byte (monocot root; needle, with protected air spaces): both pass.
