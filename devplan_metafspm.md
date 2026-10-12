@@ -517,3 +517,17 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - Junctions join stems to stems, stems to leaves and stems to roots, by the same vessel rule.
 - **`example/mpg/seedling.py`:** a stem of three elements, two leaves of two elements, and roots (a main root and a lateral), drawn at their real sizes from the MPG with their vessel junctions. 12 sections from 4 templates, 212 k Compartments, 526 k Connections, 1,555 junctions, built in 24 s.
 - **Test `test/mpg_capabilities/test_shoot.py`:** each kind from its own library, and the stem–stem, stem–leaf and stem–root junctions. Capability folder: 10.
+
+## 18. P4 (2026-10-12; your answers: exact optimisations only, in mpg/; Q-P4c moot)
+
+- **Q-P4c, your question (how it is turned on from the component):** the exact speed-ups need no switch, since the outputs are identical. They are on for every MPG-backed organ, so also for the component's templates. `MPGBacked.exact_speedups = True` is a class flag, so the gain can be measured (False: the plain pipeline) and the comparison folder can run both ways.
+- **Real times (no profiler), dicot root:** grouping 2.25 s, intercellular spaces 0.86 s, aerenchyma 2.09 s (topology 0.9 s, deep copies 0.42 s), fused gaps and final 0.2 s, network storage 1.11 s. The profiler had inflated the pure-Python parts several times over.
+- **E1, done (`mpg/speedups.py`):** a topology cache, keyed by the polygons' WKB bytes, the cell ids and the protected ids. A repeated call on identical input returns the first call's result. 8 of the 11 calls are hits (the aerenchyma attempts simplify the same cells).
+  - Generation: dicot root 6.49 → 5.71 s (−12 %); monocot root 3.02 → 2.59 s (−14 %).
+  - The dicot cross-check and the stage tests pass.
+- **E3 and E2, not done:**
+  - **E3:** about 1 s per section goes to pandas row access inside GRANAP's exporter (`cells_gdf.loc[r]` per wall cell, `iterrows`). Speeding it up exactly means rewriting the exporter in a copy in `mpg/` (about 900 lines, bridges and air links included), kept in step with GRANAP's.
+  - **E2:** the aerenchyma deep copies (0.42 s) would need a copy of the calibration loop. Since P3, both costs are paid once per template, not per segment.
+  - **Q-P4d:** stop P4 at E1 and carry E2 and E3 into P5, where the pipeline moves into MPG arrays anyway? Or copy the exporter and the calibration now?
+    - **Recommendation:** stop at E1. The copies would be rewritten again in P5, and their cost no longer grows with the plant.
+    - → answer:

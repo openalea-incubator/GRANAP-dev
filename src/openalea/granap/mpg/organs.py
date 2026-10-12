@@ -32,6 +32,7 @@ from openalea.granap.stem_dicot_continuous_class import ContinuousDicotStemAnato
 from openalea.granap.stem_monocot_class import MonocotStemAnatomy as _MonocotStem
 
 from openalea.granap.mpg.build import single_plant_mpg, write_cells, write_network
+from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
 
@@ -43,11 +44,16 @@ class MPGBacked:
     segment = None
     _mpg_written = None
     mpg_stage_hooks = ()             # callables (organ, stage) after each stage write (tests, diagnostics)
+    exact_speedups = True            # P4: GRANAP's pipeline with exact speed-ups (identical outputs); False: as is
 
     def generate_cells(self):
         if getattr(self, "_cells_gdf", None) is not None:
             return self._cells_gdf
-        super().generate_cells()
+        if self.exact_speedups:
+            with exact_speedups(self):
+                super().generate_cells()
+        else:
+            super().generate_cells()
         self._mpg_stage("final")
         self._read_cells_back()
         self._store_network()
