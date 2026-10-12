@@ -1,32 +1,39 @@
 name: granap
 channels:
+  - openalea3            # openalea.mtg / plantgl (metafspm)
   - conda-forge
-channel_priority: strict
+  - nodefaults           # ignore the defaults channels added by ~/miniconda3/.condarc
+# flexible: strict priority doubled the solve time (12 min vs 5 min) with no different outcome
+channel_priority: flexible
 
 # Keep the geometry stack identical to the pins in pyproject.toml
 # ([tool.conda.environment].dependencies) — the golden regression suite
 # (test/test_vascular_regression.py) pins an exact cell census, and a different
 # GEOS build shifts it. A dev env that drifts from CI will disagree with CI.
+# Only the pins that matter are kept; the rest is left to the solver.
 dependencies:
-  # CI builds 3.11-3.13; dev may run ahead — the census is identical on 3.13
-  # and 3.14, the geometry pins below are what actually matter.
-  - python >=3.11
+  - python           # openalea.plantgl (via openalea.mtg) has no 3.14 build
   - pip
-  - git
   - geos =3.14.1          # geometry engine — decides the golden census
   - shapely =2.1.2        # GEOS bindings
-  - opencv =4.13.0        # cv2.fitEllipse in geometry_collection
   - scipy >=1.13,<1.18    # vendored Qhull — Voronoi / Delaunay / cKDTree
-  - numpy >=1.26,<3
-  - geopandas >=1.0,<2
-  - pandas >=2.0,<4
-  - matplotlib >=3.8,<4
-  - networkx >=3.1,<4
-  - munkres >=1.1,<2
-  - pydantic >=2.7,<3
-  - roifile >=2023.8
-  - lxml >=5,<7
-  - scikit-learn >=1.3,<2
-  - ipykernel
+  - numpy
+  - geopandas
+  - pandas
+  - matplotlib
+  - networkx
+  - munkres
+  - pydantic >=2.7
+  - roifile
+  - ipykernel             # notebooks
+  # metafspm (the MPG port, src/openalea/granap/mpg)
+  - openalea.mtg
+  - numba
+  - pyyaml
+  - pytest
   - pip:
+    # cv2.fitEllipse in geometry_collection. From pip rather than conda: every conda opencv 4.13 build needs
+    # icu 78, while openalea.plantgl (required by openalea.mtg) is built on Qt 5 / icu 75, so the solve never ends.
+    - "opencv-python-headless==4.13.0.*"
     - "-e ..[doc]"
+    - "-e ../../metafspm"
