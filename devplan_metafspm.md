@@ -265,6 +265,6 @@ Already decided (metafspm `devplan_porting.md` §5, 2026-10-06):
   - On the monocot root, writing and reading the MPG adds about 0.8 s to a 10 s generation; the section is 30.5 k vertices.
 - **As planned (Q6), still on the originals:** the CellSet donor anatomies (an intermediate whose cells are grafted into the MPG-backed CellSet organ). The pre-cell construction objects (recipes, tissue polygons) are inherited unchanged until P2.
 - **Packaging, open:** `openalea.granap.mpg` imports metafspm, which is not a GRANAP dependency in `pyproject.toml` (and the conda recipe still pins conda's opencv). Should metafspm become an optional extra (`granap[mpg]`), or a hard dependency? **Recommendation:** an optional extra while P1–P3 are in progress, so the package and its CI stay installable without it.
-  - → answer:
+  - → answer: metafspm will definitly become the main dependency for this version, so yes should be added to the requirements, but last version is not packaged yet so for now comment it in pyproject.toml and just mention manual clone and pip install . in the readme.
 
 **Next, P2:** the module-by-module conversion of the internal state into MPG arrays, root first. The cells come first (the Cell objects read from and written to the MPG during the pipeline), then the topology (built once and stored as Connections, instead of `_build_topology` being rerun), then the writers and the exporter reading the MPG. The comparison folder guards each step.
