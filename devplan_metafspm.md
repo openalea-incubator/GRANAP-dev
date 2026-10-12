@@ -468,3 +468,44 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
   Capability folder: 9 passed, about 2 min.
 - **What drives the topology update:** the anatomy step triggers the DataStructure's update only when it changes the MPG itself. A pruning done outside a step (as in the test) needs `ds.update_topology()`, which an architecture's MPG-style pruning step gets from the framework.
+
+## 15. P4: optimisation — measurements and design (2026-10-12)
+
+- **Example (your request):** `example/mpg/root_system.py` draws a root system's sections from the MPG: the main root and its lateral, cells by tissue, and the xylem and phloem junctions between successive sections.
+- **Baseline** (seed 0, original = cells and network; MPG-backed = cells, stages, stored topology and network):
+
+  | organ | cells | original | MPG-backed |
+  |---|---|---|---|
+  | monocot root | 1384 | 7.3 s | 7.7 s |
+  | dicot root | 2834 | 16.0 s | 16.7 s |
+  | dicot stem | 4800 | 5.5 s | 5.9 s |
+
+- **Where the time goes** (dicot root, profiled, 32.5 s under the profiler):
+  1. aerenchyma calibration: 12.1 s in 9 attempts, each one a deep copy of every cell (4.4 s in all), a merge (6.8 s) and a `simplify_cells`;
+  2. `simplify_cells` / `_build_topology`: 9.9 s / 8.4 s over 11–12 calls, pure-Python dict and set loops, the topology recomputed at every simplification;
+  3. the network export, run once: 4.8 s, per-row pandas access and list membership;
+  4. seeding: 3.2 s; intercellular spaces: 2.8 s.
+- **Two kinds of levers:**
+  - **Exact** (outputs identical, bit for bit):
+    - E1, `_build_topology` vectorised (numpy for phases 1–2, grouping instead of dicts of sets);
+    - E2, the aerenchyma attempts copying only what an attempt changes (copy on write) instead of every cell;
+    - E3, the exporter's per-row loops replaced by array operations.
+
+    The comparison folder must stay green, unchanged.
+  - **Approximate** (anatomy changed, opt-in, own goldens), from `doc/performance_proposals.md`:
+    - A1, fewer Voronoi seeds per cell (8/6 instead of 15/10, about −28 % by that document);
+    - A2, a looser inscribed-circle tolerance in the packing (1e-3);
+    - A3, `coverage_union_all` for the grouping unions;
+    - A4, a coarser aerenchyma calibration (fewer bisection steps).
+
+## 16. Questions on P4
+
+- **Q-P4a — which kinds.** Exact levers first, on by default for the MPG-backed organs, then the approximate ones as an opt-in fast profile?
+  - **Recommendation:** yes. The exact levers cost no validation, and the fast profile gets its own goldens and a visual check (the side-by-side example, exact against fast).
+  - → answer:
+- **Q-P4b — where the exact levers live.** In `mpg/` (used during the MPG-backed organs' generation, as `stored_topology` is), with GRANAP's modules untouched? Or in GRANAP's own modules, so the original classes benefit too?
+  - **Recommendation:** in `mpg/` now, consistent with P2. Once validated, they can move upstream in one step, since they are exact.
+  - → answer:
+- **Q-P4c — the fast profile's contents.** All of A1–A4 under one opt-in profile (`fast=True`), or separate flags?
+  - **Recommendation:** separate flags, grouped by a `fast` profile that turns them all on, so that each one's effect on the anatomy can be measured and pictured on its own.
+  - → answer:
