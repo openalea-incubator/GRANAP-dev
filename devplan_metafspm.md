@@ -424,3 +424,29 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 - **F-P3a, done (your answer b):** `default_root_parameters` returns the preset unchanged, plus the class's overrides; the provisional diameter rule is removed. A class's own parametrization comes from `AnatomyLibrary(class_parameters={key: {param: {field: value}}})` or a callable key → overrides.
   - Test: the lateral class, given a 2-layer cortex, has fewer cells; the same class without parametrization gets the preset. 6 capability tests pass.
 - **Next (Q12):** emergence (new segments getting their class's anatomy) and replacement (a segment changing class), with metafspm's partial rewiring.
+
+## 12. Q12: emergence and replacement — design
+
+- **The step.** `GranapAnatomy` gets an MPG-style structural step, scheduled after the architecture's growth step. At each call it bins every root segment's class from its current radius and distances; the class is cheap to compute.
+  - A segment with no anatomy (just emerged) gets its class's copy.
+  - A segment whose class changed gets its anatomy **replaced**: its Layers, Cells, protoplasts, walls, junctions and anatomy Connections are removed, and the new class's copy is instantiated (your earlier answer: replaced, not edited).
+  - A pruned segment's anatomy goes with it.
+  - metafspm's `update_topology` then rewires only the junctions of the segments whose anatomy or link changed (signatures, partial rewiring).
+- **What a replaced anatomy keeps.** Your earlier answer: cell contents (e.g. solute concentrations) are inputs from coarser components such as root_carbon, broadcast to the new Compartments. So the new Compartments start from their variables' defaults, and the coarse inputs reach them through the translator as for every other Compartment. No state is carried from the old cells.
+- **What an emerged anatomy inherits.** metafspm's `on_grow="inherit"` takes the first same-label Compartment upstream. For GRANAP's copies, every protoplast has the same label, so it would take an arbitrary cell. Proposed instead: the Compartment of the same template and the same row in the nearest upstream segment of the same class (the same cell of the same anatomy). Otherwise, the same tissue and the nearest relative position. Otherwise, the default.
+- **Tests:**
+  - a root system grown over a few steps: new segments get their anatomy, and junctions are wired only for them;
+  - a segment whose radius crosses a bin is replaced: its old vertices and properties are gone, the new ones are there, and only its own and its child's junctions are rebuilt;
+  - inheritance by template row;
+  - a pruned segment.
+
+## 13. Questions on Q12
+
+- **Q-G1 — when classes are re-evaluated.** At every call of the step, for every segment (replacing those whose class changed)? Or only on an explicit differentiation event raised by another component?
+  - **Recommendation:** every call. Binning is cheap, and the bins decide how often a class changes. With distances binned finely, every step would replace many segments; the class parametrization (bin widths) is the knob.
+  - → answer:
+- **Q-G2 — a replaced anatomy's state.** The new Compartments start from the defaults, with coarse inputs broadcast, and nothing is carried from the old cells (as I understood your earlier answer)?
+  - → answer:
+- **Q-G3 — inheritance at emergence.** The same template row upstream, then the same tissue at the nearest relative position, then the default (a GRANAP-specific inheritance), instead of metafspm's first same-label Compartment?
+  - **Recommendation:** yes. It is a callable inheritance rule passed by the component, so metafspm's default stays for other anatomies.
+  - → answer:
