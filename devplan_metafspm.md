@@ -531,3 +531,50 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - **Q-P4d:** stop P4 at E1 and carry E2 and E3 into P5, where the pipeline moves into MPG arrays anyway? Or copy the exporter and the calibration now?
     - **Recommendation:** stop at E1. The copies would be rewritten again in P5, and their cost no longer grows with the plant.
     - → answer: stop at E1 (given in the conversation, 2026-10-12). E2 and E3 go to P5.
+
+## 19. P4 closed
+
+- E1's full check: the comparison folder passes, **176 tests, in 15 min** (16 before E1). P4 stops at E1 (your answer); E2 (aerenchyma deep copies) and E3 (the exporter's per-row access) move into P5.
+
+## 20. P5: the MPG as the storage — plan (2026-10-12)
+
+**Goal (§6):** the pipeline's algorithms read and write the MPG directly. Until now, GRANAP's `Cell` objects are the working copy, written into the MPG at stage boundaries (P2) and read back. In P5 the MPG holds the cells *during* the stages; the topology is kept in the MPG instead of recomputed from the polygons; the per-cell loops become array operations where shapely allows.
+
+**Where the code goes.** Your original request: progressively convert the sources in the separate folder. P5 is that conversion: converted copies of GRANAP's modules under `mpg/pipeline/`, which the MPG-backed classes switch to one at a time. GRANAP's own modules stay untouched until every one has a converted copy; whether to retire them then is decided at that point. The comparison folder guards every step.
+
+**What stays outside the MPG.** The stages before cells exist (layer rings, seeds, recipes) produce seeds, 10–25 per future cell, and polygons, not cells. They stay as arrays and polygons (numpy, shapely), not MPG vertices. The MPG starts at the grouping, as in P2.
+
+**Steps, root first, each with its check:**
+
+- **P5.1 — Cells as views of the MPG.**
+  - A `CellView` reads and writes its attributes in its Cell vertex's properties: numbers in the arrays, the polygon as an object property.
+  - The organ's `all_cells` becomes a manager of views in cell order, backed by the section's Cell vertices.
+  - The stages after the grouping (intercellular spaces, aerenchyma, fused gaps, the final properties) then edit the MPG itself. P2's stage writes become a check that the MPG and the views agree, then disappear.
+  - Exact by construction: the same values, through another store.
+- **P5.2 — the exporter on the stored topology, on arrays (E3).** The network is built with array operations from the stored rings, walls and junctions instead of pandas row access. The bridges and air links follow. Exact: the same graph, node for node and edge for edge, and the XML byte for byte.
+- **P5.3 — the aerenchyma calibration, copy on write (E2).** An attempt records the cells it changes, and only those are restored, instead of a deep copy of every cell per attempt. Exact.
+- **P5.4 — the topology kept through the stages.** `simplify_cells`, the aerenchyma fusions and `fuse_gaps` update the stored rings, walls and junctions where cells change, instead of snapping the whole section again. Maintained and recomputed topologies may differ at snapping ties, so this step may change goldens (Q-P5c).
+- **P5.5 — array kernels.** The per-cell loops that shapely's vectorised functions allow: the seed rings, the grouping unions, the cell properties, the intercellular buffers. Each is exact, or carries an explicit golden change.
+- **P5.6 — the other organs:** stems, leaves, needles, CellSet and ROI.
+
+**The audit's bugs (Q8, your answer: reproduce, then fix one at a time in P2, each with its golden change). Not done in P2.** The five are:
+- `cgroup` dropped by `process_voronoi_groups`;
+- `id_layer=i_slice` on monocot metaxylem;
+- multipart polygons reduced to their largest part;
+- the `air_link_radius` default (1× the median wall, documented as 3×);
+- `create_from_input` passing no seed.
+
+## 21. Questions on P5
+
+- **Q-P5a — views or arrays.** Make the pipeline's cells views of the MPG first (P5.1), with the algorithms unchanged, and turn the algorithms into array operations afterwards (P5.5)? Or write array versions of the algorithms directly?
+  - **Recommendation:** views first. Every algorithm then works on the MPG at once and exactly; the array versions replace them one at a time, each checked.
+  - → answer:
+- **Q-P5b — converted copies.** Converted copies of GRANAP's modules under `mpg/pipeline/`, switched to one at a time, with the originals untouched until all are converted?
+  - **Recommendation:** yes.
+  - → answer:
+- **Q-P5c — exactness.** Must every P5 step reproduce the goldens exactly? Or may P5.4 (maintained topology) and P5.5 change them, each change shown (census, the side-by-side example) and accepted by you?
+  - **Recommendation:** exact for P5.1–P5.3. Explicit, reviewed golden changes allowed in P5.4–P5.5, where a maintained topology or a vectorised union may break a snapping tie differently.
+  - → answer:
+- **Q-P5d — the Q8 bugs.** Fix them now, before P5 (each with its golden change, in GRANAP's modules and the converted copies alike)? Or in the converted copies only, as P5 reaches each module?
+  - **Recommendation:** in the converted copies, as P5 reaches each module. Fixing them in GRANAP's modules changes the original goldens too, which you may want to do in GRANAP's own history rather than in this port.
+  - → answer:
