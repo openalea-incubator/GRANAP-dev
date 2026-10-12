@@ -234,3 +234,37 @@ Already decided (metafspm `devplan_porting.md` §5, 2026-10-06):
   - → answer: yes to recommendation
 - **Q14 — your precise guidelines.** You mentioned in `devplan_porting.md` having precise guidelines for the GRANAP port. Do they change any of the above?
   - → answer: no, all was said in my previous prompt, the rest will be precised by questions if necessary.
+
+## 4. Done
+
+### P0 (2026-10-12, in metafspm: `devplan_anatomy_scales.md`, commit 99e1db7)
+
+- Anatomy mode supports SubOrgan → Layer → Cell → Compartment: protoplasts under their Cell, walls and junctions anchored to the SubOrgan. Layer and Cell are locations; walls are skipped by aggregations and get defaults from broadcasts. Bulk creation takes one complex per component (0.17 s for a 45.7 k-vertex section).
+
+### Environment (2026-10-08 to 10-12)
+
+- `conda/environment.yaml`: openalea3 channel, `nodefaults` (the `defaults` channels of `~/miniconda3/.condarc` froze the solve), opencv 4.13 headless from pip (conda's builds need icu 78, plantgl's Qt 5 stack icu 75), essential pins only, flexible priority. It solves in about 5 min.
+- GRANAP's suite passes in it on Python 3.13: 166 passed, so the goldens hold.
+
+### P1, the exact adapter (2026-10-12)
+
+- **`src/openalea/granap/mpg/`:**
+  - `build.py`:
+    - `single_plant_mpg()`, with one vertex per scale down to one SubOrgan;
+    - `write_cells`: Layers, one per connected region of one tissue type (Q4 b, found with an STRtree); Cells holding every attribute of their GRANAP Cell, polygon included; one protoplast Compartment per Cell;
+    - `write_network`: walls and junctions as Compartments anchored to the segment, each with its MECHA index and node attributes; virtual bridge cells as Cells in a Layer of their own; every edge as a Connection with its attributes and path label (membrane → Transmembrane, plasmodesmata → Symplastic, wall / air links → Apoplastic).
+  - `views.py`: the Cells, the GeoDataFrame and the networkx network rebuilt from the MPG.
+  - `organs.py`: every organ class backed by the MPG (a mixin), the factories `RootAnatomy`, `StemAnatomy`, `LeafAnatomy`, and `create_from_input`. After `generate_cells()` and after the network build, `all_cells`, the layers' cells, the GeoDataFrame, the graph, its counts and its wall map are read back from `organ.mpg`.
+- **`test/mpg_comparison/`:**
+  - 20 replay modules: each original test file's source is executed with its organ classes replaced by the MPG-backed ones, so no test is copied, and the library's own organ constructions are switched too (`root_series`, `create_from_input`).
+  - `test_cross_check.py`: the eight golden organs, cell by cell (every attribute, polygons equal) and GeoDataFrame; the network of the monocot root and the needle (bridges), node by node and edge by edge, plus counts, wall map and adjacency matrix.
+  - The `slow` marker covers six heavy replay files and seven cross-checks.
+- **Results:**
+  - 174 passed: 166 replayed and 8 cross-checks, in 33 min (`pytest test/mpg_comparison`, from `test/`).
+  - The quick subset (`-m "not slow"`) is 131 tests in about 10 min.
+  - On the monocot root, writing and reading the MPG adds about 0.8 s to a 10 s generation; the section is 30.5 k vertices.
+- **As planned (Q6), still on the originals:** the CellSet donor anatomies (an intermediate whose cells are grafted into the MPG-backed CellSet organ). The pre-cell construction objects (recipes, tissue polygons) are inherited unchanged until P2.
+- **Packaging, open:** `openalea.granap.mpg` imports metafspm, which is not a GRANAP dependency in `pyproject.toml` (and the conda recipe still pins conda's opencv). Should metafspm become an optional extra (`granap[mpg]`), or a hard dependency? **Recommendation:** an optional extra while P1–P3 are in progress, so the package and its CI stay installable without it.
+  - → answer:
+
+**Next, P2:** the module-by-module conversion of the internal state into MPG arrays, root first. The cells come first (the Cell objects read from and written to the MPG during the pipeline), then the topology (built once and stored as Connections, instead of `_build_topology` being rerun), then the writers and the exporter reading the MPG. The comparison folder guards each step.
