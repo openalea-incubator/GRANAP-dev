@@ -530,4 +530,4 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - **E2:** the aerenchyma deep copies (0.42 s) would need a copy of the calibration loop. Since P3, both costs are paid once per template, not per segment.
   - **Q-P4d:** stop P4 at E1 and carry E2 and E3 into P5, where the pipeline moves into MPG arrays anyway? Or copy the exporter and the calibration now?
     - **Recommendation:** stop at E1. The copies would be rewritten again in P5, and their cost no longer grows with the plant.
-    - → answer:
+    - → answer: stop at E1 (given in the conversation, 2026-10-12). E2 and E3 go to P5.
