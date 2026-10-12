@@ -269,6 +269,14 @@ class CellSetOrgan(Organ):
         overshoot:  How far (mm) past the region rim to grow the donor before
                     clipping it back, so the region is tiled exactly.  ``None``
                     uses :data:`_OVERSHOOT` times the region radius.
+        air_spaces: What to do with the intercellular air spaces a CellSet file
+                    leaves out of its cell list (recovered by the reader from
+                    walls only one cell references).  ``"omit"`` (default) keeps
+                    them as gaps: their walls are single-owner, which MECHA reads
+                    as no-flux surfaces, i.e. air-filled spaces.  ``"tracheid"``
+                    imports each as a ``"transfusion tracheid"`` cell (cgroup 18,
+                    apoplastic only, no plasmodesmata): a water-filled space that
+                    shares its walls with its neighbours.
         recenter:   Move the section to the origin.  ``Cell.radius`` is measured
                     from the world origin and MECHA ranks cells by distance from
                     a gravity centre, so an un-recentred section gives
@@ -295,10 +303,14 @@ class CellSetOrgan(Organ):
         donor_xylem_tag: Optional[str] = "stele",
         overshoot: Optional[float] = None,
         recenter: bool = True,
+        air_spaces: str = "omit",
         seed: Optional[int] = 0,
         **kwargs,
     ):
+        if air_spaces not in ("omit", "tracheid"):
+            raise ValueError(f"air_spaces must be 'omit' or 'tracheid', got {air_spaces!r}")
         super().__init__(seed=seed, **kwargs)
+        self.air_spaces = air_spaces
         self.xml_path = xml_path
         self.scale = float(scale)
         self.regenerate = tuple(regenerate)
@@ -319,6 +331,8 @@ class CellSetOrgan(Organ):
         # id(Cell) -> the CellSetCell it was imported from, so the ring data
         # (notably is_annular) stays reachable without abusing a Cell field.
         self._source_of: Dict[int, CellSetCell] = {}
+        # Air-space polygons in the organ's (recentred) frame, whatever the mode.
+        self.air_space_polygons: List[Polygon] = []
 
     # ------------------------------------------------------------------
     # Import
@@ -356,9 +370,34 @@ class CellSetOrgan(Organ):
             cells[-1].protect_topology = False
             self._source_of[id(cells[-1])] = src
 
+        # Air spaces travel with the real cells through recentring so they stay
+        # in the same frame, then are either kept (tracheid) or set aside (omit).
+        n_real = len(cells)
+        for poly in self.section.air_space_polygons:
+            k = len(cells)
+            cells.append(
+                Cell(
+                    x=poly.centroid.x,
+                    y=poly.centroid.y,
+                    diameter=2.0 * math.sqrt(poly.area / math.pi),
+                    type="transfusion tracheid",
+                    id_cell=k,
+                    id_layer=0,
+                    id_group=k,
+                    cgroup=18,
+                    polygon=poly,
+                )
+            )
+            cells[-1].protect_shape = True
+            cells[-1].protect_topology = False
+
         self.all_cells.cells = cells
         if self.recenter and cells:
             self.all_cells.recenter_cells()
+        air_cells = self.all_cells.cells[n_real:]
+        self.air_space_polygons = [c.polygon for c in air_cells]
+        if self.air_spaces == "omit":
+            self.all_cells.cells = self.all_cells.cells[:n_real]
 
     # ------------------------------------------------------------------
     # Regeneration
@@ -723,8 +762,33 @@ class CellSetOrgan(Organ):
                 key = (a, b) if a <= b else (b, a)
                 pd_pairs[key] = pd_pairs.get(key, 0) + 1
 
+        # One-cell walls lying on a real air space are not defects.  A wall node's
+        # position is its midpoint, which on a curved wall sits a little off the
+        # traced ring, so the tolerance is a fraction of the wall's own length
+        # (scale-free).  Measured on Es_Ctr1: air-space walls are within 0.05 of
+        # their length of a ring, the nearest non-air one-cell wall (epidermis,
+        # outer surface) is beyond 3 -- a gap wide enough that 0.15 is not a fit.
+        air_walls = 0
+        air_by_tag: Dict[str, int] = {}
+        if self.air_spaces == "omit" and self.air_space_polygons:
+            from shapely.geometry import Point
+            air_edge = unary_union([p.exterior for p in self.air_space_polygons])
+            for wall_id, cell_nodes in self._wall_to_cells.items():
+                if len(cell_nodes) != 1:
+                    continue
+                pos = self.graph.nodes[wall_id].get("position")
+                length = self.graph.nodes[wall_id].get("length", 0.0)
+                if pos is not None and air_edge.distance(Point(pos)) < 0.15 * length:
+                    air_walls += 1
+                    tag = tags.get(cell_nodes[0] - self.n_walls - self.n_junctions, "?")
+                    air_by_tag[tag] = air_by_tag.get(tag, 0) + 1
+
         surface = {"epidermis", "exodermis", "cortex"}
-        interior = {t: n for t, n in border.items() if t not in surface}
+        interior = {
+            t: n - air_by_tag.get(t, 0)
+            for t, n in border.items()
+            if t not in surface and n - air_by_tag.get(t, 0) > 0
+        }
         if interior or multi:
             # Report whichever defect actually occurred.  They are different
             # faults with different causes -- single-reference walls mean the
@@ -763,6 +827,9 @@ class CellSetOrgan(Organ):
             "n_cells": self.n_cells,
             "border_walls": border,
             "interior_border_walls": interior,
+            "air_space_walls": air_walls,
+            "n_air_spaces": len(self.air_space_polygons),
+            "air_space_area": sum(p.area for p in self.air_space_polygons),
             "multi_cell_walls": multi,
             "plasmodesmata_pairs": pd_pairs,
         }

@@ -169,8 +169,14 @@ class CellSetCell:
 
     @property
     def is_annular(self) -> bool:
-        """True when the cell encloses holes -- the case MECHA cannot handle."""
-        return len(self.rings) > 1
+        """True when the cell encloses holes -- the case MECHA cannot handle.
+
+        Only real holes count: a stray two-vertex stub that closes on itself (a
+        wall drawn out and back, as in the Cr_Ctr2 endodermis) has no area and
+        no inside, and treating it as a hole would graft a whole donor stele
+        into an endodermis cell.
+        """
+        return sum(1 for r in self.rings if len(r) >= 4 and _ring_area(r) > 0.0) > 1
 
     @property
     def outer_ring_polygon(self) -> Optional[Polygon]:
@@ -189,6 +195,21 @@ class CellSetSection:
     group_names: Dict[int, str] = field(default_factory=dict)
     scale: float = 1.0
     path: Optional[str] = None
+    #: Closed rings of the intercellular air spaces.  CellSet leaves them out of
+    #: the cell list, so they are recovered from the walls only one cell
+    #: references (excluding ``edgewall`` walls, the outer surface).
+    air_space_rings: List[Ring] = field(default_factory=list)
+    #: Ids of the walls those rings were assembled from.
+    air_space_wall_ids: List[int] = field(default_factory=list)
+
+    @property
+    def air_space_polygons(self) -> List[Polygon]:
+        out = []
+        for ring in self.air_space_rings:
+            poly = _polygon_from_rings([ring])
+            if poly is not None and not poly.is_empty:
+                out.append(poly)
+        return out
 
     @property
     def annular_cells(self) -> List[CellSetCell]:
@@ -240,9 +261,12 @@ def read_cellset(path: str, *, scale: float = 0.001) -> CellSetSection:
     root = ET.parse(path).getroot()
 
     walls: Dict[int, Ring] = {}
+    edge_walls: set = set()
     walls_node = root.find("walls")
     if walls_node is not None:
         for wall in walls_node.findall("wall"):
+            if (wall.get("edgewall") or "").lower() == "true":
+                edge_walls.add(int(wall.get("id")))
             points_node = wall.find("points")
             if points_node is None:
                 continue
@@ -283,6 +307,22 @@ def read_cellset(path: str, *, scale: float = 0.001) -> CellSetSection:
                 )
             )
 
+    # Air spaces: walls referenced by exactly one cell that are not on the outer
+    # surface.  Only closed rings are kept; an open chain means the air space
+    # touches something unresolved, and is reported rather than guessed at.
+    refs: Dict[int, int] = {}
+    for cell in cells:
+        for wid in set(cell.wall_ids):
+            refs[wid] = refs.get(wid, 0) + 1
+    air_ids = sorted(
+        wid for wid, n in refs.items() if n == 1 and wid not in edge_walls and wid in walls
+    )
+    air_rings = [
+        r for r in assemble_rings([walls[w] for w in air_ids])
+        if len(r) >= 4 and _key(r[0]) == _key(r[-1])
+    ]
+
     return CellSetSection(
-        cells=cells, walls=walls, group_names=group_names, scale=scale, path=path
+        cells=cells, walls=walls, group_names=group_names, scale=scale, path=path,
+        air_space_rings=air_rings, air_space_wall_ids=air_ids,
     )
