@@ -370,16 +370,47 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - root xylem, and monocot phloem: the angular sector of the `n_vascular_bundles` poles.
 
   **Recommendation:** recover them now. Seeding them in the loops can come with P5, when the pipeline itself moves into the MPG.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P3b — matching without `track_id`.** Nearest vessel of the same family, in both directions, in (angle, radius / section radius)? Or also restricted to the same pole?
   - **Recommendation:** nearest in both directions, without the pole restriction. Successive sections of different classes may have different pole counts, which makes poles hard to match.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P3c — the default `class → parameters` for roots.** A thinner root could get either:
   - (a) every length scaled by the diameter ratio: the same cells, smaller;
   - (b) the cell sizes kept, with fewer cortex layers (`cortex.n_layers`) and a thinner stele (`stele.thickness`), both scaled with the diameter.
 
   **Recommendation:** (b). Thinner roots have fewer cortical layers and a smaller stele with cells of similar size. The distances from the tip and the junction change nothing by default; a user function can use them (e.g. aerenchyma, barrier maturation).
-  - → answer:
+  - → answer: yes to (b), but don't we have the availability to also provide stele size and cell layers dimensions an number currently?
 - **Q-P3d — geometry in the copies.** Should a segment's Cells point to their template's polygons (`template`, `template_row`), as in the design above? Or should they hold their own copy, which would be needed if a segment's cells later deform on their own (growth in girth)?
   - **Recommendation:** point to the template now. A segment that deforms can get its own polygons later.
-  - → answer:
+  - → answer: yes to recommendation
+
+## 11. P3 progress (2026-10-12; your answers: Q-P3a, b, d recommendations, Q-P3c (b))
+
+- **Q-P3c, your point:** yes, GRANAP already takes the stele size (`stele.thickness`) and each layer's cell dimensions and number (`cell_diameter`, `cell_width`, `n_layers`). The default rule sets exactly those from the class's diameter, and `overrides` lets a class give its own values.
+- **Done, the initiation of a static plant:**
+  - `mpg/vessels.py`: `vessel_id`, `pole_id` (bundle envelope, phloem-pole polygon, or angular sector), `family`, angle and relative radius per conducting cell, recovered after generation (Q-P3a).
+  - `mpg/library.py`:
+    - `ClassBins` (mm);
+    - `default_root_parameters`: the cell sizes kept; the stele thickness and the xylem lengths scaled; the cortex layers filling the radius;
+    - `Template`: a generated section as tables;
+    - `instantiate`: a segment's own copy in bulk, its Cells pointing to the template's polygons and rings (Q-P3d);
+    - `AnatomyLibrary`: one template per class, generated at first use.
+  - `mpg/component.py`:
+    - `GranapAnatomy(StructuralComponent).initiate_plant` gives each root segment its class's anatomy;
+    - `junction_rules` pairs xylem with xylem (apoplastic) and phloem with phloem (symplastic): by `track_id`, else the nearest in both directions (Q-P3b).
+  - **Tests, `test/mpg_capabilities/` (5, 10 s):** a main root (4 segments, 0.55 mm) and a lateral (2 segments, 0.3 mm), so 2 classes.
+    - one template per class, and disjoint copies per segment;
+    - vessel ids unique per section;
+    - every conducting cell of each pair of successive sections joined (5 links, the lateral included);
+    - the graph view holds every Compartment and Connection;
+    - a steady flow solved by a metafspm graph system over the whole root system, equal to a direct sparse solve.
+  - **Benchmark,** `test/mpg_capabilities/bench_seedling.py`: 48 segments in 3 classes, 886 k vertices (241 k nodes, 594 k edges, 2,231 junctions).
+    - The 3 templates take 6.6 s; the architecture and its 48 copies, 2.6 s.
+    - `convert_properties_to_arraydict` takes **14.6 s**, the largest cost, on the metafspm side.
+    - The DataStructure with its junctions, 0.7 s; the graph view, 0.09 s.
+- **Found, to decide:**
+  - **F-P3a — vessels in thinner roots.** The default rule scales the vessel diameters with the stele, so a thinner root gets *more*, smaller vessels: 61 conducting cells at 0.6 mm against 25 at 1.1 mm. Keep the vessel sizes fixed instead (the stele and xylem radii still scale), so that thinner roots get fewer vessels? **Recommendation:** yes. The number of metaxylem poles stays the preset's unless a class overrides it.
+    - → answer:
+  - **F-P3b — `convert_properties_to_arraydict` at seedling scale (14.6 s).** Speed it up in metafspm, e.g. a bulk conversion from dicts to arrays per property, or create the properties as arrays during the bulk instantiation? **Recommendation:** convert in bulk (one `np.fromiter` per property) in metafspm, the change being local to the MPG.
+    - → answer:
+- **Next (Q12):** emergence (new segments getting their class's anatomy) and replacement (a segment changing class), with metafspm's partial rewiring.
