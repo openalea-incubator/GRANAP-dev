@@ -15,6 +15,7 @@ successive sections (xylem with xylem, phloem with phloem): by track_id where bo
 import numpy as np
 
 from openalea.metafspm.coupling.component import StructuralComponent
+from openalea.metafspm.solve.decorator import postsegmentation
 
 from openalea.granap.mpg.library import AnatomyLibrary, ClassBins
 
@@ -35,6 +36,70 @@ def distance_from_junction(g, segment, length="length") -> float:
         total += float(lengths.get(parent, 0.))
         parent = g.parent(parent)
     return total
+
+
+def remove_anatomy(g, segment) -> None:
+    """Remove *segment*'s anatomy (its Layers with their Cells and protoplasts, its anchored walls, junctions and
+    anatomy Connections), keeping the segment."""
+    s = g.scales
+    anchored = [c for c in list(g._children.get(segment, [])) if g.scale(c) in (s.Compartment, s.Connection)]
+    g.remove_connections([c for c in anchored if g.scale(c) == s.Connection])
+    g.remove_connections([c for c in anchored if g.scale(c) == s.Compartment])
+    g.remove_connections([c for c in list(g._components.get(segment, [])) if g.scale(c) == s.Layer])
+
+
+def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
+    """
+    The source of each new Compartment (Q-G3): the Compartment of the same template node in the nearest upstream
+    section that has it; else the known protoplast of the same tissue nearest in (angle, relative radius) in the
+    nearest upstream section having that tissue; else none (-1, the default). Sections in *fresh* (replaced
+    anatomies, Q-G2) inherit nothing.
+    """
+    g = ds.mtg
+    from_scale = ds._from_scale
+    new_vids = np.asarray(new_vids, dtype=np.int64)
+    sources = np.full(new_vids.size, -1, dtype=np.int64)
+    sections = ds._sections_of(new_vids)
+    owners = g.compartments_by_owner(from_scale)
+    template, node = g.property("template"), g.property("template_node")
+    tissue, angle, radius = g.property("tissue"), g.property("angle"), g.property("relative_radius")
+    upstream_cache, node_maps = {}, {}
+
+    def upstream(section):
+        if section not in upstream_cache:
+            chain, vertex = [], g.linked_parent(int(section), from_scale)
+            while vertex is not None:
+                chain.append(int(vertex))
+                vertex = g.linked_parent(vertex, from_scale)
+            upstream_cache[section] = chain
+        return upstream_cache[section]
+
+    def node_map(section):
+        if section not in node_maps:
+            comps = np.asarray(owners.get(section, []), dtype=np.int64)
+            known = comps[np.asarray(is_known(comps), dtype=bool)] if comps.size else comps
+            node_maps[section] = {(template.get(int(v)), node.get(int(v))): int(v) for v in known}
+        return node_maps[section]
+
+    for i, (vid, section) in enumerate(zip(new_vids.tolist(), sections.tolist())):
+        if section < 0 or section in fresh:
+            continue
+        key = (template.get(vid), node.get(vid))
+        for ancestor in upstream(section):
+            hit = node_map(ancestor).get(key)
+            if hit is not None:
+                sources[i] = hit
+                break
+        if sources[i] >= 0 or tissue.get(vid) is None:
+            continue
+        for ancestor in upstream(section):                       # same tissue, nearest relative position
+            candidates = [v for v in node_map(ancestor).values() if tissue.get(v) == tissue.get(vid) and v in angle]
+            if candidates and vid in angle:
+                here = np.array([radius[vid] * np.cos(angle[vid]), radius[vid] * np.sin(angle[vid])])
+                there = np.array([[radius[v] * np.cos(angle[v]), radius[v] * np.sin(angle[v])] for v in candidates])
+                sources[i] = candidates[int(np.argmin(np.linalg.norm(there - here, axis=1)))]
+                break
+    return sources
 
 
 class GranapAnatomy(StructuralComponent):
@@ -61,11 +126,47 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant_vid: int, parameters: dict) -> None:
         """Each root segment of the plant gets its class's anatomy, instantiated from the library."""
+        cls.update_anatomies(g, _segments(g, plant_vid))
+
+    @classmethod
+    def update_anatomies(cls, g, segments) -> dict:
+        """
+        Give each segment the anatomy of its current class (Q12): a segment without one (just emerged) gets its
+        class's copy; a segment whose class changed has its anatomy replaced. Returns {"emerged", "replaced"}.
+        """
         anatomy_class = g.properties().setdefault("anatomy_class", {})
-        for segment in _segments(g, plant_vid):
+        done = {"emerged": [], "replaced": []}
+        for segment in segments:
             key = cls.segment_class(g, segment)
+            current = anatomy_class.get(segment)
+            if current == key:
+                continue
+            if current is not None:
+                remove_anatomy(g, segment)
+                done["replaced"].append(segment)
+            else:
+                done["emerged"].append(segment)
             cls.library.template(key).instantiate(g, segment)
             anatomy_class[segment] = key
+        return done
+
+    def __post_init__(self):
+        super().__post_init__()
+        self._replaced = set()
+        self.data_structure.inheritance = lambda ds, new, known: granap_inheritance(ds, new, known, self._replaced)
+
+    @postsegmentation
+    def _anatomies(self):
+        """MPG-style: every root segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
+        g = self.mtg
+        segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant) for s in _segments(g, plant)]
+        alive = set(segments)
+        anatomy_class = g.properties().get("anatomy_class", {})
+        for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
+            del anatomy_class[gone]
+        done = self.update_anatomies(g, segments)
+        self._replaced = set(done["replaced"])
+        self.last_update = done
 
 
 def _vessels(g, compartments, family):

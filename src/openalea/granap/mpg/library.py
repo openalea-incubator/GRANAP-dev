@@ -135,6 +135,9 @@ class Template:
             s.anchors[s.Connection], n_edges, topo_parents=[segment] * n_edges,
             **_props(s.Connection, n_id_a=nodes[self.links[:, 0]].tolist(), n_id_b=nodes[self.links[:, 1]].tolist()))
         properties = g.properties()
+        template_node = properties.setdefault("template_node", {})          # each Compartment's place in the template
+        template_node.update(dict(zip(nodes.tolist(), range(nodes.size))))
+        properties.setdefault("template", {}).update(dict.fromkeys(nodes.tolist(), self.index))
         for vids, table in ((layers, self.layers), (cells, self.cells), (protoplasts, self.protoplasts),
                             (apoplast, self.apoplast), (connections, self.connections)):
             vids = np.asarray(vids, dtype=np.int64)

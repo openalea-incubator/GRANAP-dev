@@ -444,9 +444,27 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 - **Q-G1 — when classes are re-evaluated.** At every call of the step, for every segment (replacing those whose class changed)? Or only on an explicit differentiation event raised by another component?
   - **Recommendation:** every call. Binning is cheap, and the bins decide how often a class changes. With distances binned finely, every step would replace many segments; the class parametrization (bin widths) is the knob.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-G2 — a replaced anatomy's state.** The new Compartments start from the defaults, with coarse inputs broadcast, and nothing is carried from the old cells (as I understood your earlier answer)?
-  - → answer:
+  - → answer: yes
 - **Q-G3 — inheritance at emergence.** The same template row upstream, then the same tissue at the nearest relative position, then the default (a GRANAP-specific inheritance), instead of metafspm's first same-label Compartment?
   - **Recommendation:** yes. It is a callable inheritance rule passed by the component, so metafspm's default stays for other anatomies.
-  - → answer:
+  - → answer: yes
+
+## 14. Q12 done (2026-10-12; your answers: Q-G1, Q-G2, Q-G3 yes)
+
+- **`GranapAnatomy`'s structural step** (MPG-style `@postsegmentation`) bins every root segment's class at each call (Q-G1).
+  - A segment without anatomy gets its class's copy; a segment whose class changed has its anatomy replaced (`remove_anatomy`, then a new copy).
+  - The records of pruned segments are dropped. `last_update` gives {"emerged", "replaced"}.
+  - `update_anatomies` is the same logic for `initiate_plant`.
+- **Inheritance (Q-G3):** `granap_inheritance`, set as the DataStructure's `inheritance` by the component. A new Compartment inherits from the same template node (`template`, `template_node` on every copied Compartment) in the nearest upstream section; else from the same tissue at the nearest relative position; else the default. Replaced sections inherit nothing and start from the defaults (Q-G2).
+- **metafspm changes it needed:**
+  - inheritance in bulk with a model's own rule (`MPGDataStructure.inheritance`, `df6a956`): once per update for every variable, where it used to search per Compartment and per variable;
+  - pruning removes a segment's whole anatomy (`61a33bf`): before, the MTG refused to remove a vertex with Layers.
+- **Tests (`test/mpg_capabilities/test_growth.py`, 3):**
+  - a new tip segment gets its class's copy; only its link is rewired; its cells carry their upstream namesakes' values;
+  - a lateral segment thickening into the main class is replaced: its old vertices are gone, the new ones are at their defaults, and its junctions are rebuilt;
+  - a pruned tip takes its anatomy with it.
+
+  Capability folder: 9 passed, about 2 min.
+- **What drives the topology update:** the anatomy step triggers the DataStructure's update only when it changes the MPG itself. A pruning done outside a step (as in the test) needs `ds.update_topology()`, which an architecture's MPG-style pruning step gets from the framework.
