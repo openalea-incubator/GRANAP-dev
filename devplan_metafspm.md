@@ -502,10 +502,18 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 - **Q-P4a — which kinds.** Exact levers first, on by default for the MPG-backed organs, then the approximate ones as an opt-in fast profile?
   - **Recommendation:** yes. The exact levers cost no validation, and the fast profile gets its own goldens and a visual check (the side-by-side example, exact against fast).
-  - → answer:
+  - → answer: Do only exact optimisations yes.
 - **Q-P4b — where the exact levers live.** In `mpg/` (used during the MPG-backed organs' generation, as `stored_topology` is), with GRANAP's modules untouched? Or in GRANAP's own modules, so the original classes benefit too?
   - **Recommendation:** in `mpg/` now, consistent with P2. Once validated, they can move upstream in one step, since they are exact.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-P4c — the fast profile's contents.** All of A1–A4 under one opt-in profile (`fast=True`), or separate flags?
   - **Recommendation:** separate flags, grouped by a `fast` profile that turns them all on, so that each one's effect on the anatomy can be measured and pictured on its own.
-  - → answer:
+  - → answer: yes to recommendation, how will it be turned on from the component's usage?
+
+## 17. Stems and leaves (2026-10-12, your request: a seedling example with stems and leaves)
+
+- **`GranapAnatomy.shoot`** maps a SubOrgan label to an `OrganAnatomy` (a library and the size property of its classes). Stems (`StemElement`) are classed by radius; leaves (`LeafElement`, size `None`) form one class. Root segments keep `library`.
+  - Libraries take any preset (`preset_parameters("for_monocot_stem")`, `organ_class=mpg.StemAnatomy`), and template ids are unique across libraries (`find_template`).
+  - Junctions join stems to stems, stems to leaves and stems to roots, by the same vessel rule.
+- **`example/mpg/seedling.py`:** a stem of three elements, two leaves of two elements, and roots (a main root and a lateral), drawn at their real sizes from the MPG with their vessel junctions. 12 sections from 4 templates, 212 k Compartments, 526 k Connections, 1,555 junctions, built in 24 s.
+- **Test `test/mpg_capabilities/test_shoot.py`:** each kind from its own library, and the stem–stem, stem–leaf and stem–root junctions. Capability folder: 10.
