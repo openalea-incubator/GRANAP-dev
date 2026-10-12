@@ -12,6 +12,8 @@ segment (its own vertices and state, the template's geometry). junction_rules pa
 successive sections (xylem with xylem, phloem with phloem): by track_id where both have one, else the nearest in
 (angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions (Q-P3b).
 """
+from dataclasses import dataclass
+
 import numpy as np
 
 from openalea.metafspm.coupling.component import StructuralComponent
@@ -20,11 +22,18 @@ from openalea.metafspm.solve.decorator import postsegmentation
 from openalea.granap.mpg.library import AnatomyLibrary, ClassBins
 
 
-def _segments(g, plant):
-    """The root segments of *plant* (SubOrgan vertices labelled RootSegment)."""
-    label = g.labels.SubOrgan.RootSegment
+@dataclass
+class OrganAnatomy:
+    """The anatomy of one kind of segment: its library and the property giving its class's size (None: one class)."""
+    library: AnatomyLibrary
+    size: str = "radius"
+
+
+def _segments(g, plant, labels_handled=("RootSegment",)):
+    """The segments of *plant* (SubOrgan vertices) whose label is handled (default: root segments)."""
+    codes = {getattr(g.labels.SubOrgan, name) for name in labels_handled}
     labels = g.property("label")
-    return [int(v) for v in g.components_at_scale(plant, scale=g.scales.SubOrgan) if labels.get(v) == label]
+    return [int(v) for v in g.components_at_scale(plant, scale=g.scales.SubOrgan) if labels.get(v) in codes]
 
 
 def distance_from_junction(g, segment, length="length") -> float:
@@ -111,14 +120,29 @@ class GranapAnatomy(StructuralComponent):
       radius, length, distance_from_tip   the names of the segments' properties
     """
     library = AnatomyLibrary()
+    shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
     bins = ClassBins()
     mm_per_unit = 1000.
     radius, length, distance_from_tip = "radius", "length", "distance_from_tip"
 
     @classmethod
+    def organs(cls) -> dict:
+        """{SubOrgan label name: OrganAnatomy}: the root segments with cls.library, and cls.shoot."""
+        return {"RootSegment": OrganAnatomy(cls.library, cls.radius), **cls.shoot}
+
+    @classmethod
+    def organ_of(cls, g, segment) -> OrganAnatomy:
+        code = g.property("label").get(segment)
+        return next(organ for name, organ in cls.organs().items() if getattr(g.labels.SubOrgan, name) == code)
+
+    @classmethod
     def segment_class(cls, g, segment) -> tuple:
-        to_mm = cls.mm_per_unit
-        diameter = 2. * float(g.property(cls.radius)[segment]) * to_mm
+        to_mm, organ = cls.mm_per_unit, cls.organ_of(g, segment)
+        if organ.size is None:
+            return cls.bins.key(0.)
+        diameter = 2. * float(g.property(organ.size)[segment]) * to_mm
+        if g.property("label").get(segment) != g.labels.SubOrgan.RootSegment:
+            return cls.bins.key(diameter)
         tip = float(g.property(cls.distance_from_tip).get(segment, 0.)) * to_mm
         junction = distance_from_junction(g, segment, cls.length) * to_mm
         return cls.bins.key(diameter, tip, junction)
@@ -126,7 +150,7 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant_vid: int, parameters: dict) -> None:
         """Each root segment of the plant gets its class's anatomy, instantiated from the library."""
-        cls.update_anatomies(g, _segments(g, plant_vid))
+        cls.update_anatomies(g, _segments(g, plant_vid, tuple(cls.organs())))
 
     @classmethod
     def update_anatomies(cls, g, segments) -> dict:
@@ -146,7 +170,7 @@ class GranapAnatomy(StructuralComponent):
                 done["replaced"].append(segment)
             else:
                 done["emerged"].append(segment)
-            cls.library.template(key).instantiate(g, segment)
+            cls.organ_of(g, segment).library.template(key).instantiate(g, segment)
             anatomy_class[segment] = key
         return done
 
@@ -159,7 +183,8 @@ class GranapAnatomy(StructuralComponent):
     def _anatomies(self):
         """MPG-style: every root segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
         g = self.mtg
-        segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant) for s in _segments(g, plant)]
+        segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant)
+                    for s in _segments(g, plant, tuple(self.organs()))]
         alive = set(segments)
         anatomy_class = g.properties().get("anatomy_class", {})
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only

@@ -61,7 +61,7 @@ def test_each_class_has_one_template_and_each_segment_its_own_copy(plant):
     assert len(cells) == sum(len(Anatomy.library.template(g.property("anatomy_class")[s]).cell_layer)
                              for s in segments)
     assert "cell__polygon" not in g.properties() or not set(cells) & set(g.property("cell__polygon"))
-    assert {template_of[int(c)] for c in cells} == {0, 1}                          # geometry by template
+    assert {template_of[int(c)] for c in cells} == {t.index for t in Anatomy.library.templates.values()}
 
 
 def test_vessels_are_numbered_within_each_section(plant):

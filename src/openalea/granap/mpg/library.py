@@ -13,6 +13,7 @@ and properties (its state), but not the geometry: its Cells point to the templat
 (template, template_row; Q-P3d), stored once per class.
 """
 import copy
+import itertools
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -22,6 +23,7 @@ from openalea.granap.mpg.build import JUNCTION, PROTOPLAST, WALL, _props
 from openalea.granap.mpg.vessels import vessel_ids
 
 GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
+_TEMPLATE_IDS = itertools.count()                 # template ids, unique across libraries (roots, stems, leaves)
 LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
 SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
@@ -37,6 +39,16 @@ class ClassBins:
         def binned(value, width):
             return 0. if width <= 0 else round(round(float(value) / width) * width, 9)
         return binned(diameter, self.diameter), binned(tip, self.tip), binned(junction, self.junction)
+
+
+def preset_parameters(preset: str):
+    """A parameters(key, overrides=...) function on an OrganInputData preset (e.g. "for_monocot_stem"): the preset
+    unchanged, then the class's overrides (as default_root_parameters for roots)."""
+    def parameters(key, base: OrganInputData = None, overrides: dict = None) -> OrganInputData:
+        return default_root_parameters(key, base=getattr(OrganInputData, preset)() if base is None else base,
+                                       overrides=overrides)
+    parameters.__name__ = f"{preset}_parameters"
+    return parameters
 
 
 def default_root_parameters(key, base: OrganInputData = None, overrides: dict = None) -> OrganInputData:
@@ -167,8 +179,17 @@ class AnatomyLibrary:
     def template(self, key) -> Template:
         if key not in self.templates:
             organ = self.organ_class(self.parameters(key, overrides=self.overrides(key)), seed=self.seed)
-            self.templates[key] = Template.from_organ(organ, key, len(self.templates))
+            self.templates[key] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
         return self.templates[key]
 
     def by_index(self, index) -> Template:
         return next(t for t in self.templates.values() if t.index == index)
+
+
+def find_template(libraries, index) -> Template:
+    """The template of id *index* among several libraries."""
+    for library in libraries:
+        for template in library.templates.values():
+            if template.index == index:
+                return template
+    raise KeyError(f"no template {index}")
