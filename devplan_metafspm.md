@@ -584,4 +584,12 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - (c) P5.3 first, in a converted copy on plain cells: shallow copies instead of deep copies, exact since cell attributes are numbers or immutable shapely polygons. Then P5.1, where only the stages creating cells (air spaces, fusions) write into the MPG.
 
   **Recommendation:** (c).
-  - → answer:
+  - → answer: yes, (c)
+
+## 22. P5.3 done (2026-10-12; your answers: Q-P5a-d recommendations, Q-P5e c)
+
+- **`mpg/pipeline/aerenchyma.py`:** GRANAP's `Organ._add_aerenchyma_to_proportion`, the snapshot and each attempt's restore made of shallow copies instead of deep copies. Exact: a Cell's attributes are numbers, strings, None or immutable shapely geometries, and the attempts set attributes rather than mutating them.
+  - Used by the MPG-backed organs whose calibration is `Organ`'s; organs with their own (leaves) keep theirs.
+  - `MPGBacked.converted_pipeline = True` (False: GRANAP's modules), like `exact_speedups`.
+- **Times:** dicot root 5.81 → 5.60 s (−4 %); monocot root 2.77 → 2.53 s (−9 %). The dicot cross-check and the stage tests pass.
+- **Next, P5.1:** cells as views of the MPG. The stages that create cells (air spaces, fusions, the calibration's attempts on copies) write them into the MPG.

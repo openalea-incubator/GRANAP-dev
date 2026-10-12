@@ -32,6 +32,7 @@ from openalea.granap.stem_dicot_continuous_class import ContinuousDicotStemAnato
 from openalea.granap.stem_monocot_class import MonocotStemAnatomy as _MonocotStem
 
 from openalea.granap.mpg.build import single_plant_mpg, write_cells, write_network
+from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
@@ -45,6 +46,7 @@ class MPGBacked:
     _mpg_written = None
     mpg_stage_hooks = ()             # callables (organ, stage) after each stage write (tests, diagnostics)
     exact_speedups = True            # P4: GRANAP's pipeline with exact speed-ups (identical outputs); False: as is
+    converted_pipeline = True        # P5: the converted copies of GRANAP's modules (mpg/pipeline/); False: GRANAP's
 
     def generate_cells(self):
         if getattr(self, "_cells_gdf", None) is not None:
@@ -75,7 +77,12 @@ class MPGBacked:
 
     def _add_aerenchyma_to_proportion(self, *args, **kwargs):
         self._mpg_stage("intercellular")
-        result = super()._add_aerenchyma_to_proportion(*args, **kwargs)
+        inherited = next(c.__dict__["_add_aerenchyma_to_proportion"] for c in type(self).__mro__[1:]
+                         if "_add_aerenchyma_to_proportion" in c.__dict__ and c is not MPGBacked)
+        if self.converted_pipeline and inherited is _Organ.__dict__["_add_aerenchyma_to_proportion"]:
+            result = add_aerenchyma_to_proportion(self, *args, **kwargs)        # P5.3: GRANAP's, on shallow copies
+        else:
+            result = super()._add_aerenchyma_to_proportion(*args, **kwargs)     # an organ's own (e.g. leaves)
         self._mpg_stage("aerenchyma")
         return result
 
