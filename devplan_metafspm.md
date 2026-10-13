@@ -1225,10 +1225,48 @@ Not scheduled. Each is a candidate step, to be designed when chosen. The second 
 
 - **Q-O1 — drop O1?**
   - **Recommendation:** yes. Its exact gain is negligible; the per-cell Python it would have amortized is O3's.
-  - → answer:
+  - → answer (2026-10-14): yes, drop O1.
 - **Q-O2/O4 — these two are changes in metafspm's core** (the solver, the MPG). Do them in metafspm now, in that order, each with metafspm's suite and the GRANAP checks?
   - **Recommendation:** yes. O2 is the largest measured gain (the solve), and O4 is step 5 of your scene plan (PA2: yes).
-  - → answer:
+  - → answer (2026-10-14): drop O2 — the solve is the scope of the MECHA port that follows (package/MECHA-dev, branch to_metafspm), coupled to GRANAP the metafspm way. Yes to O4.
 - **Q-O3 — numba as a GRANAP dependency** (it is in the env: 0.68)?
   - **Recommendation:** yes, for the snap first, with the comparison folder as the check.
+  - → answer (2026-10-14): yes.
+
+## 54. GRANAP's anatomy component with declared i/o — design, anticipating the MECHA coupling (2026-10-14, your request)
+
+**Your concern:** `GranapAnatomy` has no declared fields (inputs, parameters, state variables) as a metafspm component should. So a coupled model (MECHA, next, in `package/MECHA-dev`, branch `to_metafspm`) cannot read GRANAP's outputs, pass it generation instructions, or be coupled to it explicitly. Today the configuration is class attributes (`library`, `shoot`, `bins`, `mm_per_unit`, the names `radius`/`length`/`distance_from_tip`), and the outputs are MPG properties nobody declares. Nothing is reimplemented for MECHA now; this only shapes GRANAP's side.
+
+**What metafspm offers** (checked): a `StructuralComponent` declares fields like any component. Around an MPG-style step (`@postsegmentation _anatomies`), the framework:
+1. writes the declared variables to the MPG;
+2. updates the DataStructure's topology if the MPG changed;
+3. re-reads the declared state variables from the MPG.
+
+Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameters)`, `parameter_values`).
+
+**Proposed declarations:**
+- **Inputs (the architecture's outputs that GRANAP reads),** at the SubOrgan scale: `radius`, `length`, `distance_from_tip`, `input_variable(by=<the architecture model>)`. The names become fixed declarations instead of class attributes.
+- **Parameters (the instructions for generation),** per plant through the scenario:
+  - the class bins (diameter, distance from the tip, from the junction);
+  - `mm_per_unit`;
+  - the anatomy's parametrization, as overrides of GRANAP's input sections (`{section: {field: value}}`, e.g. the cortex's number of layers), per organ kind and per class. The library is then keyed by (plant's parameters, class), so two genotypes in one population get their own templates.
+- **State variables (the outputs MECHA couples to),** all `state_variable_type="descriptor"`, written by the component and re-read by the framework:
+  - **SubOrgan:** the class (three numeric descriptors: diameter, tip and junction bins) and the template index;
+  - **Cell:** tissue (an object variable at its own scale), vessel id, family, area;
+  - **Compartment:** C1's columns (`section_x`, `section_y`, `wall_length`, `wall_thickness`, `cell_area`, `cgroup`, `protect_topology`, `bridge`), and the kind (protoplast, wall, junction);
+  - **Connection:** C1's columns (`network_path`, `edge_length`, `edge_dx`, `edge_dy`, `edge_dist`, `edge_wall_thickness`, `lateral_distance`, `distnode_wall_cell`).
+- **How MECHA would couple** (later, nothing done now): MECHA's component declares `input_variable(by="GranapAnatomy", scale=Compartment/Connection)` for what it needs (tissue, cgroup, wall lengths and thicknesses, areas, edge types and lengths), computes its conductances on them, and solves with `@graph_system`. Its own parameters (wall and membrane conductivities per tissue) are its own.
+
+**This needs Q-C1a decided:** declared edge variables need a value on every edge, the vessel junctions included. The recommendation of §42 stands: offsets between the vessels, length between the sections' centres, a path code of its own, NaN otherwise.
+
+## 55. Questions (2026-10-14)
+
+- **Q-D1 — the declarations above** (inputs, parameters per plant through the scenario, descriptor state variables at the SubOrgan, Cell, Compartment and Connection scales)?
+  - **Recommendation:** yes, implemented after O4 and O3, and checked by a test component declaring `input_variable(by="GranapAnatomy")` for the network, as MECHA will.
+  - → answer:
+- **Q-C1a — the junctions' values** (§42), needed for the Connection-scale declarations.
+  - **Recommendation:** as in §42.
+  - → answer:
+- **Q-D2 — the anatomy's parametrization per plant:** overrides of GRANAP's input sections (`{section: {field: value}}`, per organ kind and class) as one object-valued parameter? Or flattened into numeric parameters (`cortex__n_layers`, …), one declaration per field?
+  - **Recommendation:** the overrides object. GRANAP has hundreds of fields across organ kinds. Declaring each one would freeze a large API, while the overrides follow GRANAP's own `OrganInputData` sections and its validation.
   - → answer:
