@@ -120,7 +120,7 @@ class MPGBacked:
         exporter run once into a scratch network, without bridges (which would add cells to the organ), so that
         every section carries its walls, junctions and edges, and the export reads them instead of recomputing them.
         """
-        from openalea.granap.anatomy_writer import NetworkExporter
+        NetworkExporter = self._network_exporter()
         store_topology(self.mpg, self.segment, self, self._mpg_written)          # the one snapping of the section
         scratch = SimpleNamespace(graph=nx.Graph(), n_walls=0, n_junctions=0, n_cells=0, _wall_to_cells={})
         with stored_topology(self):
@@ -132,6 +132,14 @@ class MPGBacked:
         self.generate_cells()
         with stored_topology(self):
             return super().write_to_xml(path, **kwargs)
+
+    def _network_exporter(self):
+        """The network exporter: the converted copy (P5.2) or GRANAP's."""
+        if self.converted_pipeline:
+            from openalea.granap.mpg.pipeline.network import NetworkExporter
+        else:
+            from openalea.granap.anatomy_writer import NetworkExporter
+        return NetworkExporter
 
     def _stored_network_matches(self, air_link_radius, exporter_kwargs) -> bool:
         """Whether the export asked for is the stored one: default exporter settings, and no bridge to add."""
@@ -146,7 +154,7 @@ class MPGBacked:
         written = self._mpg_written
         if not self._stored_network_matches(air_link_radius, exporter_kwargs):
             with stored_topology(self):                                           # the stored rings, not a new snap
-                super()._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
+                self._network_exporter()(self).export(self, air_link_radius=air_link_radius, **exporter_kwargs)
             written = write_network(self.mpg, self.segment, self, written)        # replaces the stored one
             n_real = len(written["cells"]) - len(written.get("bridge_cells", []))
             if len(written["cells"]) > n_real or "bridge" in self._cells_gdf.columns:

@@ -602,3 +602,9 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - At the end the organ gets plain Cells back, rebuilt from the MPG, as since P1.
 - **Time:** none added. Converted against GRANAP's modules: dicot root 6.12 against 6.40 s, monocot 2.80 against 3.02 s (absolute times vary from run to run on this machine).
 - **Tests:** the stage test now also checks that the cells are views from the intercellular stage on. The stage tests, the monocot cross-check and the capability folder (10) pass; the full comparison folder runs at the end of the step.
+
+## 24. P5.2 done (2026-10-13)
+
+- **`mpg/pipeline/network.py`:** GRANAP's `NetworkExporter`, copied verbatim, with two edits. The cells' rows are built once (`_Rows`, the frame's columns as numpy arrays, values of the types pandas gives) and replace `cells_gdf.loc[r]` (one per wall cell) and `iterrows()`. The topology comes from the MPG (`stored_topology`). The MPG-backed organs use it for the stored network and the reruns (bridges, custom settings) when `converted_pipeline`.
+- **Times** (machine loaded by a concurrent run, converted against GRANAP's modules): dicot root 7.02 against 8.02 s (−12 %), monocot root 3.26 against 3.92 s (−17 %).
+- **Exactness:** the monocot and needle cross-checks (graph node for node and edge for edge, adjacency matrix, XML byte for byte; the needle with bridges) and the replayed transfusion network pass, 12 tests.
