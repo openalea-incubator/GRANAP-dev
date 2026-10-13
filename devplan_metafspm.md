@@ -611,7 +611,7 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 ## 25. P5.1 checked; P5.4 and P5.5 reassessed (2026-10-13)
 
-- **P5.1, full check:** the comparison folder passes, 176 tests. P5.2's full check is running.
+- **P5.1 and P5.2, full checks:** the comparison folder passes, 176 tests each (P5.2: 14 min, down from 16).
 - **What is left to gain** (dicot root, converted pipeline, machine loaded about 1.5×):
 
   | stage | time |
