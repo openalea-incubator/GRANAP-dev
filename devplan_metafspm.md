@@ -832,3 +832,49 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - rewiring, 0.45 s, mostly the linked parent of every segment.
 
   These belong with DS14b (array mirrors of parent, complex, scale).
+
+## 34. B1 measured; B2 design (2026-10-13)
+
+**B1, the aerenchyma calibration from areas: it cannot be exact (Q-N3, measured).**
+- **Why:** the proportion an attempt realizes is measured after:
+  - the air spaces are fused (`unary_union` per group);
+  - the whole section is re-simplified (`simplify_cells`, global snapping);
+  - the tissue is carved by the air (`difference`).
+
+  GRANAP's docstring says so too ("the overshoot depends on the emergent geometry"). An area predictor would bisect through other values, and the goldens of aerenchymatous organs would change.
+- **Done instead, exact:** the best attempt's cells are kept and restored at the end, instead of running that attempt again. Monocot root −3 %, dicot root −1 % (in the noise). The stage and aerenchyma tests pass.
+- **What is left within an attempt:**
+  - the fill order (`_connected_radial_order`) is the same for every attempt and could be computed once (about 0.15 s on the dicot root);
+  - the attempt itself is mostly `simplify_cells` and the carving, which B2 makes cheaper.
+
+**B2, the stages after the grouping on the MPG's arrays — design.**
+- **Scope:** `Organ`'s stages after the grouping, converted copies in `mpg/pipeline/`, about 460 lines:
+  - `_apply_intercellular` (84 lines) and `seat_air_spaces` (57);
+  - `add_aerenchyma` (116) and `_connected_radial_order` (60);
+  - `merge_intercellular_aerenchyma` (102);
+  - `fuse_gaps` (87).
+
+  The stems' and leaves' own versions (14 and 28 lines, they call these) follow.
+- **How:**
+  - each stage reads the section's columns once (polygons as a shapely array, type, id_layer, x, y, protect flags);
+  - it computes with shapely's vectorised functions, which run the same GEOS operation per geometry, so the results are the same, and with numpy selections in GRANAP's order;
+  - it writes the changed columns back into the Cell vertices.
+
+  No CellView, no adoption. Where GRANAP's loop is sequential (the fill per quadrant, the union-find of the merge), the loop stays, over arrays.
+- **What it retires:** `cells.py` (views, adoption), the overrides of the MPG-backed class, and the "plain cells back" step. The cells then exist only in the MPG during generation; GRANAP's `Cell` objects are built only for its API.
+- **Order, each step checked by the comparison folder:**
+  - **B2a:** `merge_intercellular_aerenchyma` (run in every calibration attempt);
+  - **B2b:** `add_aerenchyma`, with its fill order computed once;
+  - **B2c:** the intercellular spaces;
+  - **B2d:** `fuse_gaps`;
+  - then the stems' and leaves' versions.
+- **Expected gain:** the view layer (about 11 % profiled), plus the per-cell carving and filling loops. To be measured after B2a before going on.
+
+## 35. Questions (2026-10-13)
+
+- **Q-B1 — the calibration's number of attempts.** Keep GRANAP's bisection (exact), or replace it with a secant search on the measured proportion (fewer attempts, about half; the goldens of aerenchymatous organs change, reviewed)?
+  - **Recommendation:** keep the bisection for now, and revisit after B2 has made each attempt cheaper.
+  - → answer:
+- **Q-B2 — B2 as designed (§34): converted stages working on the MPG's columns, in the order B2a–d, exact, checked step by step?**
+  - **Recommendation:** yes, starting with B2a, with a measurement before going on.
+  - → answer:
