@@ -608,3 +608,41 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 - **`mpg/pipeline/network.py`:** GRANAP's `NetworkExporter`, copied verbatim, with two edits. The cells' rows are built once (`_Rows`, the frame's columns as numpy arrays, values of the types pandas gives) and replace `cells_gdf.loc[r]` (one per wall cell) and `iterrows()`. The topology comes from the MPG (`stored_topology`). The MPG-backed organs use it for the stored network and the reruns (bridges, custom settings) when `converted_pipeline`.
 - **Times** (machine loaded by a concurrent run, converted against GRANAP's modules): dicot root 7.02 against 8.02 s (−12 %), monocot root 3.26 against 3.92 s (−17 %).
 - **Exactness:** the monocot and needle cross-checks (graph node for node and edge for edge, adjacency matrix, XML byte for byte; the needle with bridges) and the replayed transfusion network pass, 12 tests.
+
+## 25. P5.1 checked; P5.4 and P5.5 reassessed (2026-10-13)
+
+- **P5.1, full check:** the comparison folder passes, 176 tests. P5.2's full check is running.
+- **What is left to gain** (dicot root, converted pipeline, machine loaded about 1.5×):
+
+  | stage | time |
+  |---|---|
+  | grouping | 3.48 s |
+  | intercellular spaces | 1.31 s |
+  | aerenchyma | 1.30 s |
+  | fused gaps | 0.20 s |
+  | final | 0.11 s |
+  | network stored | 0.86 s |
+  | total | 7.25 s |
+
+  Topology actually computed: 1.10 s in all (8 of 11 calls answered by E1). Most of it is the grouping's first snap, which nothing can reuse.
+- **P5.4 (topology kept through the stages) — not worth it.** It could save at most the topology computed after the grouping, about 0.6 s, roughly 8 %. And it cannot be exact: GRANAP snaps globally (tolerance from the section's 5th-percentile edge, greedy clustering in vertex order), so an incremental update breaks ties differently and changes the goldens. That is a reviewed change for a small gain.
+- **P5.5 (array kernels) — where the time is.** The grouping is half the time: seed rings, packing, the global Voronoi, a union per cell. Its cost is mostly GEOS and scipy, not Python. What can be vectorised exactly has to be measured first (a profile of the grouping alone).
+- **The Q8 bugs (your answer: in the converted copies, as P5 reaches each module).** Two of their modules are converted now:
+  - the `air_link_radius` default, in the converted exporter;
+  - `create_from_input` passing no seed, in `mpg/organs.py`.
+
+  The three others live in modules not converted (`process_voronoi_groups`, the monocot root's metaxylem loop, `_build_topology`).
+
+## 26. Questions (2026-10-13)
+
+- **Q-P5f — P5.4.** Drop it, given about 8 % at most, not exact?
+  - **Recommendation:** drop it. The topology stays snapped once per section (P2.3), and the aerenchyma attempts reuse it (E1).
+  - → answer:
+- **Q-P5g — P5.5.** Profile the grouping stage and convert only what proves exact and worthwhile (each with its measured gain), or stop P5 here?
+  - **Recommendation:** profile first, then decide with the numbers.
+  - → answer:
+- **Q-P5h — the two Q8 fixes possible now.**
+  - **`air_link_radius`:** the default is 1× the median wall, the docstring says 3×. Which is intended? Changing the code to 3× changes the leaves' air links, so the goldens of networks with protected air (leaves).
+  - **`create_from_input`:** pass the organ's seed? It would take a `seed=None` argument passed to the class, which adds an argument and changes no golden.
+  - **Recommendation:** for `create_from_input`, add the seed. For `air_link_radius`, tell me which is intended (code or docstring), and I fix the other.
+  - → answer:
