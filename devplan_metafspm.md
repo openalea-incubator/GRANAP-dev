@@ -1263,13 +1263,13 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
 
 - **Q-D1 — the declarations above** (inputs, parameters per plant through the scenario, descriptor state variables at the SubOrgan, Cell, Compartment and Connection scales)?
   - **Recommendation:** yes, implemented after O4 and O3, and checked by a test component declaring `input_variable(by="GranapAnatomy")` for the network, as MECHA will.
-  - → answer:
+  - → answer: yes to recommendation, but why just descriptors for state variables? For example a recomputed exchange surface could not be non inertial extensive? Also will parameter passing accomodate that we want several anatomies to be generated on the same MPG? With per class parametrization even though we instantiate GranapAnatomy only once in the metafspm Composite model coupling logic?
 - **Q-C1a — the junctions' values** (§42), needed for the Connection-scale declarations.
   - **Recommendation:** as in §42.
-  - → answer:
+  - → answer: Not sure to understand the question, reexplain the choice here, conductances of edges will later be assigned by the MECHA first steps before the functional water solve, if that was the question.
 - **Q-D2 — the anatomy's parametrization per plant:** overrides of GRANAP's input sections (`{section: {field: value}}`, per organ kind and class) as one object-valued parameter? Or flattened into numeric parameters (`cortex__n_layers`, …), one declaration per field?
   - **Recommendation:** the overrides object. GRANAP has hundreds of fields across organ kinds. Declaring each one would freeze a large API, while the overrides follow GRANAP's own `OrganInputData` sections and its validation.
-  - → answer:
+  - → answer: Override yes, what I mainly want is that if a parameter needs to be changed explicitly by an organ class from a specific computation of the architectured growth model that will provide to the GRANAP component as input, that it is done based on SubOrgan-scale variable passing, does it fit your recommendation?
 
 ## 56. O4 done; O3 measured again (2026-10-14)
 
@@ -1294,4 +1294,58 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
   - numba also compiles at the first call in each process (about a second per kernel, unless cached on disk). For a simulation generating a few templates per process, that cancels the gain.
 - **Q-O3b — drop O3?**
   - **Recommendation:** yes, not implemented. The measured cost of what remains is GEOS (the grouping's unions, the intercellular unions) and the cell views (the B2 b question), not Python loops a kernel would take.
+  - → answer (2026-10-14): yes, drop O3.
+
+## 57. Your answers Q-D1, Q-C1a, Q-D2: the declarations refined (2026-10-14)
+
+**Q-D1 (a) — why only descriptors?** You are right; it was too coarse.
+- **What the kind decides in metafspm:**
+  - the default mapping across scales: extensive kinds are summed up and need a mapping down; intensive ones are averaged up and broadcast down;
+  - the repartition at growth: extensive is split, intensive copied, non-inertial extensive copied with a weight, descriptors take `on_grow`.
+- **So each output takes the kind of its physics:**
+
+  | kind | quantities | why |
+  |---|---|---|
+  | `NonInertialExtensive` | `cell_area`, `wall_length` | recomputed by GRANAP, never integrated; additive, so a segment's total is their sum |
+  | `NonInertialIntensive` | `section_x`, `section_y`, `wall_thickness`, `edge_length`, `edge_dx`, `edge_dy`, `edge_dist`, `edge_wall_thickness`, `lateral_distance`, `distnode_wall_cell` | geometric intensities: positions, thicknesses, distances between two nodes |
+  | `descriptor` | tissue, `cgroup`, `kind`, `network_path`, `protect_topology`, `bridge`, vessel id, family, the class bins, the template | categorical, no aggregation |
+
+- **Your example, an exchange surface, belongs here.** The section is 2D; its 3D surfaces and volumes depend on the segment's current length, which grows between template changes. So GRANAP would add, in an array-style step (`@state`, every time step):
+  - `wall_surface = wall_length × segment length`;
+  - `membrane_surface` (per membrane edge, the same product);
+  - `cell_volume = cell_area × segment length`.
+
+  They are `NonInertialExtensive`, recomputed from the template's 2D values and the length input, and summed to the segment by the default mapping. This is the metafspm way: declared outputs, a decorated step, the DataStructure.
+
+**Q-D1 (b) — several anatomies on one MPG, with one `GranapAnatomy` instance:** yes, that is how it works already, and it stays so.
+- The instance serves every plant and every segment of the population's MPG.
+- Its templates are keyed by (organ kind, the plant's parameters, the class). Each plant's segments get their own templates when the plants' parametrizations differ, and share them otherwise.
+- The class comes from per-segment inputs (below), so one instance holds any number of anatomies. The composite model declares it once.
+
+**Q-D2 — parameters changed per organ class from the architecture model's SubOrgan variables:** yes, it fits. It makes the class key general, instead of today's three fixed bins:
+- **Class inputs:** a component attribute maps SubOrgan input variables to GRANAP parameter fields, each with a bin width. For example `{"cortex_layers": ("cortex", "n_layers", 1)}`, or `{"radius": diameter rule, ...}` as today.
+- **Each class input is a declared `input_variable(scale=SubOrgan, by=<the architecture model>)`.**
+- **A segment's class** = its organ kind, its plant's parameters, and the binned values of its class inputs. The template's parameters = GRANAP's preset, then the plant's overrides (the scenario's object), then the class inputs' binned values on their fields.
+- **When the architecture changes a segment's class input past a bin,** the segment changes class, and its anatomy is replaced (the mechanism of Q12, unchanged). Binning keeps the number of templates bounded: segments within a bin share one.
+- **Today's diameter, distance-from-the-tip and distance-from-the-junction bins become three class inputs of this kind.** The diameter one sets the section's size; the other two select the differentiation stage.
+
+**Q-C1a, explained again.** It is not about conductances; those will be MECHA's, computed in its first steps from GRANAP's geometry, as you say.
+- **The question is geometric.** The vessel junctions are the axial Connections between successive sections. The wiring creates them, not GRANAP's section network. So they have none of C1's columns: no `edge_length`, no `edge_dx`, no `network_path`.
+- **A declared edge variable must have a value on every edge.** If MECHA declares `edge_length` as an input, the DataStructure cannot read it while the junctions have none. And MECHA will need the junctions' geometry for its axial conductances anyway.
+- **So GRANAP should write their geometry when they are wired:**
+  - `edge_length`: the axial distance between the two sections, the mean of the two segments' lengths, updated as they grow;
+  - `edge_dx`, `edge_dy`: the in-plane offset between the two vessels' positions;
+  - `network_path`: a code of its own (5, axial junction), so that MECHA applies its axial law to them;
+  - the other columns: NaN.
+
+## 58. Questions (2026-10-14)
+
+- **Q-K1 — the kinds** of §57 (non-inertial extensive for areas and wall lengths, non-inertial intensive for positions, thicknesses and distances, descriptors for codes), and the 3D quantities (`wall_surface`, `membrane_surface`, `cell_volume`) recomputed in a `@state` step from the segment's length?
+  - **Recommendation:** yes.
+  - → answer:
+- **Q-K2 — class inputs** (SubOrgan input variables mapped to GRANAP fields with bins, replacing the three fixed bins) as the way the architecture model instructs the generation?
+  - **Recommendation:** yes.
+  - → answer:
+- **Q-C1a — the junctions' geometry** as above (axial length, in-plane offset, path code 5)?
+  - **Recommendation:** yes.
   - → answer:
