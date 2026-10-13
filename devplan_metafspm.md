@@ -1095,3 +1095,51 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - the comparison folder passes, 190 tests (12.5 min);
   - the 14 organs of `compare_sections.py` are identical;
   - the CellSet and needle tests pass.
+
+## 48. One source: the port as GRANAP, the original as legacy — design (2026-10-13, your request)
+
+**Your request:**
+1. The online source moves to a legacy folder, and the MPG source becomes the main one.
+2. The tests use the port; only a `comparison/` subfolder compares with the legacy.
+3. The same for the examples.
+
+**What the port is today.** It is not a standalone copy of GRANAP; it is GRANAP plus a layer:
+- **About 20 of GRANAP's modules are building blocks it calls as they are:** layers, recipes, vascular bundles, stomata, organ parameters, readers.
+- **About a dozen methods have converted copies** in `mpg/pipeline/`: the generation, the intercellular spaces, the aerenchyma, the merge, the gaps, the snap, the seeds, the exporter, the XML writer, the needle's and the CellSet's stages.
+- **The MPG-backed classes are mixins over GRANAP's classes;** flags (`converted_pipeline`, `native_network`, `exact_speedups`) select the converted or the original path.
+
+So "keeping only the port" means merging the two, not keeping `mpg/` alone.
+
+**Proposed layout:**
+- **`src/openalea/granap/legacy/`:** the online source, frozen and verbatim (`origin/to_metafspm`, 248adca; the original modules are unchanged since). Only its internal imports are rewritten (`openalea.granap.X` → `openalea.granap.legacy.X`), so that it runs on its own as the reference.
+- **`src/openalea/granap/` (the main package) is the port:**
+  - the organ classes under their own names and modules (`root_class.RootAnatomy` …) are the MPG-backed ones;
+  - the converted methods replace the original methods in their modules (`generate_cell.py`, `organ_class.py`, `anatomy_writer.py`, `needle_class.py`, `cellset_organ.py`);
+  - the building blocks stay where they are.
+- **Removed from the main package:** the mixins, the flags and the patches (`exact_speedups`, `stored_topology`). `mpg/pipeline/` disappears into the modules.
+- **`openalea.granap.mpg`** keeps what is MPG- and metafspm-specific: build, network, columns, topology, cells, views, component, library, vessels.
+- **Tests:**
+  - `test/` holds GRANAP's tests on the main package. They are today's replayed tests, the same goldens, since the port is exact;
+  - the capability tests (component, growth, network variables) also go in `test/`;
+  - `test/comparison/` holds the cross-checks, the stage tests, N1 against the exporter, and the class-method test, comparing the main package with `legacy`.
+- **Examples:**
+  - every example in `example/` on the main package;
+  - `example/comparison/` holds `compare_sections.py`, now comparing with `legacy`.
+- **Steps, each checked:**
+  1. the legacy copy, with the comparison folder pointed at it;
+  2. the merge of the port into the main modules, with every flag removed;
+  3. the tests and examples moved.
+
+  The full comparison runs at each step.
+
+## 49. Questions (2026-10-13)
+
+- **Q-R1 — where legacy goes.** You wrote `src/legacy/`. As a top-level package, `legacy` would be a generic import name, shared by anything else installed. `src/openalea/granap/legacy/` (importable as `openalea.granap.legacy`, shipped with GRANAP) keeps it inside GRANAP's namespace.
+  - **Recommendation:** `src/openalea/granap/legacy/`.
+  - → answer:
+- **Q-R2 — the main package's names.** Keep GRANAP's module and class names (`from openalea.granap.root_class import RootAnatomy` gives the port), or make `openalea.granap.mpg` the entry point?
+  - **Recommendation:** GRANAP's names. Users' code and GRANAP's own tests keep working unchanged; `openalea.granap.mpg` stays the metafspm bridge.
+  - → answer:
+- **Q-R3 — the original paths inside the main package.** With legacy holding the original, the main package drops the switches (`converted_pipeline=False`, `native_network=False`, `exact_speedups=False`) and the code they selected?
+  - **Recommendation:** yes, drop them. The comparison tests compare with legacy instead.
+  - → answer:
