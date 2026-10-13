@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from openalea.granap.cell_class import Cell
+from openalea.granap.mpg import columns
 
 
 def _by_row(g, vids, prefix):
@@ -52,18 +53,16 @@ def gdf_from_cells(cells, n_real=None) -> gpd.GeoDataFrame:
 
 
 def network_from_mpg(g, written) -> nx.Graph:
-    """The exporter's networkx graph: its nodes (MECHA indices, attributes) and edges (attributes), from the MPG."""
-    mecha = g.property("mecha_index")
-    node_props = {name[len("node__"):]: values for name, values in g.properties().items()
-                  if name.startswith("node__")}
+    """The exporter's networkx graph: its nodes (MECHA indices, attributes) and edges (attributes), rebuilt from the
+    MPG's network columns (columns.py)."""
+    mecha, kinds, tissue = g.property("mecha_index"), g.property("kind"), g.property("tissue")
     graph = nx.Graph()
     compartments = sorted(mecha, key=lambda v: mecha[v])
-    for v in compartments:
-        graph.add_node(int(mecha[v]), **{name: values[v] for name, values in node_props.items() if v in values})
-    edge_props = {name[len("edge__"):]: values for name, values in g.properties().items()
-                  if name.startswith("edge__")}
+    for v, attrs in zip(compartments, columns.node_attributes(g, compartments, [int(kinds[v]) for v in compartments],
+                                                             mecha, tissue)):
+        graph.add_node(int(mecha[v]), **attrs)
     u_of, v_of = g.property("edge_u"), g.property("edge_v")
-    for e in written["connections"]:
-        graph.add_edge(int(u_of[e]), int(v_of[e]),
-                       **{name: values[e] for name, values in edge_props.items() if e in values})
+    connections = written["connections"]
+    for e, attrs in zip(connections, columns.edge_attributes(g, connections)):
+        graph.add_edge(int(u_of[e]), int(v_of[e]), **attrs)
     return graph

@@ -983,3 +983,42 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
     - the method overrides of the MPG-backed class, which now choose between the converted copies and GRANAP's.
   - **Retiring them** comes with P5.6, the organ-specific stages.
 - **Open:** C1 (the network as DataStructure variables), C2 (the process-wide patches), B3 (the seeds as arrays), P5.6.
+
+## 42. C1: the network as DataStructure variables — design (2026-10-13; your go-ahead for C1, C2, B3, P5.6 in order)
+
+**Today:** the network's attributes are `node__`/`edge__` properties holding what networkx held: tuples (`position`), small arrays (`d_vec`), strings (`type`, `path`, `cell_type`), and keys that only some nodes or edges have. The DataStructure reads a property as a declared variable only if it is numeric and present on every node (or edge), so a graph system cannot use any of them.
+
+**C1 — numeric columns, one per quantity, on every Compartment and every anatomy Connection:**
+
+| location | variable | content |
+|---|---|---|
+| Compartment | `section_x`, `section_y` | its position in the section, mm |
+| Compartment | `wall_length` | walls; 0 at junctions; NaN for protoplasts |
+| Compartment | `wall_thickness` | walls; NaN otherwise |
+| Compartment | `cell_area`, `cgroup`, `protect_topology`, `bridge` | protoplasts; NaN otherwise |
+| Connection | `network_path` | a code: membrane 0, wall_air 1, wall 2, plasmodesmata 3, air_link 4 |
+| Connection | `edge_length`, `edge_dx`, `edge_dy` | every anatomy Connection |
+| Connection | `edge_dist` | NaN for wall edges |
+| Connection | `edge_wall_thickness` | membrane, wall_air and wall edges |
+| Connection | `lateral_distance`, `distnode_wall_cell` | wall edges |
+
+- **Kept as they are:** the air links' `via_*` (node indices, on the air links only, for GRANAP's API), and the MECHA index.
+- **Derived instead of stored:** the node `type` from the Compartment's kind; `cell_type` is the protoplast's `tissue`.
+- **GRANAP's networkx graph,** now a view, is rebuilt from these columns with exactly the keys and values the exporter gives (a path's keys are fixed by the path). The cross-checks keep checking it node for node.
+- **Templates copy the columns with the rest,** so every segment's anatomy carries them.
+- **Units:** GRANAP's (mm, mm²). Converting to the MPG's length unit is left to the model that declares them, as with `mm_per_unit` for the classes.
+
+**Q-C1a — values on the vessel junctions between sections.** The junction Connections (created by the wiring) have no in-section geometry. A declared edge variable needs a value on every edge.
+- **Recommendation:**
+  - `edge_dx`, `edge_dy`: the in-plane offset between the two vessels' positions;
+  - `edge_length`: the distance between the two sections' centres (the mean of the two segments' lengths);
+  - `network_path`: a code of its own (5, junction);
+  - every other variable: NaN.
+
+  Implemented only once you agree. Until then, junctions carry none of these variables.
+- **C1 done (2026-10-13):** `mpg/columns.py`.
+  - **Written:** N1 writes the columns as arrays; the exporter path converts its attribute dicts.
+  - **Read back:** GRANAP's graph is rebuilt from the columns, exact (the cross-checks against GRANAP's original graph pass, the needle with bridges and air links included).
+  - **New test, `test_network_variables.py`:** a component declares six of them at the Compartment and Connection scales; the DataStructure reads them on every node and edge, with the exporter's values.
+  - **Examples:** they draw from `section_x`/`section_y`.
+  - **Q-C1a (junction values):** still open; junctions carry none of these variables.

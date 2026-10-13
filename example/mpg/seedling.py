@@ -129,7 +129,8 @@ def main():
     segments = sorted(int(v) for v in g.property("anatomy_class"))
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     template, row = g.property("template"), g.property("template_row")
-    tissue, family, position = g.property("tissue"), g.property("family"), g.property("node__position")
+    tissue, family = g.property("tissue"), g.property("family")
+    px, py = g.property("section_x"), g.property("section_y")
     template_of = {s: find_template(libraries, int(template[owners[s][0]])) for s in segments}
     size = {s: _extent(template_of[s]) for s in segments}
     offsets = layout(g, segments, size)
@@ -156,8 +157,8 @@ def main():
     lines = {0: [], 1: []}
     for e in g.junction_vids():
         u, v = int(a[e]), int(b[e])
-        lines[int(family[u])].append([np.asarray(position[u]) + offsets[section_of[u]],
-                                      np.asarray(position[v]) + offsets[section_of[v]]])
+        lines[int(family[u])].append([np.array([px[u], py[u]]) + offsets[section_of[u]],
+                                      np.array([px[v], py[v]]) + offsets[section_of[v]]])
     for fam, colour in ((0, "tab:blue"), (1, "tab:red")):
         if lines[fam]:
             ax.add_collection(LineCollection(lines[fam], colors=colour, linewidths=0.12, alpha=0.25, zorder=0))

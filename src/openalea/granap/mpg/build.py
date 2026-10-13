@@ -21,6 +21,8 @@ from scipy.sparse.csgraph import connected_components
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.data_structure.mpg import MPG
 
+from openalea.granap.mpg import columns
+
 PROTOPLAST, WALL, JUNCTION = 0, 1, 2          # Compartment kinds
 PATH_LABELS = {"membrane": "Transmembrane", "wall_air": "Transmembrane", "plasmodesmata": "Symplastic",
                "wall": "Apoplastic", "air_link": "Apoplastic"}
@@ -192,7 +194,7 @@ def clear_network(g, written: dict) -> None:
         written["layers"] = [v for v in written["layers"] if g.has_vertex(v)]
         keep = len(written["cells"]) - len(bridges)
         written["cells"], written["protoplasts"] = written["cells"][:keep], written["protoplasts"][:keep]
-    for name in [n for n in g.properties() if n.startswith("node__") or n == "mecha_index"]:
+    for name in [n for n in g.properties() if n in columns.NODE_COLUMNS or n == "mecha_index"]:
         values = g.property(name)
         for v in written["protoplasts"]:
             values.pop(v, None)
@@ -203,8 +205,8 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
     The network built by the exporter into *network* (default: the organ itself, organ.graph) under *segment*,
     replacing the one stored before: its wall and junction nodes as Compartments anchored to the segment, its
     virtual bridge cells (appended to organ.all_cells by the exporter) as Cells with their protoplasts in a Layer of
-    their own, and every edge as a Connection with its attributes. Node attributes go to the Compartments
-    (node__<name>), and each Compartment keeps its MECHA index (mecha_index).
+    their own, and every edge as a Connection. The nodes' and edges' attributes become numeric columns (columns.py),
+    and each Compartment keeps its MECHA index (mecha_index).
     """
     s, L = g.scales, g.labels
     network = organ if network is None else network
@@ -238,7 +240,9 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
         s.Compartment, label=L.Compartment.Apoplastic,
         kind=[WALL if n < n_walls else JUNCTION for n in apoplast]))
     vid_of_node.update(zip(apoplast, apo_vids))
-    _write_present(g, "node__", [vid_of_node[n] for n in nodes], [graph.nodes[n] for n in nodes])
+    node_vids = [vid_of_node[n] for n in nodes]
+    rows = [columns.node_columns(graph.nodes[n]) for n in nodes]
+    columns.write(g, {name: [r[name] for r in rows] for name in columns.NODE_COLUMNS}, node_vids)
     mecha = g.properties().setdefault("mecha_index", {})
     for n in nodes:
         mecha[vid_of_node[n]] = int(n)
@@ -249,7 +253,9 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
                  n_id_b=[vid_of_node[v] for _, v, _ in edges],
                  edge_u=[int(u) for u, _, _ in edges], edge_v=[int(v) for _, v, _ in edges],
                  label=[getattr(L.Connection, PATH_LABELS.get(data.get("path"), "Apoplastic")) for _, _, data in edges]))
-    _write_present(g, "edge__", connections, [data for _, _, data in edges])
+    rows = [columns.edge_columns(data) for _, _, data in edges]
+    columns.write(g, {name: [r[name] for r in rows] for name in columns.EDGE_COLUMNS}, connections)
+    _write_present(g, "edge__", connections, [{k: data[k] for k in columns.VIA if k in data} for _, _, data in edges])
     written.update(apoplast=apo_vids, connections=connections, n_walls=n_walls, n_junctions=n_junctions,
                    n_cells=network.n_cells,
                    wall_to_cells={int(w): list(c) for w, c in network._wall_to_cells.items()},

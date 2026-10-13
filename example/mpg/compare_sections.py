@@ -126,10 +126,10 @@ def identical(old, new) -> bool:
 def network_lines(organ):
     """The Connections of the stored network, as segments between their Compartments' positions."""
     g, w = organ.mpg, organ._mpg_written
-    position = g.property("node__position")
+    px, py = g.property("section_x"), g.property("section_y")
     a, b = g.property("n_id_a"), g.property("n_id_b")
-    lines = [(position[int(a[e])], position[int(b[e])]) for e in w["connections"]
-             if int(a[e]) in position and int(b[e]) in position]
+    lines = [((px[int(a[e])], py[int(a[e])]), (px[int(b[e])], py[int(b[e])])) for e in w["connections"]
+             if int(a[e]) in px and int(b[e]) in px]
     return np.asarray(lines, dtype=float).reshape(-1, 2, 2)
 
 

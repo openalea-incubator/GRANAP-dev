@@ -18,6 +18,7 @@ import numpy as np
 import shapely
 
 from openalea.granap.anatomy_writer import CGROUP_MAP, DEFAULT_CELL_WALL_THICKNESS
+from openalea.granap.mpg import columns
 from openalea.granap.mpg.build import JUNCTION, PATH_LABELS, WALL, _props, clear_network
 from openalea.granap.mpg.topology import topology_from_mpg
 
@@ -221,7 +222,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     """
     The network of organ's section with the exporter's default settings and no bridges, built from the MPG and
     written into it (replacing the stored one): walls and junctions as Compartments anchored to the segment, every edge
-    a Connection with its attributes (edge__<name>), the nodes' attributes (node__<name>) and MECHA indices
+    a Connection, the nodes' and edges' quantities as numeric columns (columns.py) and the MECHA indices
     (mecha_index). Returns the updated record of the section.
     """
     g, segment, written = organ.mpg, organ.segment, organ._mpg_written
@@ -330,24 +331,19 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     def put(name, vids, values):
         properties.setdefault(name, {}).update(zip(vids, values))
 
-    wall_vids, junction_vids = list(apo_vids[:n_walls]), list(apo_vids[n_walls:])
-    put("node__indice", wall_vids, range(n_walls))
-    put("node__type", wall_vids, ["apo"] * n_walls)
-    put("node__position", wall_vids, list(zip(mid_x, mid_y)))
-    put("node__length", wall_vids, lengths)
-    put("node__wall_thickness", wall_vids, thickness.tolist())
-    put("node__indice", junction_vids, range(n_walls, n_apo))
-    put("node__type", junction_vids, ["apo"] * n_junctions)
-    put("node__position", junction_vids, [walls["verts"][v] for v in used.tolist()])
-    put("node__length", junction_vids, [0] * n_junctions)
-    put("node__indice", protoplasts, range(n_apo, n_apo + n_cells))
-    put("node__type", protoplasts, ["cell"] * n_cells)
-    put("node__cgroup", protoplasts, [cells["cgroup"][r] or CGROUP_MAP.get(types[r], 4) for r in valid_list])
-    put("node__cell_type", protoplasts, [types[r] for r in valid_list])
-    put("node__protect_topology", protoplasts, [bool(cells["protect"][r]) for r in valid_list])
-    put("node__bridge", protoplasts, [False] * n_cells)
-    put("node__position", protoplasts, list(zip(cx[valid].tolist(), cy[valid].tolist())))
-    put("node__area", protoplasts, areas.tolist())
+    nan_w, nan_j, nan_c = np.full(n_walls, np.nan), np.full(n_junctions, np.nan), np.full(n_cells, np.nan)
+    cgroup = [cells["cgroup"][r] or CGROUP_MAP.get(types[r], 4) for r in valid_list]
+    nodes = vid_of_node.tolist()
+    columns.write(g, {                                       # C1: one numeric column per quantity
+        "section_x": np.concatenate((mid_x, xy[used, 0], cx[valid])),
+        "section_y": np.concatenate((mid_y, xy[used, 1], cy[valid])),
+        "wall_length": np.concatenate((lengths, np.zeros(n_junctions), nan_c)),
+        "wall_thickness": np.concatenate((thickness, nan_j, nan_c)),
+        "cell_area": np.concatenate((nan_w, nan_j, areas)),
+        "cgroup": np.concatenate((nan_w, nan_j, np.asarray(cgroup, dtype=float))),
+        "protect_topology": np.concatenate((nan_w, nan_j, [float(bool(cells["protect"][r])) for r in valid_list])),
+        "bridge": np.concatenate((nan_w, nan_j, np.zeros(n_cells))),
+    }, nodes)
     put("mecha_index", vid_of_node.tolist(), range(n_apo + n_cells))
 
     order = np.concatenate([blk[0] for blk in blocks])
@@ -369,8 +365,17 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     for blk_order, _, _, attributes in blocks:
         vids = connections[rank[offset:offset + blk_order.size]].tolist()
         offset += blk_order.size
+        k = len(vids)
+        d_vec = np.asarray(attributes["d_vec"], dtype=float).reshape(k, 2)
+        block = {name: np.full(k, np.nan) for name in columns.EDGE_COLUMNS}
+        block["network_path"] = np.array([columns.PATH_CODES[p] for p in attributes["path"]], dtype=float)
+        block["edge_dx"], block["edge_dy"] = d_vec[:, 0], d_vec[:, 1]
         for name, values in attributes.items():
-            put("edge__" + name, vids, values)
+            if name in columns.VIA:
+                put("edge__" + name, vids, values)
+            elif name not in ("path", "d_vec"):
+                block[columns._EDGE_COLUMN[name]] = np.asarray(values, dtype=float)
+        columns.write(g, block, vids)
     nodes = node_of_row[mem_r].tolist()
     wall_to_cells = {w: nodes[i:i + c] for w, (i, c) in enumerate(zip(starts.tolist(), counts.tolist()))}
     written.update(apoplast=list(apo_vids), connections=connections.tolist(), n_walls=n_walls,
