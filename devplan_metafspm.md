@@ -1163,3 +1163,28 @@ Not scheduled. Each is a candidate step, to be designed when chosen. The second 
   - the vascular circle packing (14 s of the continuous dicot stem's 18.7 s) on a distance field;
   - the Voronoi grouping by coverage unions (B4);
   - a vectorised snap without GRANAP's greedy order.
+
+## 51. One source: done (2026-10-13; your answers Q-R1–R3: recommendations; your request: `mpg` → `metafspm`)
+
+- **`openalea.granap.legacy`:** the online source (`origin/to_metafspm`, 248adca), frozen and verbatim, its imports rewritten. It runs on its own; no main module is loaded.
+- **The main package is the port, under GRANAP's names:**
+  - **`Organ`** generates into the MPG: `generate_cells` → `generate_section` → `_generate_pipeline`, with the stages written, the cells as views, the stored network (`section_topology`, `graph` and the matrix as views of the MPG). The converted stages replace the originals: `_apply_intercellular`, `_add_aerenchyma_to_proportion` (with `_fill_plan`), `add_aerenchyma`, `merge_intercellular_aerenchyma`, `find_gaps`/`fuse_gaps`.
+  - **`CellGenerator`:** the snap, the simplification and the seeds.
+  - **`CellManager.recalculate_cell_properties`:** in bulk.
+  - **`seat_air_spaces`:** carving in bulk, with the organ's snap.
+  - **`anatomy_writer`:** the exporter and the XML writer ask the organ for the topology.
+  - **The needle** seats its lacunae with the organ's snap; the **CellSet and ROI** organs give `_generate_pipeline`; the CellSet donor stores no network.
+  - **`create_from_input`** takes a seed.
+- **Removed:** the mixins, the flags (`converted_pipeline`, `native_network`, `exact_speedups`), the patches (`exact_speedups`, `stored_topology`), `mpg/pipeline/`, `mpg/organs.py`, `mpg/speedups.py`.
+- **`openalea.granap.metafspm`** (was `openalea.granap.mpg`, your request): build, network, columns, topology, cells, views, component, library, vessels.
+- **Tests:**
+  - `test/`: GRANAP's own tests, now on the port, with the same goldens; the replay wrappers are gone;
+  - `test/component/`: the capability tests;
+  - `test/comparison/`: against legacy — the cross-checks, the stages, and the stored network on 13 organ kinds.
+  - The full suite: 201 passed (13 min).
+  - **CI** runs `pytest -v --ignore=comparison` (`conda/meta.yaml`), so the comparison against legacy runs only locally.
+- **Examples:**
+  - `example/comparison/compare_sections.py` compares legacy and GRANAP: the 14 organs are identical;
+  - `example/mpg/` holds the component examples;
+  - GRANAP's other examples use its names, so they run the port. A sample run was not done (your interrupt).
+- **README and packaging:** metafspm is required (comments in `pyproject.toml` and `conda/environment.yaml`); `legacy` is described in the README.

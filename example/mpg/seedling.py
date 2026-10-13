@@ -26,9 +26,10 @@ from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.data_structure.data_api import MPGDataStructure
 from openalea.metafspm.scene.population import build_population
 
-from openalea.granap import mpg
-from openalea.granap.mpg.component import GranapAnatomy, OrganAnatomy, junction_rules
-from openalea.granap.mpg.library import AnatomyLibrary, find_template, preset_parameters
+from openalea.granap.leaf_class import LeafAnatomy
+from openalea.granap.stem_class import StemAnatomy
+from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
+from openalea.granap.metafspm.library import AnatomyLibrary, find_template, preset_parameters
 
 SEGMENT = 5e-3                                               # m
 STEM_RADIUS, ROOT_RADIUS, LATERAL_RADIUS = 2.5e-3, 0.55e-3, 0.3e-3
@@ -77,9 +78,9 @@ class SeedlingArchitecture(StructuralComponent):
 class SeedlingAnatomy(GranapAnatomy):
     library = AnatomyLibrary(class_parameters={LATERAL: {"cortex": {"n_layers": 2}}})
     shoot = {"StemElement": OrganAnatomy(AnatomyLibrary(parameters=preset_parameters("for_monocot_stem"),
-                                                        organ_class=mpg.StemAnatomy)),
+                                                        organ_class=StemAnatomy)),
              "LeafElement": OrganAnatomy(AnatomyLibrary(parameters=preset_parameters("for_monocot_leaf"),
-                                                        organ_class=mpg.LeafAnatomy), size=None)}
+                                                        organ_class=LeafAnatomy), size=None)}
 
 
 def _extent(template, axis=None):

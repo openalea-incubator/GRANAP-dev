@@ -463,6 +463,7 @@ class CellSetOrgan(Organ):
             # contour without subclassing (RootAnatomy.__new__ is a transparent
             # monocot/dicot factory).
             organ._base_polygon = base
+            organ.stores_network = False                         # a donor: its cells only
             return organ
 
         if self.donor_input is not None:
@@ -618,17 +619,14 @@ class CellSetOrgan(Organ):
     # Pipeline
     # ------------------------------------------------------------------
 
-    def generate_cells(self) -> gpd.GeoDataFrame:
-        """Import the real cells, regenerate the unresolved regions, export a gdf.
+    def _generate_pipeline(self) -> None:
+        """Import the real cells, regenerate the unresolved regions (Organ.generate_cells writes them into the MPG).
 
-        Replaces ``Organ.generate_cells`` wholesale: there is no seeding, no
+        Replaces ``Organ._generate_pipeline`` wholesale: there is no seeding, no
         global Voronoi and no layer peeling here — the real cells are the data,
         and the only tessellation is the donor's, which runs inside
         :meth:`_build_donor` through the ordinary pipeline.
         """
-        if self._cells_gdf is not None:
-            return self._cells_gdf
-
         self._load_cellset()
         self.donors = []
         self.graft_report = []
@@ -673,13 +671,6 @@ class CellSetOrgan(Organ):
                 f"{' ...' if len(bad) > 10 else ''}"
             )
 
-        cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
-        for i, c in enumerate(self.all_cells.cells):
-            cell_dicts[i]["geometry"] = c.polygon
-        self._cells_gdf = (
-            gpd.GeoDataFrame(cell_dicts) if cell_dicts else gpd.GeoDataFrame()
-        )
-        return self._cells_gdf
 
     # ------------------------------------------------------------------
     # Inspection

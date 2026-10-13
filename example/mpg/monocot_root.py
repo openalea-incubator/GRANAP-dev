@@ -20,7 +20,7 @@ from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.data_structure.data_api import MPGDataStructure
 from openalea.metafspm.scene.population import build_population
 
-from openalea.granap.mpg.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
 
 SEGMENT, RADIUS = 5e-3, 0.55e-3                   # m
 

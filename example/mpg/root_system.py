@@ -22,10 +22,10 @@ from matplotlib.patches import Polygon as PolygonPatch
 from openalea.metafspm.data_structure.data_api import MPGDataStructure
 from openalea.metafspm.scene.population import build_population
 
-from openalea.granap.mpg.component import GranapAnatomy, junction_rules
-from openalea.granap.mpg.library import AnatomyLibrary
+from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.library import AnatomyLibrary
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "test", "mpg_capabilities"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "test", "component"))
 from roots import SmallRootSystem, planting                                          # noqa: E402
 
 LATERAL = (0.6, 0., 0.)

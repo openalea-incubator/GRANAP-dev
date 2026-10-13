@@ -15,9 +15,10 @@ pip install -e .
 
 ### metafspm (MPG data structure)
 
-This version stores the anatomies in metafspm's multiscale plant graph (`openalea.granap.mpg`, see
-`devplan_metafspm.md`). metafspm's latest version is not packaged yet: clone it next to GRANAP and install it from
-source in the same environment.
+This version generates every cross-section into metafspm's multiscale plant graph (MPG): its cells, walls, junctions
+and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`, see `devplan_metafspm.md`). metafspm is
+therefore required. Its latest version is not packaged yet: clone it next to GRANAP and install it from source in the
+same environment.
 ```bash
 cd ..                                       # the folder holding GRANAP
 git clone https://github.com/openalea/metafspm.git metafspm
@@ -25,6 +26,9 @@ cd metafspm && git checkout data_structure_api   # the branch holding the anatom
 pip install .                               # or pip install -e . to follow its development
 ```
 `conda/environment.yaml` already installs it this way (`-e ../../metafspm`), when it is cloned next to GRANAP.
+
+The original source is kept, frozen, as `openalea.granap.legacy` (the reference the port is compared with:
+`test/comparison/`, `example/comparison/`). New work goes into the main package.
 
 Warning : 
 > - Intercellular space are not well implemented
