@@ -890,8 +890,9 @@ class NetworkExporter:
         # polygons lie within ``air_link_radius`` of each other (true
         # boundary-to-boundary gap, not centroid distance — elongated rhombi
         # can have a centroid well outside the radius while their nearest tip
-        # is right next to the other air space). Defaults to 3x the median
-        # wall length so the radius scales with the organ's own cell size.
+        # is right next to the other air space). Defaults to the median wall
+        # length (1x, kept as the code has it; the comment said 3x — Q8, your
+        # answer Q-P5h), so the radius scales with the organ's own cell size.
         # ------------------------------------------------------------------
 
         radius = air_link_radius

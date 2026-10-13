@@ -198,10 +198,13 @@ RootAnatomy, StemAnatomy, LeafAnatomy = _factory(_Root), _factory(_Stem), _facto
 _ORIGINAL_CREATE = _Organ.__dict__["create_from_input"].__func__     # GRANAP's own, even if replaced on Organ
 
 
-def create_from_input(input_data):
-    """Organ.create_from_input, returning the MPG-backed class of the organ it chooses (no seed, as GRANAP's)."""
+def create_from_input(input_data, seed=None):
+    """
+    Organ.create_from_input, returning the MPG-backed class of the organ it chooses, with *seed* (Q8, your answer
+    Q-P5h: GRANAP's passes none, so its organs were never reproducible; seed=None keeps that behaviour).
+    """
     chosen = type(_ORIGINAL_CREATE(_Organ, input_data))
     backed = {**_CONCRETE, _Needle: NeedleAnatomy}.get(chosen)
     if backed is None:
         raise TypeError(f"no MPG-backed class for {chosen.__name__}")
-    return backed(input_data)
+    return backed(input_data, seed=seed)

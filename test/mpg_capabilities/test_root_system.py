@@ -161,3 +161,10 @@ def test_a_class_differs_only_by_its_own_parametrization(plant):
     assert len(lateral.cell_layer) < len(main.cell_layer)          # two cortex layers instead of five
     unchanged = AnatomyLibrary().template((0.6, 0., 0.))            # without a parametrization: the preset
     assert len(unchanged.cell_layer) == len(main.cell_layer)
+
+
+def test_create_from_input_takes_a_seed():
+    from openalea.granap.input_data import OrganInputData
+    from openalea.granap.mpg import create_from_input
+    a, b = (create_from_input(OrganInputData.for_root(), seed=3) for _ in range(2))
+    assert a.rng.integers(1 << 30) == b.rng.integers(1 << 30)                      # reproducible (Q8)

@@ -611,7 +611,7 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 ## 25. P5.1 checked; P5.4 and P5.5 reassessed (2026-10-13)
 
-- **P5.1 and P5.2, full checks:** the comparison folder passes, 176 tests each (P5.2: 14 min, down from 16).
+- **P5.1, full check:** the comparison folder passes, 176 tests. P5.2's full check is running.
 - **What is left to gain** (dicot root, converted pipeline, machine loaded about 1.5×):
 
   | stage | time |
@@ -637,12 +637,21 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 
 - **Q-P5f — P5.4.** Drop it, given about 8 % at most, not exact?
   - **Recommendation:** drop it. The topology stays snapped once per section (P2.3), and the aerenchyma attempts reuse it (E1).
-  - → answer:
+  - → answer: yes drop it
 - **Q-P5g — P5.5.** Profile the grouping stage and convert only what proves exact and worthwhile (each with its measured gain), or stop P5 here?
   - **Recommendation:** profile first, then decide with the numbers.
-  - → answer:
+  - → answer: yes to recommendation 
 - **Q-P5h — the two Q8 fixes possible now.**
   - **`air_link_radius`:** the default is 1× the median wall, the docstring says 3×. Which is intended? Changing the code to 3× changes the leaves' air links, so the goldens of networks with protected air (leaves).
   - **`create_from_input`:** pass the organ's seed? It would take a `seed=None` argument passed to the class, which adds an argument and changes no golden.
   - **Recommendation:** for `create_from_input`, add the seed. For `air_link_radius`, tell me which is intended (code or docstring), and I fix the other.
-  - → answer:
+  - → answer: keep 1x and follow recommendation
+
+## 27. Your answers Q-P5f-h (2026-10-13)
+
+- **Q-P5f:** P5.4 is dropped.
+- **Q-P5g:** profile the grouping before converting anything in P5.5.
+- **Q-P5h, done in the converted copies:**
+  - `air_link_radius` keeps 1× the median wall, and the comment that said 3× is corrected (`mpg/pipeline/network.py`);
+  - `mpg.create_from_input(input_data, seed=None)` passes the seed to the organ (a test checks it is reproducible).
+- **Q8 still open:** `cgroup` dropped by `process_voronoi_groups`, `id_layer=i_slice` on monocot metaxylem, multipart polygons in `_build_topology`. Their modules are not converted.
