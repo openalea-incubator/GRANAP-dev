@@ -63,7 +63,7 @@ def smoothed_polygons(polygons, smooth_factors) -> list:
 
 
 def seat_air_spaces(cell_manager, host_cells: List[Cell], air_union, air_faces, *, protect_topology: bool = False,
-                    min_area: float = 1e-6) -> None:
+                    min_area: float = 1e-6, snap=None) -> None:
     """Carve intercellular lacunae out of their host cells and insert them (GRANAP's, the carving in bulk)."""
     present = [cell for cell in host_cells if cell.polygon is not None]
     if present:
@@ -89,7 +89,7 @@ def seat_air_spaces(cell_manager, host_cells: List[Cell], air_union, air_faces, 
             lacuna.protect_shape = True
         cell_manager.cells.append(lacuna)
 
-    cell_manager.cells = simplify_cells(cell_manager.cells)
+    cell_manager.cells = simplify_cells(cell_manager.cells, snap=snap)
 
 
 def apply_intercellular(organ, ics: dict) -> None:
@@ -176,4 +176,4 @@ def apply_intercellular(organ, ics: dict) -> None:
 
     air_union = GeometryProcessor.union_polygons(air_space_polys)
     seat_air_spaces(organ.all_cells, all_tissue_cells, air_union, air_space_polys,
-                    protect_topology=organ.PROTECT_AIR_TOPOLOGY)
+                    protect_topology=organ.PROTECT_AIR_TOPOLOGY, snap=organ.section_topology)

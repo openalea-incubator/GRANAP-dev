@@ -122,7 +122,7 @@ class NetworkExporter:
             return float(cell_wall_thickness)
 
         cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
-            CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
+            getattr(self.organ, "section_topology", CellGenerator._build_topology)(polys, cell_ids, protect_ids=protect_ids)
         )
 
         if not cell_vkeys:

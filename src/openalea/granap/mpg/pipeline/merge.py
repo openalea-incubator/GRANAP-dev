@@ -30,8 +30,9 @@ def _set_polygons(cells, polygons) -> None:
             cell.polygon = polygon
 
 
-def simplify_cells(grouped_cells):
-    """Simplify cell boundaries by retaining only junction (and protected) vertices; the same list, in place."""
+def simplify_cells(grouped_cells, snap=None):
+    """Simplify cell boundaries by retaining only junction (and protected) vertices; the same list, in place. *snap*:
+    the topology function (the organ's, MPGBacked.section_topology; default GRANAP's CellGenerator._build_topology)."""
     polys = [c.polygon for c in grouped_cells]
     cell_ids = list(range(len(grouped_cells)))
 
@@ -43,7 +44,7 @@ def simplify_cells(grouped_cells):
         if getattr(cell, "protect_shape", False)
     }
 
-    cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(
+    cell_vkeys, _, _, junction_set, protected_shape_set = (snap or CellGenerator._build_topology)(
         polys, cell_ids, protect_ids=protect_ids or None
     )
 
@@ -151,7 +152,7 @@ def merge_intercellular_aerenchyma(organ):
         organ.all_cells.remove_cells(merge_pool)
         organ.all_cells.cells.extend(fused_cells)
 
-    organ.all_cells.cells = simplify_cells(organ.all_cells.cells)
+    organ.all_cells.cells = simplify_cells(organ.all_cells.cells, snap=organ.section_topology)
 
     tissue = organ.aerenchyma_params.get("tissue")
     air_spaces = organ.all_cells.get_cells_by_type("air space")

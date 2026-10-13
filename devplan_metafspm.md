@@ -1022,3 +1022,20 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - **New test, `test_network_variables.py`:** a component declares six of them at the Compartment and Connection scales; the DataStructure reads them on every node and edge, with the exporter's values.
   - **Examples:** they draw from `section_x`/`section_y`.
   - **Q-C1a (junction values):** still open; junctions carry none of these variables.
+
+## 43. C2: no class method replaced for the converted pipeline (2026-10-13)
+
+- **`MPGBacked.section_topology(polys, cell_ids, protect_ids)`:** the section's topology, asked of the organ. It returns the rings stored in the MPG for the stored network's cells; otherwise it computes, through the organ's E1 cache (`speedups.cached_topology`, now held by the organ) and the converted snap (B5).
+- **Converted code calls it directly:**
+  - the simplification (grouping, merge, air spaces);
+  - the converted exporter;
+  - a converted copy of GRANAP's XML writer (`mpg/pipeline/writer.py`), whose one edit is that call.
+- **The two patches remain only where GRANAP's own modules still call `CellGenerator._build_topology`:**
+  - `stored_topology`: GRANAP's exporter and writer, off the converted pipeline;
+  - `exact_speedups`: during generation, where it now just routes the class method to `organ.section_topology`.
+
+  With the class method forbidden and no patch, the 14 organs of `compare_sections.py` were generated and exported. Two still reach it, both through organ-specific code (P5.6):
+  - the needle: `_apply_mesophyll_wall_rhombi` → GRANAP's `seat_air_spaces`;
+  - the CellSet organ: its donor section runs GRANAP's own `Organ.generate_cells`.
+- **Test, `test_no_class_patch.py`:** a converted root with the class method forbidden generates, exports and writes its XML, byte for byte GRANAP's.
+- **Also:** C1's full check passed, 188 tests (12.5 min).

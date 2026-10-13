@@ -13,6 +13,7 @@ vertex through the stages. What the rest of GRANAP reads afterwards (all_cells, 
 GeoDataFrame, the network graph, its counts and wall map) is rebuilt from the MPG, so every result is the MPG's. The
 MPG becomes the storage itself in P5.
 """
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import networkx as nx
@@ -42,8 +43,10 @@ from openalea.granap.mpg.pipeline.generate import generate_cells
 from openalea.granap.mpg.pipeline.merge import merge_intercellular_aerenchyma
 from openalea.granap.mpg.pipeline.intercellular import apply_intercellular
 from openalea.granap.mpg.pipeline.gaps import fuse_gaps
-from openalea.granap.mpg.speedups import exact_speedups
-from openalea.granap.mpg.topology import store_topology, stored_topology
+from openalea.granap.mpg.speedups import cached_topology, exact_speedups
+from openalea.granap.mpg.topology import _ORIGINAL_BUILD, store_topology, stored_topology, topology_from_mpg
+from openalea.granap.mpg.pipeline.snap import build_topology
+from openalea.granap.mpg.pipeline.writer import MPGAnatomyWriter
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
 
 
@@ -190,15 +193,42 @@ class MPGBacked:
             return
         NetworkExporter = self._network_exporter()
         scratch = SimpleNamespace(graph=nx.Graph(), n_walls=0, n_junctions=0, n_cells=0, _wall_to_cells={})
-        with stored_topology(self):
+        with self._granap_topology():
             NetworkExporter(self).export(scratch, bridges=False)
         write_network(self.mpg, self.segment, self, self._mpg_written, network=scratch)
 
     def write_to_xml(self, path: str, **kwargs):
-        """GRANAP's XML writer, its walls numbered from the topology stored in the MPG (P2.3)."""
+        """GRANAP's XML writer, its walls numbered from the topology stored in the MPG (P2.3): the converted writer,
+        which asks the organ for it (C2), or GRANAP's under the stored-topology patch."""
         self.generate_section()
+        if self.converted_pipeline:
+            return MPGAnatomyWriter(self).write_to_xml(path, **kwargs)
         with stored_topology(self):
             return super().write_to_xml(path, **kwargs)
+
+    # ── The section's topology (C2): asked of the organ, not of a replaced class method ──
+
+    def section_topology(self, polys, cell_ids, protect_ids=None):
+        """
+        CellGenerator._build_topology for this section: the rings stored in the MPG when asked for the stored
+        network's cells (the exporter, the XML writer); otherwise computed, through the organ's cache (E1) when
+        exact_speedups, by the converted snap (B5) on the converted pipeline.
+        """
+        written = self._mpg_written or {}
+        ids = written.get("topology", {}).get("ids")
+        if ids is not None and [int(i) for i in cell_ids] == ids:
+            self.mpg_topology_reads = getattr(self, "mpg_topology_reads", 0) + 1
+            return topology_from_mpg(self.mpg, self.segment, written)
+        if self.exact_speedups:
+            return cached_topology(self, polys, cell_ids, protect_ids)
+        if self.converted_pipeline:
+            return build_topology(polys, cell_ids, protect_ids=protect_ids)
+        return _ORIGINAL_BUILD(polys, cell_ids, protect_ids=protect_ids)
+
+    def _granap_topology(self):
+        """For GRANAP's own exporter (converted_pipeline False): its class method answering the stored topology.
+        The converted exporter asks the organ, so nothing is replaced."""
+        return nullcontext() if self.converted_pipeline else stored_topology(self)
 
     def _network_exporter(self):
         """The network exporter: the converted copy (P5.2) or GRANAP's."""
@@ -249,7 +279,7 @@ class MPGBacked:
         written = self._mpg_written
         if not self._stored_network_matches(air_link_radius, exporter_kwargs):
             self.graph = nx.Graph()                                               # the exporter's own target
-            with stored_topology(self):                                           # the stored rings, not a new snap
+            with self._granap_topology():                                         # the stored rings, not a new snap
                 self._network_exporter()(self).export(self, air_link_radius=air_link_radius, **exporter_kwargs)
             written = write_network(self.mpg, self.segment, self, written)        # replaces the stored one
             n_real = len(written["cells"]) - len(written.get("bridge_cells", []))

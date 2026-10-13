@@ -62,7 +62,7 @@ def generate_cells(organ) -> None:
 
     t_start = time.time()
     grouped_cells = CellGenerator.process_voronoi_groups(organ.all_cells, vor).cells
-    grouped_cells = simplify_cells(grouped_cells)                   # B2a: the polygons rebuilt in bulk
+    grouped_cells = simplify_cells(grouped_cells, snap=organ.section_topology)     # B2a; C2: the organ's snap
     # simplify_cells rebuilds each polygon independently, which can distort
     # small cells (few vertices) into a neighbour and leave them rendered
     # one-inside-another; drop those, keeping the larger cell.
