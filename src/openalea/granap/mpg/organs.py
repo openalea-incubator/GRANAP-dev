@@ -40,6 +40,7 @@ from openalea.granap.mpg.network import build_network
 from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
 from openalea.granap.mpg.pipeline.generate import generate_cells
 from openalea.granap.mpg.pipeline.merge import merge_intercellular_aerenchyma
+from openalea.granap.mpg.pipeline.intercellular import apply_intercellular
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
@@ -137,6 +138,13 @@ class MPGBacked:
             result = super()._add_aerenchyma_to_proportion(*args, **kwargs)     # an organ's own (e.g. leaves)
         self._mpg_stage("aerenchyma")
         return result
+
+    def _apply_intercellular(self, ics):
+        """B2c: the converted intercellular spaces (smoothing and carving in bulk) when the organ's are Organ's."""
+        if self.converted_pipeline and _inherited(type(self), "_apply_intercellular") is \
+                _Organ.__dict__["_apply_intercellular"]:
+            return apply_intercellular(self, ics)
+        return super()._apply_intercellular(ics)
 
     def merge_intercellular_aerenchyma(self):
         """B2a: the converted merge (simplification and carving in bulk) when the organ's is Organ's."""

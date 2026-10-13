@@ -947,3 +947,16 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
 - **Exact:** the stage tests, the dicot and needle cross-checks, and the replayed dicot-root and special-tissue tests pass (15). The aerenchymatous organs of `compare_sections.py` are identical.
 - **Times** (medians of 5 interleaved runs): dicot root 4.47 → 4.24 s (−5 %), monocot root 2.00 → 1.89 s (−5 %).
 - **Next:** B2c (the intercellular spaces) and B2d (`fuse_gaps`).
+
+## 40. B2c: the intercellular spaces (2026-10-13, your go-ahead)
+
+- **`mpg/pipeline/intercellular.py`:** GRANAP's `Organ._apply_intercellular` and `seat_air_spaces`, converted.
+  - **The cells' smoothing in bulk:** one GEOS buffer for all the cells. Each ring is resampled by GRANAP's own `resample_coords`, then the 10 Laplacian passes run on all the rings at once, the same arithmetic element by element. A buffer that is not one Polygon, or an open ring, goes through GRANAP's function.
+  - **The hosts carved in bulk**, then the converted simplification (B2a) on top of the converted snap (B5).
+  - The unions and the pocket centering are GRANAP's.
+- **Scope:** used for organs whose `_apply_intercellular` is `Organ`'s. The needle keeps its own (P5.6).
+- **Exact:**
+  - the stage, cross-check (monocot, dicot, needle, stems) and special-tissue tests pass (13);
+  - the 14 organs of `compare_sections.py` are identical.
+- **Times** (medians of 5 interleaved runs): dicot root 4.09 → 3.95 s (−3 %), monocot root 1.85 → 1.76 s (−5 %), dicot leaf unchanged (its own intercellular spaces).
+- **Next:** B2d (`fuse_gaps`), then the full comparison folder.
