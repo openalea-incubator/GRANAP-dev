@@ -20,6 +20,7 @@ from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.organ_class import log
 from openalea.granap.mpg.pipeline.gaps import recalculate_cell_properties
 from openalea.granap.mpg.pipeline.merge import simplify_cells
+from openalea.granap.mpg.pipeline.seeds import generate_cells_info
 
 
 def generate_cells(organ) -> None:
@@ -32,7 +33,7 @@ def generate_cells(organ) -> None:
     t_start = time.time()
     for layer in organ.layer_manager.get_layers():
         layer.cells = []
-    organ.all_cells = CellGenerator.generate_cells_info(layers_polygons, center, rng=organ.rng)
+    organ.all_cells = generate_cells_info(layers_polygons, center, rng=organ.rng)    # B3: footprints in bulk
     log.info("Cell seeds:              %.3fs", time.time() - t_start)
 
     t_start = time.time()
