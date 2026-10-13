@@ -1136,10 +1136,30 @@ So "keeping only the port" means merging the two, not keeping `mpg/` alone.
 
 - **Q-R1 — where legacy goes.** You wrote `src/legacy/`. As a top-level package, `legacy` would be a generic import name, shared by anything else installed. `src/openalea/granap/legacy/` (importable as `openalea.granap.legacy`, shipped with GRANAP) keeps it inside GRANAP's namespace.
   - **Recommendation:** `src/openalea/granap/legacy/`.
-  - → answer:
+  - → answer (2026-10-13): recommendation
 - **Q-R2 — the main package's names.** Keep GRANAP's module and class names (`from openalea.granap.root_class import RootAnatomy` gives the port), or make `openalea.granap.mpg` the entry point?
   - **Recommendation:** GRANAP's names. Users' code and GRANAP's own tests keep working unchanged; `openalea.granap.mpg` stays the metafspm bridge.
-  - → answer:
+  - → answer (2026-10-13): recommendation
 - **Q-R3 — the original paths inside the main package.** With legacy holding the original, the main package drops the switches (`converted_pipeline=False`, `native_network=False`, `exact_speedups=False`) and the code they selected?
   - **Recommendation:** yes, drop them. The comparison tests compare with legacy instead.
-  - → answer:
+  - → answer (2026-10-13): recommendation
+
+## 50. Optimisations opened by an MPG-centred source (2026-10-13, your request: recorded as candidates)
+
+Not scheduled. Each is a candidate step, to be designed when chosen. The second group changes results, so it is a modelling choice and needs reviewed golden changes.
+
+**Exact (the same sections and networks):**
+- **O1 — several sections in one pass:** the stages of every class that appears in one step run through the same bulk GEOS calls, spreading the Python cost across sections.
+- **O2 — the solve per template:** every copy of a template has the same network structure.
+  - The symbolic part of its matrix (sparsity, factorization pattern) is computed once and reused for all copies.
+  - The full matrix is assembled from per-template index arrays; GRANAP's `fill_matrix` loops over networkx edges today.
+- **O3 — compiled kernels:** the loops that must stay sequential (the snap's greedy clustering, the aerenchyma fill, the merge's union-find), compiled (numba) on the arrays, exact.
+- **O4 — per-step DataStructure passes:** the array mirrors of the MPG (DS14b in metafspm's scene plan) remove most of the about 1.5 s of whole-MPG passes left in a growth step (owner scales, topology arrays, linked parents).
+
+**Changing results:**
+- **O5 — sections edited in place:** with the topology and network stored, a section changes as the plant develops (aerenchyma forming over time, a tissue differentiating), re-snapping and rewiring only the cells concerned, instead of being regenerated as a new class.
+- **O6 — a class derived from a neighbouring template:** a new diameter class built by deforming an existing template's geometry, far cheaper than the whole pipeline for small steps between classes.
+- **O7 — algorithmic replacements in the stages before the network:**
+  - the vascular circle packing (14 s of the continuous dicot stem's 18.7 s) on a distance field;
+  - the Voronoi grouping by coverage unions (B4);
+  - a vectorised snap without GRANAP's greedy order.
