@@ -57,13 +57,124 @@ def remove_anatomy(g, segment) -> None:
     g.remove_connections([c for c in list(g._components.get(segment, [])) if g.scale(c) == s.Layer])
 
 
+def _instance(g, comps):
+    """(template, template node of each of *comps*) when *comps* are exactly one copy of a template, else None."""
+    vids = np.asarray(comps, dtype=np.int64)
+    if vids.size == 0:
+        return None
+    order = np.argsort(vids, kind="stable")
+    found, templates = g._property_at("template", vids[order])
+    found_nodes, nodes = g._property_at("template_node", vids[order])
+    if found.size != vids.size or found_nodes.size != vids.size or not (templates == templates[0]).all():
+        return None
+    out = np.empty(vids.size, dtype=np.int64)
+    out[order] = np.asarray(nodes, dtype=np.int64)
+    if not np.array_equal(np.sort(out), np.arange(vids.size)):
+        return None
+    return int(templates[0]), out
+
+
+def _positions(g, vids):
+    """(angle and radius present, x, y) of *vids*, computed value by value as the original rule does."""
+    angle, radius = g.property("angle"), g.property("relative_radius")
+    present = np.array([v in angle for v in vids], dtype=bool)
+    xy = np.zeros((len(vids), 2))
+    for i, v in enumerate(vids):
+        if present[i]:
+            xy[i] = (radius[v] * np.cos(angle[v]), radius[v] * np.sin(angle[v]))
+    return present, xy
+
+
 def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     """
     The source of each new Compartment (Q-G3): the Compartment of the same template node in the nearest upstream
     section that has it; else the known protoplast of the same tissue nearest in (angle, relative radius) in the
     nearest upstream section having that tissue; else none (-1, the default). Sections in *fresh* (replaced
     anatomies, Q-G2) inherit nothing.
+
+    Sections are template copies: the rule is applied per section and per upstream section, on their template nodes
+    (a section that is not a whole copy, or an upstream section partly known, falls back to the rule vertex by
+    vertex, _inheritance_by_vertex). The same sources.
     """
+    g = ds.mtg
+    from_scale = ds._from_scale
+    new_vids = np.asarray(new_vids, dtype=np.int64)
+    sources = np.full(new_vids.size, -1, dtype=np.int64)
+    sections = ds._sections_of(new_vids)
+    owners = g.compartments_by_owner(from_scale)
+    tissue = g.property("tissue")
+    upstream_cache, known_sections = {}, {}
+
+    def upstream(section):
+        if section not in upstream_cache:
+            chain, vertex = [], g.linked_parent(int(section), from_scale)
+            while vertex is not None:
+                chain.append(int(vertex))
+                vertex = g.linked_parent(vertex, from_scale)
+            upstream_cache[section] = chain
+        return upstream_cache[section]
+
+    def known_section(section):
+        """("all", copy) when every Compartment is known and they form one copy; "none"; or "partial"."""
+        if section not in known_sections:
+            comps = owners.get(section, [])
+            known = np.asarray(is_known(np.asarray(comps, dtype=np.int64)), dtype=bool) if comps else \
+                np.zeros(0, dtype=bool)
+            if not known.any():
+                known_sections[section] = ("none", None)
+            elif known.all() and _instance(g, comps) is not None:
+                known_sections[section] = ("all", (comps, _instance(g, comps)))
+            else:
+                known_sections[section] = ("partial", None)
+        return known_sections[section]
+
+    slow = []
+    for section in np.unique(sections).tolist():
+        rows = np.flatnonzero(sections == section)
+        if section < 0 or section in fresh:
+            continue
+        here = _instance(g, new_vids[rows].tolist())
+        chain = upstream(section)
+        states = [known_section(a) for a in chain]
+        if here is None or any(state == "partial" for state, _ in states):
+            slow.append(rows)
+            continue
+        template, nodes = here
+        ancestors = [copy for state, copy in states if state == "all"]
+        same = next((copy for copy in ancestors if copy[1][0] == template), None)
+        if same is not None:                                     # the same template node upstream
+            comps, (_, their_nodes) = same
+            vid_of_node = np.empty(their_nodes.size, dtype=np.int64)
+            vid_of_node[their_nodes] = comps
+            sources[rows] = vid_of_node[nodes]
+            continue
+        vids = new_vids[rows].tolist()
+        own_tissue = [tissue.get(v) for v in vids]
+        present, xy = _positions(g, vids)
+        pending = np.array([t is not None for t in own_tissue], dtype=bool)
+        for comps, _ in ancestors:                               # same tissue, nearest relative position
+            if not pending.any():
+                break
+            their_present, their_xy = _positions(g, comps)
+            their_tissue = [tissue.get(v) for v in comps]
+            by_tissue = {}
+            for j, t in enumerate(their_tissue):
+                if their_present[j]:
+                    by_tissue.setdefault(t, []).append(j)
+            for i in np.flatnonzero(pending).tolist():
+                candidates = by_tissue.get(own_tissue[i])
+                if candidates and present[i]:
+                    distance = np.linalg.norm(their_xy[candidates] - xy[i], axis=1)
+                    sources[rows[i]] = comps[candidates[int(np.argmin(distance))]]
+                    pending[i] = False
+    if slow:
+        rows = np.concatenate(slow)
+        sources[rows] = _inheritance_by_vertex(ds, new_vids[rows], is_known, fresh)
+    return sources
+
+
+def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
+    """granap_inheritance, Compartment by Compartment (for sections that are not whole template copies)."""
     g = ds.mtg
     from_scale = ds._from_scale
     new_vids = np.asarray(new_vids, dtype=np.int64)
@@ -204,7 +315,29 @@ def _vessels(g, compartments, family):
 
 
 def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
-    """The junctions between two successive sections for one family of conducting cells."""
+    """
+    The junctions between two successive sections for one family of conducting cells. When both sections are
+    template copies, the pairs depend only on the two templates: computed once per (parent template, child template,
+    family) on their template nodes, then given each pair's vids.
+    """
+    parent, child = _instance(g, parent_compartments), _instance(g, child_compartments)
+    if parent is None or child is None:
+        return _vessel_pairs(g, parent_compartments, child_compartments, family)
+    cache = g.__dict__.setdefault("_granap_vessel_pairs", {})
+    key = (parent[0], child[0], family)
+    local = cache.get(key)
+    if local is None:
+        node_a, node_b = dict(zip(parent_compartments, parent[1].tolist())), \
+            dict(zip(child_compartments, child[1].tolist()))
+        local = cache[key] = [(node_a[a], node_b[b])
+                              for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
+    vid_a, vid_b = np.empty(parent[1].size, dtype=np.int64), np.empty(child[1].size, dtype=np.int64)
+    vid_a[parent[1]], vid_b[child[1]] = parent_compartments, child_compartments
+    return sorted((int(vid_a[a]), int(vid_b[b])) for a, b in local)
+
+
+def _vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
+    """vessel_pairs for any two sections: by track id, then the nearest in both directions."""
     parents, parent_tracks, p_xy = _vessels(g, parent_compartments, family)
     children, child_tracks, c_xy = _vessels(g, child_compartments, family)
     if not parents or not children:

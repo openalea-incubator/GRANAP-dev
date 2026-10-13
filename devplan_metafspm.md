@@ -763,10 +763,53 @@ Under the profiler, the shares within the stages are:
 
 - **Q-N1 — next step.** Start with A1 and A2 (templates in parallel, cached on disk), or with B1 and B2 (the aerenchyma calibration and the post-grouping stages on the MPG)?
   - **Recommendation:** A1 and A2. They give the most for a population, are independent of the pipeline, and stay exact by construction.
-  - → answer:
+  - → answer (2026-10-13): A1 and A2 are not the priority. New classes are computed progressively as they appear in a growing plant, so their cost is not paid at every time step. Otherwise the proposed order: A3, A4, then B1 with B2, C1, C2, B3.
 - **Q-N2 — the cache's key.** Should the template cache be keyed on the full parameters (any change regenerates), and stored next to the run (e.g. `outputs/anatomy_cache/`) or in a user cache directory?
   - **Recommendation:** the full parameters plus GRANAP's and the geometry stack's versions, in a directory given to the library (default: none, i.e. no cache).
-  - → answer:
+  - → answer: moot for now (A2 deferred).
 - **Q-N3 — B1's exactness.** If the calibration found on area arrays differs from GRANAP's attempt loop in some cases, accept a reviewed golden change, or keep the attempt loop?
   - **Recommendation:** first measure on the cross-check organs whether it differs at all, then decide with the cases in hand.
-  - → answer:
+  - → answer: the proposed order agreed; measure first (recommendation).
+
+## 32. A3 re-scoped by measurement: a growth step's cost follows the change (2026-10-13)
+
+**Measured.** The seedling has 48 segments and 1.46 M vertices; one growth step adds 9 segments. Under the profiler the step takes 5.1 s:
+
+| part | time |
+|---|---|
+| instantiation of the 9 copies (2 M property values written) | 1.7 s |
+| junction rewiring | 1.6 s |
+| inheritance | 0.56 s |
+| DataStructure update | the rest |
+
+Most of it goes to passes over the whole MPG, made on every step to find what changed:
+- the owner map of every Compartment, rebuilt 5 times (0.85 s);
+- a Python tuple signature of every Compartment of every section (0.65 s);
+- `wire_junctions` grouping the Compartments of all sections by label to rewire 9;
+- `vessel_pairs` and `granap_inheritance`, per pair of sections, though their result depends only on the two templates.
+
+**Changes, each exact (the same junctions, the same inherited values):**
+- **metafspm:**
+  - **M1:** `compartments_by_owner` cached on the MPG's structural signature (the one `topology_arrays` uses), and grouped with numpy;
+  - **M2:** the anatomy signature as arrays (owner, vid, label, ordering), the changed sections found by comparing two tables;
+  - **M3:** `_rewire_junctions`' alive set and stale junctions found with sorted arrays;
+  - **M4:** `wire_junctions` groups only the sections it rewires and their parents, and creates the junction Connections in bulk.
+- **GRANAP:**
+  - **G1:** `vessel_pairs` computed once per (parent template, child template, family), in template-node space, then mapped to each pair's vids;
+  - **G2:** `granap_inheritance` per (new template, upstream template), vectorised over a section's nodes.
+- **Check:** a reference growth run before the change (junctions as (n_id_a, n_id_b, label), the inherited solute), compared after; the capability tests and metafspm's suite.
+- **A4** follows: classes from arrays, one instantiation per template.
+- **Done (2026-10-13).** Also found while measuring: replacing an anatomy (a class change) took **669 s** on the seedling.
+  - **Cause:** metafspm's `remove_connections` removed vertex by vertex: one bulk property deletion per Cell's protoplast (20 k), and a list search in the Compartment anchor's list for each wall.
+  - **Fix:** it now removes in one pass, with the same final state; the vertex-by-vertex path stays where `remove_vertex` would refuse a vertex.
+  - **Results**, against a reference run of the old code (three growth steps; junctions, inherited values and rewired sections compared at each, identical):
+
+    | step | before | after |
+    |---|---|---|
+    | 9 new segments | 5.3 s | 3.3 s |
+    | class change | 669 s | 7.9 s (about 5 s of it generating the new class's template) |
+    | pruning | 0.05 s | 0.04 s |
+
+  - **Profiled emergence step:** 5.1 s → 4.3 s (rewiring 1.6 → 0.56 s, inheritance 0.56 → 0.27 s).
+  - **What is left:** instantiation (2.2 s, writing about 2 M values through dicts), and the DataStructure's whole-MPG passes (owner scales 0.7 s, topology arrays 0.7 s).
+  - **Tests:** metafspm 794 passed; GRANAP capabilities 11 passed (63 s → 44 s).
