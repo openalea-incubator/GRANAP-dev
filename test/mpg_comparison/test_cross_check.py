@@ -1,5 +1,5 @@
 """
-GRANAP and its MPG-backed organs, entity by entity (devplan_metafspm.md, Q7), at seed=0 on the pinned geometry
+GRANAP's legacy source (openalea.granap.legacy) and its MPG-backed organs, entity by entity (devplan_metafspm.md, Q7), at seed=0 on the pinned geometry
 stack: the same cells (every attribute, the polygons equal), the same cell GeoDataFrame, the same network (nodes,
 edges and every attribute, counts, wall map), and the MPG holding them at the Compartment and Connection scales.
 """
@@ -10,12 +10,18 @@ import pytest
 
 from openalea.granap import mpg
 from openalea.granap.input_data import OrganInputData
+from openalea.granap.legacy.input_data import OrganInputData as LegacyInputData
+from openalea.granap.legacy.needle_class import NeedleAnatomy
+from openalea.granap.legacy.root_class import RootAnatomy
+from openalea.granap.legacy.stem_class import StemAnatomy
 from openalea.granap.mpg.build import JUNCTION, PROTOPLAST, WALL
-from openalea.granap.needle_class import NeedleAnatomy
-from openalea.granap.root_class import RootAnatomy
-from openalea.granap.stem_class import StemAnatomy
 
 SEED = 0
+
+
+def legacy(data):
+    """The same input for the legacy source (its own OrganInputData class)."""
+    return LegacyInputData.from_dict_list(data.to_dict_list())
 
 
 def _dicot_secondary():
@@ -101,7 +107,7 @@ def _check_mpg(new):
 @pytest.mark.parametrize("name", [pytest.param(n, marks=() if n in QUICK else pytest.mark.slow) for n in ORGANS])
 def test_the_mpg_backed_organ_gives_the_same_section(name, tmp_path):
     original, backed, data, network = ORGANS[name]
-    old, new = original(data(), seed=SEED), backed(data(), seed=SEED)
+    old, new = original(legacy(data()), seed=SEED), backed(data(), seed=SEED)
     old.generate_cells()
     new.generate_cells()
     _check_cells(old, new)

@@ -11,9 +11,9 @@ from openalea.granap import mpg
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.mpg.build import UID, tissue_regions
 from openalea.granap.mpg.cells import CellView, MPGCells, attributes
-from openalea.granap.root_class import RootAnatomy
+from openalea.granap.legacy.root_class import RootAnatomy
 
-from test_cross_check import _check_cells, _same
+from test_cross_check import legacy, _check_cells, _same
 
 STAGES = ["grouping", "intercellular", "aerenchyma", "fused_gaps", "final"]
 
@@ -68,7 +68,7 @@ def test_each_stage_is_written_into_the_mpg_and_cells_keep_their_vertex():
                 assert before[uid] == vid                      # a surviving cell keeps its Cell vertex
         removed += len(set(before) - set(after))
     assert removed > 0                                         # the aerenchyma fused some cells away
-    original = RootAnatomy(_aerenchymatous_root(), seed=0)
+    original = RootAnatomy(legacy(_aerenchymatous_root()), seed=0)
     original.generate_cells()
     _check_cells(original, organ)
     assert not any(hasattr(c, UID) for c in organ.all_cells.cells)
