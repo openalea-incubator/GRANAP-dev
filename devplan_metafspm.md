@@ -1039,3 +1039,17 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - the CellSet organ: its donor section runs GRANAP's own `Organ.generate_cells`.
 - **Test, `test_no_class_patch.py`:** a converted root with the class method forbidden generates, exports and writes its XML, byte for byte GRANAP's.
 - **Also:** C1's full check passed, 188 tests (12.5 min).
+
+## 44. B3: the seeds' footprints in bulk (2026-10-13)
+
+- **`mpg/pipeline/seeds.py`:** GRANAP's `generate_cells_info` and `resolve_cell_border_overlaps`, copied. The groups' convex-hull footprints are built in bulk (`multipoints`, `convex_hull`, `buffer`: the same GEOS operations per group), instead of a `MultiPoint`, a hull and a buffer per group, about 3,100 groups on a dicot root.
+  - The buffer's resolution is passed explicitly: shapely's `buffer` function defaults to `quad_segs=8`, the geometry method GRANAP calls to 16.
+- **The seeds stay Cell objects:** the grouping (`process_voronoi_groups`) reads them. Seeds as arrays would come with converting the grouping, which belongs to P5.5's grouping profile.
+- **Exact:** the 14 organs of `compare_sections.py` are identical.
+- **Times** (medians of 5 interleaved runs): dicot root 4.05 → 3.84 s (−5 %), monocot root 1.84 → 1.71 s (−7 %), dicot leaf −2 %.
+- **Also, your request:** `example/mpg/monocot_root.py`, the simplest use of the component. One monocot root of three segments:
+  - instantiated: plant, anatomies, DataStructure, component;
+  - run: the root grows a segment, and the component gives it its anatomy;
+  - plotted: the four sections from the MPG.
+
+  About 100 lines, 4 s.
