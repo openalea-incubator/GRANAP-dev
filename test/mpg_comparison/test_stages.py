@@ -10,6 +10,7 @@ import pytest
 from openalea.granap import mpg
 from openalea.granap.input_data import OrganInputData
 from openalea.granap.mpg.build import UID, tissue_regions
+from openalea.granap.mpg.cells import CellView, MPGCells, attributes
 from openalea.granap.root_class import RootAnatomy
 
 from test_cross_check import _check_cells, _same
@@ -34,9 +35,10 @@ def _record_stages(organ):
         for row, (cell, vid, protoplast) in enumerate(zip(cells, written["cells"], written["protoplasts"])):
             assert g.complex(protoplast) == vid and g.property("cell_row")[vid] == row
             assert g.property(UID)[vid] == getattr(cell, UID)
-            for name, value in vars(cell).items():
-                if name != UID:
-                    assert _same(g.property("cell__" + name)[vid], value), f"{stage}: cell {row}.{name}"
+            for name, value in attributes(cell).items():
+                assert _same(g.property("cell__" + name)[vid], value), f"{stage}: cell {row}.{name}"
+        if stage != "grouping":                                # P5.1: the cells are views of the MPG from here on
+            assert isinstance(organ.all_cells, MPGCells) and all(isinstance(c, CellView) for c in cells)
         regions = tissue_regions(cells)
         layer_of = [g.complex(v) for v in written["cells"]]
         assert len(set(layer_of)) == len(set(regions.tolist())) == len(written["layers"])

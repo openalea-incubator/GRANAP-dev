@@ -593,3 +593,12 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - `MPGBacked.converted_pipeline = True` (False: GRANAP's modules), like `exact_speedups`.
 - **Times:** dicot root 5.81 → 5.60 s (−4 %); monocot root 2.77 → 2.53 s (−9 %). The dicot cross-check and the stage tests pass.
 - **Next, P5.1:** cells as views of the MPG. The stages that create cells (air spaces, fusions, the calibration's attempts on copies) write them into the MPG.
+
+## 23. P5.1 done (2026-10-13)
+
+- **`mpg/cells.py`:** from the grouping on, the organ's cells are `CellView`s. A view is a `Cell` keeping nothing itself: its attributes are read from and written to its Cell vertex's properties. GRANAP's algorithms run on them unchanged, so `cell.type = …` edits the MPG.
+  - **`MPGCells`** (a `CellManager`) and **`ViewList`** adopt the plain Cells GRANAP brings (an air space appended, fusions extended, the calibration's copies assigned). A cell of the section (same uid) updates only the attributes that differ; a new cell gets a vertex and a protoplast in a provisional Layer, dissolved by the next stage's regrouping.
+  - Copying a view gives a detached plain Cell (same values and uid). The stage writes no longer rewrite the views' attributes; they only recompute Layers, rows and removals.
+  - At the end the organ gets plain Cells back, rebuilt from the MPG, as since P1.
+- **Time:** none added. Converted against GRANAP's modules: dicot root 6.12 against 6.40 s, monocot 2.80 against 3.02 s (absolute times vary from run to run on this machine).
+- **Tests:** the stage test now also checks that the cells are views from the intercellular stage on. The stage tests, the monocot cross-check and the capability folder (10) pass; the full comparison folder runs at the end of the step.

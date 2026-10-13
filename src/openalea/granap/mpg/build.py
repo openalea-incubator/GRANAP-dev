@@ -78,6 +78,11 @@ def tissue_regions(cells) -> np.ndarray:
 UID = "cell_uid"                              # the stable id a cell carries through the stages (Q-P2c)
 
 
+def _is_view(cell) -> bool:
+    """Whether *cell* is a view of the MPG (mpg.cells.CellView), whose attributes are already its vertex's."""
+    return getattr(type(cell), "_mpg_view", False)
+
+
 def _record(cell) -> dict:
     """A GRANAP Cell's attributes as written to its Cell vertex (cell__<name>), its pipeline uid left out."""
     return {name: value for name, value in vars(cell).items() if name != UID}
@@ -107,10 +112,10 @@ def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -
             setattr(cell, UID, written["next_uid"])
             written["next_uid"] += 1
     uids = [getattr(c, UID) for c in cells]
-    if len(set(uids)) != len(uids):                    # a cell duplicated by a stage: the copies are new cells
+    if len(set(uids)) != len(uids):                    # a cell duplicated by a stage: the plain copies are new cells
         seen = set()
-        for cell in cells:
-            if cell.cell_uid in seen:
+        for cell in sorted(cells, key=lambda c: not _is_view(c)):         # the views keep their uid
+            if cell.cell_uid in seen and not _is_view(cell):
                 cell.cell_uid = written["next_uid"]
                 written["next_uid"] += 1
             seen.add(cell.cell_uid)
@@ -120,6 +125,8 @@ def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -
     g.remove_connections([written["protoplast_of_uid"].pop(u) for u in gone])        # vertices and properties
     g.remove_connections([written["cell_of_uid"].pop(u) for u in gone])
     old_layers = list(written["layers"])
+    if written.get("provisional_layer") is not None:               # the new cells' layer, dissolved by the regrouping
+        old_layers.append(written.pop("provisional_layer"))
     regions = tissue_regions(cells)
     region_ids, first = np.unique(regions, return_index=True)
     layers = g.add_components_bulk(segment, len(region_ids), **_props(s.Layer, tissue=[cells[i].type for i in first]))
@@ -143,11 +150,12 @@ def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -
     cell_vids = [written["cell_of_uid"][u] for u in uids]
     protoplasts = [written["protoplast_of_uid"][u] for u in uids]
     properties = g.properties()
+    plain = [(v, c) for v, c in zip(cell_vids, cells) if not _is_view(c)]     # views already live in the MPG
     for name in [n for n in properties if n.startswith("cell__")]:
         values = properties[name]
-        for v in cell_vids:
+        for v, _ in plain:
             values.pop(v, None)                                    # an attribute a stage removed stays removed
-    _write_present(g, "cell__", cell_vids, [_record(c) for c in cells])
+    _write_present(g, "cell__", [v for v, _ in plain], [_record(c) for _, c in plain])
     for prop, values in (("cell_row", range(len(cells))), ("tissue", [c.type for c in cells]), (UID, uids)):
         target = properties.setdefault(prop, {})
         for v, p, value in zip(cell_vids, protoplasts, values):

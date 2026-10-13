@@ -32,6 +32,8 @@ from openalea.granap.stem_dicot_continuous_class import ContinuousDicotStemAnato
 from openalea.granap.stem_monocot_class import MonocotStemAnatomy as _MonocotStem
 
 from openalea.granap.mpg.build import single_plant_mpg, write_cells, write_network
+from openalea.granap.cell_manager import CellManager
+from openalea.granap.mpg.cells import CellStore, MPGCells
 from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
@@ -68,11 +70,19 @@ class MPGBacked:
         if self.mpg is None:
             self.mpg, self.segment = single_plant_mpg()
         self._mpg_written = write_cells(self.mpg, self.segment, self, self._mpg_written, stage)
+        store = getattr(self, "_cell_store", None)
+        if store is not None:                                    # views of removed cells are forgotten
+            alive = self._mpg_written["cell_of_uid"]
+            for uid in [u for u in store.views if u not in alive]:
+                del store.views[uid]
         for hook in getattr(self, "mpg_stage_hooks", ()):
             hook(self, stage)
 
     def add_intercellular_spaces(self):
         self._mpg_stage("grouping")                    # the Voronoi groups, simplified, nested cells removed
+        if self.converted_pipeline:                    # P5.1: from here on, the cells are views of the MPG
+            self._cell_store = CellStore(self.mpg, self.segment, self._mpg_written)
+            self.all_cells = MPGCells(self._cell_store, self.all_cells.cells)
         return super().add_intercellular_spaces()
 
     def _add_aerenchyma_to_proportion(self, *args, **kwargs):
@@ -96,6 +106,9 @@ class MPGBacked:
         old = list(self.all_cells.cells)
         cells = cells_from_mpg(self.mpg, self._mpg_written)
         replaced = {id(a): b for a, b in zip(old, cells)}
+        if isinstance(self.all_cells, MPGCells):               # the pipeline is over: plain Cells, as since P1
+            self.all_cells = CellManager()
+            self._cell_store = None
         self.all_cells.cells[:] = cells
         for layer in getattr(self.layer_manager, "layers", []):
             layer.cells[:] = [replaced.get(id(c), c) for c in layer.cells]
