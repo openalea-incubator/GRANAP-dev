@@ -1188,3 +1188,47 @@ Not scheduled. Each is a candidate step, to be designed when chosen. The second 
   - `example/mpg/` holds the component examples;
   - GRANAP's other examples use its names, so they run the port. A sample run was not done (your interrupt).
 - **README and packaging:** metafspm is required (comments in `pyproject.toml` and `conda/environment.yaml`); `legacy` is described in the README.
+
+## 52. O1–O4 under metafspm's logic — design and measurements (2026-10-14, your go-ahead and question)
+
+**Your question: can the generation be declared as decorated steps of a component, with metafspm's scheduling?**
+- **What already follows metafspm's logic:**
+  - the anatomies of a population are a `StructuralComponent` (`GranapAnatomy`), updated in its `@postsegmentation` step;
+  - its network is solved by `@graph_system`s over the DataStructure;
+  - its quantities are DataStructure variables (C1).
+- **The generation of a section is not a time-stepped process,** so its stages do not map onto metafspm's step kinds:
+  - **Kinds are global rows run every time step.** A kind (`@stepinit`, `@rate`, `@state`, … `@postsegmentation`) runs for every component, in a fixed order, once per time step. A section is generated once, when its class first appears. There is no "once per new class" kind, and adding one would be a new scheduling concept for one model.
+  - **The stages are strictly sequential within one section,** each one consuming the previous one's cells. Step kinds give no order finer than the row.
+  - **The stages change the topology at every boundary** (cells created, fused, removed), with geometry (polygons) as their main data. metafspm steps compute fields on a fixed topology, which is then updated between steps (`update_topology`).
+- **So the right fit is the one in place:** the generation is a service of the structural component (its library), called in its `@postsegmentation` step when a new class appears, and producing DataStructure-backed sections.
+- **What can move further into metafspm's logic is the numeric part:** the quantities a stage computes on a fixed set of cells (areas, radii, fill targets) as DataStructure variables computed in bulk. That is the cell-view question (B2 option b), not needed for O1–O4.
+
+**Measurements behind O1–O4.**
+- **O2, the solve** (the seedling: 398 k nodes, 980 k edges; the capability test's hydraulic model; 60 s profiled):
+  - the Jacobian is built by finite differences (no analytic one is declared): 35 s;
+  - of these, 6 s are scipy's column grouping (`group_sparse`) and 9 s its perturbation vectors, recomputed at each solve although they depend only on the sparsity pattern, i.e. on the topology;
+  - the LU solves (SuperLU) take 6 s.
+- **O4, a growth step's whole-MPG passes** (§33): about 1.5 s on the seedling (owner scales 0.58 s, topology arrays 0.55 s, linked parents in the rewiring 0.45 s).
+- **O3, one dicot root's generation** (11 s profiled):
+  - the snap's own Python is 0.77 s;
+  - the views' attribute reads and adoptions about 2 s (cumulative);
+  - the grouping's unions 1.5 s, which is GEOS itself.
+- **O1, several sections in one pass:** a section's work is GEOS operations proportional to its cells, plus per-cell Python. Batching sections removes only the per-call overhead of the bulk calls, which is small. No exact gain worth measuring is expected.
+
+**Proposal, by where the code goes:**
+- **O2 → metafspm's solver (`solve/`):** the Jacobian's sparsity pattern and its column grouping cached per topology version (the DataStructure's `topology_version`) and per equation set. The same groups give the same finite-difference Jacobian, so it is exact. An analytic Jacobian for linear edge laws would gain more, but it is a model-side declaration (`@graph_jacobian`), left to the models.
+- **O4 → metafspm's MPG (DS14b in your scene plan):** array mirrors of `parent`, `complex` and `scale`, kept with the structural signature. The owner maps, `linked_parent` and the topology arrays read them instead of walking dicts. Exact (the same results), checked by metafspm's suite and the GRANAP growth reference.
+- **O3 → GRANAP:** numba kernels for the snap's clustering and maps, with the same arithmetic. Python's `round` stays in Python, since numba's `round(x, 6)` is not guaranteed to round the same way. The views' cost goes with B2 (b), not O3.
+- **O1:** not done, for the reason above.
+
+## 53. Questions (2026-10-14)
+
+- **Q-O1 — drop O1?**
+  - **Recommendation:** yes. Its exact gain is negligible; the per-cell Python it would have amortized is O3's.
+  - → answer:
+- **Q-O2/O4 — these two are changes in metafspm's core** (the solver, the MPG). Do them in metafspm now, in that order, each with metafspm's suite and the GRANAP checks?
+  - **Recommendation:** yes. O2 is the largest measured gain (the solve), and O4 is step 5 of your scene plan (PA2: yes).
+  - → answer:
+- **Q-O3 — numba as a GRANAP dependency** (it is in the env: 0.68)?
+  - **Recommendation:** yes, for the snap first, with the comparison folder as the check.
+  - → answer:
