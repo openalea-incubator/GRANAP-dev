@@ -1270,3 +1270,28 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
 - **Q-D2 — the anatomy's parametrization per plant:** overrides of GRANAP's input sections (`{section: {field: value}}`, per organ kind and class) as one object-valued parameter? Or flattened into numeric parameters (`cortex__n_layers`, …), one declaration per field?
   - **Recommendation:** the overrides object. GRANAP has hundreds of fields across organ kinds. Declaring each one would freeze a large API, while the overrides follow GRANAP's own `OrganInputData` sections and its validation.
   - → answer:
+
+## 56. O4 done; O3 measured again (2026-10-14)
+
+- **O4 (metafspm 26bb644, DS14b):**
+  - `add_components_bulk` records its vertices' parents and complexes, and the incremental topology arrays read these records instead of the MTG's dicts, vertex by vertex;
+  - `replace_parent` counts as a structural edit, so the cached arrays are rebuilt (they used to stay stale after a reparenting);
+  - `_valid_vids_at` is cached per structure;
+  - the anatomy signature reads its columns in bulk.
+
+  The same arrays, as a new metafspm test checks against a full rebuild. metafspm's suite: 796 passed; GRANAP's component tests pass; the GRANAP growth reference is identical. On the seedling:
+
+  | | before | after |
+  |---|---|---|
+  | build | 21 s | 13.6 s |
+  | 9-segment emergence | 2.2 s | 1.6 s |
+  | class change (with the new template's generation) | 7.8 s | 6.4 s |
+
+- **O3 (numba for the snap), measured without the profiler: not worth it.**
+  - The snap now takes 0.06–0.13 s per call, 2,834 cells for the largest. That is about 0.25 s per dicot root over its 4 calls, 6 % of its 3.8 s. The 0.77 s of §52 was cProfile's, which inflates pure-Python loops several times.
+  - By phase, for the largest call: rings and tolerance 0.015 s, KD-tree query 0.007 s, clustering 0.011 s, vertex map 0.011 s, edge map 0.008 s, junctions 0.005 s.
+  - A kernel could take half of that at best (about 3 %): the dicts and sets of tuples it returns, which the exporter, the writer and the simplification read, must still be built in Python.
+  - numba also compiles at the first call in each process (about a second per kernel, unless cached on disk). For a simulation generating a few templates per process, that cancels the gain.
+- **Q-O3b — drop O3?**
+  - **Recommendation:** yes, not implemented. The measured cost of what remains is GEOS (the grouping's unions, the intercellular unions) and the cell views (the B2 b question), not Python loops a kernel would take.
+  - → answer:
