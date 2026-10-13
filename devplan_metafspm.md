@@ -813,3 +813,22 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - **Profiled emergence step:** 5.1 s → 4.3 s (rewiring 1.6 → 0.56 s, inheritance 0.56 → 0.27 s).
   - **What is left:** instantiation (2.2 s, writing about 2 M values through dicts), and the DataStructure's whole-MPG passes (owner scales 0.7 s, topology arrays 0.7 s).
   - **Tests:** metafspm 794 passed; GRANAP capabilities 11 passed (63 s → 44 s).
+
+## 33. A4 (2026-10-13)
+
+- **Instantiation as array appends:** a copy's values are appended to the array-backed properties in one copy (metafspm `ArrayDict.extend`, `MPG.set_values`), instead of a dict per property and `ArrayDict.update`. The same vids and values: identical to the growth reference.
+  - **Emergence step** (9 segments): 3.3 s → 2.2 s;
+  - **seedling build:** 27 s → 21 s;
+  - **profiled step:** 4.3 s → 2.9 s;
+  - **metafspm's suite:** 794 passed, 29 s → 17 s.
+- **The classes from arrays: not done.**
+  - Computing the class keys costs little (48 segments). What does cost is finding the segments (`components_at_scale`, 0.29 s profiled).
+  - Reading them from arrays would change the order the new segments are processed in, so the vids they get, for little gain.
+  - It is worth doing when the plants have thousands of segments, together with DS14a/b (the MPG's array mirrors in your scene plan).
+- **One instantiation per template for all its new segments: not done either.** Since the writes are appends, it would save only per-call overhead, and it would also renumber the vids.
+- **What remains of a growth step:** the DataStructure's whole-MPG passes:
+  - owner scales and variable stores, 0.58 s;
+  - topology arrays, 0.55 s;
+  - rewiring, 0.45 s, mostly the linked parent of every segment.
+
+  These belong with DS14b (array mirrors of parent, complex, scale).
