@@ -24,10 +24,16 @@ from openalea.granap.mpg.topology import topology_from_mpg
 _PAIRWISE_BLOCK = 128          # numpy's pairwise summation: one block up to 128 values
 
 
+def _starts(lens):
+    """The start of each run of *lens* consecutive values (empty for none)."""
+    lens = np.asarray(lens, dtype=np.int64)
+    return np.cumsum(lens) - lens
+
+
 def _sequential_sums(values, lens):
     """Per run of *lens* consecutive values, their sum in order from 0 (Python's sum)."""
     lens = np.asarray(lens, dtype=np.int64)
-    starts = np.concatenate(([0], np.cumsum(lens)[:-1])) if lens.size else lens
+    starts = _starts(lens)
     out = np.zeros(lens.size)
     for j in range(int(lens.max()) if lens.size else 0):
         m = lens > j
@@ -61,7 +67,7 @@ def _means(values, lens):
     values, numpy's own mean above."""
     lens = np.asarray(lens, dtype=np.int64)
     out = np.empty(lens.size)
-    starts = np.concatenate(([0], np.cumsum(lens)[:-1])) if lens.size else lens
+    starts = _starts(lens)
     for n in np.unique(lens).tolist():
         runs = np.flatnonzero(lens == n)
         if n <= _PAIRWISE_BLOCK:
@@ -127,13 +133,13 @@ def _walls(cell_vkeys, junction_set, protected_shape_set):
     normal = np.flatnonzero(n_junc >= 2)
     closed = n_per[normal] + 1
     cell_rep = np.repeat(normal, closed)
-    local = np.arange(int(closed.sum())) - np.repeat(np.concatenate(([0], np.cumsum(closed)[:-1])), closed)
+    local = np.arange(int(closed.sum())) - np.repeat(_starts(closed), closed)
     cv = flat[offsets[cell_rep] + (j0[cell_rep] + local) % n_per[cell_rep]]
     jp = np.flatnonzero(is_j[cv])
     last = np.r_[cell_rep[jp][1:] != cell_rep[jp][:-1], True] if jp.size else np.zeros(0, dtype=bool)
     P, E = jp[~last], jp[np.flatnonzero(~last) + 1]
     seg_cell = cell_rep[P]
-    seg_k = np.arange(P.size) - np.repeat(np.concatenate(([0], np.cumsum(n_junc[normal])[:-1])), n_junc[normal])
+    seg_k = np.arange(P.size) - np.repeat(_starts(n_junc[normal]), n_junc[normal])
     js, je = cv[P], cv[E]
     cp = np.concatenate(([0], np.cumsum(is_p[cv])))
     signatures = {(): 0}
@@ -182,7 +188,7 @@ def _walls(cell_vkeys, junction_set, protected_shape_set):
     seq_lens = np.array([s.size for s in sequences], dtype=np.int64)
     concat = np.concatenate(sequences) if sequences else np.zeros(0, dtype=np.int64)
     steps = np.hypot(xy[concat[1:], 0] - xy[concat[:-1], 0], xy[concat[1:], 1] - xy[concat[:-1], 1])
-    starts = np.concatenate(([0], np.cumsum(seq_lens)[:-1]))
+    starts = _starts(seq_lens)
     step_index = np.concatenate([np.arange(a, a + n - 1) for a, n in zip(starts, seq_lens)]) if n_walls else \
         np.zeros(0, dtype=np.int64)
     lengths = _sequential_sums(steps[step_index], seq_lens - 1)
@@ -237,7 +243,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     n_walls, xy, wall_cells = walls["n_walls"], walls["xy"], walls["cells"]
     lengths, mid_x, mid_y = walls["lengths"], walls["mid_x"], walls["mid_y"]
     counts = np.array([len(wc) for wc in wall_cells], dtype=np.int64)
-    starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+    starts = _starts(counts)
     mem_w = np.repeat(np.arange(n_walls), counts)                  # (wall, cell) in the walls' encounter order
     mem_r = np.fromiter((r for wc in wall_cells for r in wc), dtype=np.int64, count=int(counts.sum()))
     type_thickness = {t: get_thickness(t) for t in set(types[r] for r in valid_list)}
