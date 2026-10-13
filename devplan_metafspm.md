@@ -678,3 +678,95 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
 - `_cells_gdf` becomes a view: built from the MPG's cells when first read, cached, and dropped when the cells change (stage writes, bridge cells, cells read back). GRANAP's code that reads it (XML writer, statistics, plots) or edits it in place (`retag_cells`) works unchanged.
 - For organs whose `generate_cells` is `Organ`'s; the CellSet and ROI organs keep theirs (P5.6).
 - **Check:** the comparison folder (176 tests).
+
+## 29. N1 and N2 done (2026-10-13)
+
+- **N1, `mpg/network.py`:** the stored network built from the MPG's cells and rings, as array operations, and written straight into Compartments and Connections. It is exact: the same graph as the exporter, node for node, edge for edge and every attribute (`via_*` of the air links included), on all 8 cross-check organs and both leaves.
+  - **Exactness checks:**
+    - numpy's `mean` reproduced bit for bit: its pairwise sum is emulated up to 128 values and checked against `np.mean` for every length;
+    - `np.hypot` on arrays equals the scalar call.
+  - **`organ.graph`** is a view, built from the MPG at its first read. **`export_to_adjencymatrix`** reads the Connections (COO, then LIL), without networkx.
+  - **The converted exporter (P5.2)** remains for exports with other settings (needle bridges, `air_link_radius`, wall thicknesses).
+  - **Flag:** `MPGBacked.native_network` (False: the exporter, copied into the MPG).
+  - **Test:** `test_native_network.py` compares N1 with the exporter on 10 organs, plus the matrix.
+- **N2, `mpg/pipeline/generate.py`:** GRANAP's `Organ.generate_cells`, copied.
+  - **The stages are explicit** ("grouping", "fused_gaps") instead of method overrides. "intercellular" and "aerenchyma" stay on the calibration, which the organs' own methods call.
+  - **No GeoDataFrame during generation:** `_cells_gdf` is a view, built from the cells when first read. `generate_section()` generates without building it (the library's templates, the XML writer, the matrix). The topology rows come from the cells.
+- **metafspm, `ArrayDict.update` in bulk:**
+  - new keys skip the per-key membership test;
+  - the index of appended keys is built in one call;
+  - the merge is one stable sort.
+
+  A section's MPG writes go from 0.25 s to 0.07 s. The suite passes (data structures, 266).
+- **Times** (generation plus matrix, median of 5 interleaved runs):
+
+  | organ | before | after | change |
+  |---|---|---|---|
+  | dicot root | 5.71 s | 5.22 s | −9 % |
+  | monocot root | 2.71 s | 2.42 s | −11 % |
+  | dicot leaf | 3.98 s | 3.61 s | −9 % |
+
+  - The stored-network stage goes from 0.65 to 0.24 s, the matrix from 0.21 to 0.02 s.
+  - GeoDataFrames built: 0 (2 before).
+- **Full check:** the comparison folder passes, 186 tests (176 plus the 10 of N1), 15 min. One test reads `inputs/` relative to `test/`, so the folder runs from there. The two examples run.
+
+## 30. Overview: where a component-native logic would pay (2026-10-13, your request)
+
+Dicot root, one template, with the stage times from GRANAP's log:
+
+| stage | time |
+|---|---|
+| seeds | 0.64 s |
+| vascular and organ tissues | 0.34 s |
+| Voronoi | 0.17 s |
+| grouping | 1.21 s |
+| intercellular spaces and aerenchyma | 1.87 s |
+| fused gaps | 0.15 s |
+| network | 0.24 s |
+| stage writes | 0.13 s |
+
+Under the profiler, the shares within the stages are:
+- the aerenchyma calibration: 9 attempts, each re-simplifying the whole section, about 28 %;
+- the seeds: 68 k Polygons and 46 k Points created one by one, 16 %;
+- the CellView attribute reads and adoptions, about 11 %;
+- the GEOS unions of the grouping, 9 %.
+
+**A. A population MPG: where the wall time is.** A population needs one template per anatomy class, and a seedling has tens of classes.
+- **A1, templates generated in parallel.** Classes are independent and seeded deterministically, so a process pool can generate them. A `Template` is tables plus shapely geometries, which pickle once its back-reference to the organ is dropped. Generation time then divides by the number of cores. This fits your scene plan: parallel offline generation, then the simulation in one MPG and one process.
+- **A2, a template cache on disk:** the library saved by (parameters, class key), and reloaded instead of regenerated. A rerun of a population then generates nothing.
+- **A3, junctions and inheritance per pair of templates.** `vessel_pairs` and `granap_inheritance` run per pair of successive sections: Python loops, distance matrices, upstream chains through `linked_parent`. Yet their result depends only on the two templates. They could be computed once per (template, template) pair and applied in bulk through `template_node`. The cost then follows the number of distinct pairs, not the number of segments.
+- **A4, classes and instantiation in bulk.**
+  - `update_anatomies` loops over segments, and `segment_class` walks to the nearest junction for each one. The class keys can come from arrays (diameter, distance from the tip, and from the junction by an axis scan, DS14a in your scene plan).
+  - Then one `instantiate` per template for all its new segments, and one removal for the replaced ones.
+
+**B. Generation of one template, by measured weight:**
+- **B1, the aerenchyma calibration on the MPG.** An attempt only changes which cells become aerenchyma, and the proportion is an area ratio. The target count can be found on the area arrays, and the geometry run once instead of once per attempt (up to 21). Whether this is exact depends on whether an attempt's geometry changes the areas it measures; to check before choosing.
+- **B2, the post-grouping stages native** (intercellular spaces, fusions, gaps) on the MPG's arrays instead of through CellViews. This removes the view layer and its cost (about 11 %), and with it `cells.py` and the mixin's overrides.
+- **B3, the seeds as arrays** (x, y, layer, group, type), with shapely's vectorised predicates instead of a Cell, Point and Polygon per seed. Likely exact (the same draws in the same order); to verify.
+- **B4, the grouping unions as coverage unions:** Voronoi regions form a coverage, and GEOS's coverage union is faster than a general union. The vertex order of the result differs, so the goldens change (a reviewed change, Q-P5c).
+- **B5, the snap** (`_build_topology`, 0.9 s of Python over 4 calls): vectorising it would have to keep GRANAP's greedy clustering order to stay exact. That is hard; a compiled loop is the fallback.
+
+**C. Readability and the component design:**
+- **C1, the network as DataStructure variables.** Today the attributes are `node__`/`edge__` properties holding tuples and small arrays (`position`, `d_vec`). As float variables registered with units (`x`, `y`, `dx`, `dy`, `length`, `wall_thickness`), the graph systems read them as they read any variable. networkx stays only as GRANAP's view.
+- **C2, no process-wide patches.** `stored_topology` and `exact_speedups` replace `CellGenerator` methods for the whole process. That is hard to read and unsafe with threads. After N1, only the XML writer and the exports with bridges or other settings need them. Converting the XML writer (walls and junctions from the MPG) and adding bridges to N1 would retire both.
+- **C3, one pipeline that reads as stages.** `generate.py` already lists the stages. As they turn native (B1, B2), the overrides retire, and the pipeline becomes a sequence of functions, each writing the section into the MPG.
+
+**Recommended order:**
+1. A1 and A2 (the most wall time for a population, and no exactness risk);
+2. A3 and A4;
+3. B1 with B2 (the largest stage, and the view layer goes);
+4. C1 and C2;
+5. B3;
+6. B4 and B5 only with reviewed golden changes.
+
+## 31. Questions (2026-10-13)
+
+- **Q-N1 — next step.** Start with A1 and A2 (templates in parallel, cached on disk), or with B1 and B2 (the aerenchyma calibration and the post-grouping stages on the MPG)?
+  - **Recommendation:** A1 and A2. They give the most for a population, are independent of the pipeline, and stay exact by construction.
+  - → answer:
+- **Q-N2 — the cache's key.** Should the template cache be keyed on the full parameters (any change regenerates), and stored next to the run (e.g. `outputs/anatomy_cache/`) or in a user cache directory?
+  - **Recommendation:** the full parameters plus GRANAP's and the geometry stack's versions, in a directory given to the library (default: none, i.e. no cache).
+  - → answer:
+- **Q-N3 — B1's exactness.** If the calibration found on area arrays differs from GRANAP's attempt loop in some cases, accept a reviewed golden change, or keep the attempt loop?
+  - **Recommendation:** first measure on the cross-check organs whether it differs at all, then decide with the cases in hand.
+  - → answer:

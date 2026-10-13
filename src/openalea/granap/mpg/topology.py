@@ -20,19 +20,16 @@ _DESCRIPTOR = CellGenerator.__dict__["_build_topology"]
 _ORIGINAL_BUILD = _DESCRIPTOR.__func__
 
 
-def _valid_rows(gdf):
-    """The rows the exporter and the XML writer tessellate: a valid geometry, not a bridge cell."""
-    valid = gdf["geometry"].notna() & gdf["geometry"].apply(lambda p: p is not None and not p.is_empty)
-    if "bridge" in gdf.columns:
-        valid = valid & ~gdf["bridge"].astype(bool)
-    rows = gdf[valid]
-    protect = set(rows.index[rows["protect_topology"]]) if "protect_topology" in rows.columns else None
-    return list(rows.index), list(rows["geometry"]), protect
+def _valid_rows(cells):
+    """The rows the exporter and the XML writer tessellate (a valid geometry), their polygons, and the protected
+    rows among them (protect_topology), as they read them from the cell GeoDataFrame."""
+    rows = [r for r, c in enumerate(cells) if c.polygon is not None and not c.polygon.is_empty]
+    return rows, [cells[r].polygon for r in rows], set(r for r in rows if cells[r].protect_topology)
 
 
 def store_topology(g, segment, organ, written: dict) -> tuple:
     """Snap the final cells' vertices once (GRANAP's phase 0), store each ring on its protoplast; returns the topology."""
-    ids, polys, protect = _valid_rows(organ._cells_gdf)
+    ids, polys, protect = _valid_rows(organ.all_cells.cells)
     topology = _ORIGINAL_BUILD(polys, ids, protect_ids=protect)
     cell_vkeys = topology[0]
     boundary = g.properties().setdefault("boundary", {})

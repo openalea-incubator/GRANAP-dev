@@ -38,6 +38,7 @@ from openalea.granap.cell_manager import CellManager
 from openalea.granap.mpg.cells import CellStore, MPGCells
 from openalea.granap.mpg.network import build_network
 from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
+from openalea.granap.mpg.pipeline.generate import generate_cells
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
@@ -50,24 +51,56 @@ class MPGBacked:
     segment = None
     _mpg_written = None
     mpg_stage_hooks = ()             # callables (organ, stage) after each stage write (tests, diagnostics)
+    _converted_generation = False    # N2: within the converted generate_cells, which writes the stages itself
     exact_speedups = True            # P4: GRANAP's pipeline with exact speed-ups (identical outputs); False: as is
     converted_pipeline = True        # P5: the converted copies of GRANAP's modules (mpg/pipeline/); False: GRANAP's
     native_network = True            # N1: the stored network built in the MPG; False: the exporter, copied into it
 
     def generate_cells(self):
-        if getattr(self, "_cells_gdf", None) is not None:
-            return self._cells_gdf
-        if self.exact_speedups:
-            with exact_speedups(self):
-                super().generate_cells()
-        else:
-            super().generate_cells()
-        self._mpg_stage("final")
-        self._read_cells_back()
-        self._store_network()
+        """GRANAP's: the cells generated (once), and their GeoDataFrame, a view of the MPG built when first read."""
+        self.generate_section()
         return self._cells_gdf
 
-    # ── Stages (P2): the pipeline's cells written into the MPG at each boundary, GRANAP's own calls unchanged ──
+    def generate_section(self) -> None:
+        """The section generated once into the MPG: the pipeline stage by stage, the final cells, the stored network."""
+        if self.__dict__.get("_mpg_generated"):
+            return
+        converted = self.converted_pipeline and _inherited(type(self), "generate_cells") is _Organ.generate_cells
+        self._converted_generation = converted
+        try:
+            if self.exact_speedups:
+                with exact_speedups(self):
+                    self._run_pipeline(converted)
+            else:
+                self._run_pipeline(converted)
+        finally:
+            self._converted_generation = False
+        self._mpg_stage("final")
+        self._read_cells_back()
+        self.__dict__["_mpg_generated"] = True                  # the cells are final; the network follows them
+        self._store_network()
+
+    def _run_pipeline(self, converted: bool) -> None:
+        if converted:
+            generate_cells(self)                               # N2: GRANAP's, the stages explicit, no GeoDataFrame
+        else:
+            super().generate_cells()
+
+    @property
+    def _cells_gdf(self):
+        """The cell GeoDataFrame: once generated, built from the cells at its first read (then cached)."""
+        gdf = self.__dict__.get("_gdf")
+        if gdf is None and self.__dict__.get("_mpg_generated"):
+            gdf = self.__dict__["_gdf"] = gdf_from_cells(self.all_cells.cells, self.__dict__.get("_gdf_n_real"))
+        return gdf
+
+    @_cells_gdf.setter
+    def _cells_gdf(self, value):
+        self.__dict__["_gdf"] = value                          # GRANAP's own writes (bridge rows, retagging)
+        if value is None:                                      # Organ._invalidate_geometry: to be generated again
+            self.__dict__["_mpg_generated"] = False
+
+    # ── Stages (P2): the pipeline's cells written into the MPG at each boundary ──
 
     def _mpg_stage(self, stage: str) -> None:
         """Write the current cells into the section's MPG (created at the first stage) as the record of *stage*."""
@@ -82,17 +115,21 @@ class MPGBacked:
         for hook in getattr(self, "mpg_stage_hooks", ()):
             hook(self, stage)
 
-    def add_intercellular_spaces(self):
-        self._mpg_stage("grouping")                    # the Voronoi groups, simplified, nested cells removed
+    def _grouped(self) -> None:
+        """The Voronoi groups, simplified, nested cells removed: stage "grouping"; then the cells become views."""
+        self._mpg_stage("grouping")
         if self.converted_pipeline:                    # P5.1: from here on, the cells are views of the MPG
             self._cell_store = CellStore(self.mpg, self.segment, self._mpg_written)
             self.all_cells = MPGCells(self._cell_store, self.all_cells.cells)
+
+    def add_intercellular_spaces(self):
+        if not self._converted_generation:             # GRANAP's generate_cells: the grouping ends here
+            self._grouped()
         return super().add_intercellular_spaces()
 
     def _add_aerenchyma_to_proportion(self, *args, **kwargs):
         self._mpg_stage("intercellular")
-        inherited = next(c.__dict__["_add_aerenchyma_to_proportion"] for c in type(self).__mro__[1:]
-                         if "_add_aerenchyma_to_proportion" in c.__dict__ and c is not MPGBacked)
+        inherited = _inherited(type(self), "_add_aerenchyma_to_proportion")
         if self.converted_pipeline and inherited is _Organ.__dict__["_add_aerenchyma_to_proportion"]:
             result = add_aerenchyma_to_proportion(self, *args, **kwargs)        # P5.3: GRANAP's, on shallow copies
         else:
@@ -102,11 +139,13 @@ class MPGBacked:
 
     def fuse_gaps(self, *args, **kwargs):
         fused = super().fuse_gaps(*args, **kwargs)
-        self._mpg_stage("fused_gaps")
+        if not self._converted_generation:             # the converted generation writes the stage itself
+            self._mpg_stage("fused_gaps")
         return fused
 
     def _read_cells_back(self, n_real=None):
-        """all_cells, the layers' cell lists and the GeoDataFrame, from the MPG (the same cells, the same order)."""
+        """all_cells and the layers' cell lists from the MPG (the same cells, the same order); the GeoDataFrame
+        follows them (with *n_real*, the cells after it are the exporter's bridge cells)."""
         old = list(self.all_cells.cells)
         cells = cells_from_mpg(self.mpg, self._mpg_written)
         replaced = {id(a): b for a, b in zip(old, cells)}
@@ -116,7 +155,7 @@ class MPGBacked:
         self.all_cells.cells[:] = cells
         for layer in getattr(self.layer_manager, "layers", []):
             layer.cells[:] = [replaced.get(id(c), c) for c in layer.cells]
-        self._cells_gdf = gdf_from_cells(cells, n_real)
+        self.__dict__["_gdf"], self.__dict__["_gdf_n_real"] = None, n_real      # the view, rebuilt when read
 
     def _store_network(self) -> None:
         """
@@ -137,7 +176,7 @@ class MPGBacked:
 
     def write_to_xml(self, path: str, **kwargs):
         """GRANAP's XML writer, its walls numbered from the topology stored in the MPG (P2.3)."""
-        self.generate_cells()
+        self.generate_section()
         with stored_topology(self):
             return super().write_to_xml(path, **kwargs)
 
@@ -172,7 +211,7 @@ class MPGBacked:
 
     def export_to_adjencymatrix(self, air_link_radius=None, **exporter_kwargs):
         """GRANAP's adjacency matrix (a 1 per edge, both ways), from the section's Connections."""
-        self.generate_cells()
+        self.generate_section()
         if self._matrix is not None:
             return self._matrix
         if not self.__dict__.get("_network_built"):
@@ -186,8 +225,7 @@ class MPGBacked:
         return self._matrix
 
     def _build_anatnetwork(self, air_link_radius=None, **exporter_kwargs):
-        if self.mpg is None:
-            self.generate_cells()
+        self.generate_section()
         written = self._mpg_written
         if not self._stored_network_matches(air_link_radius, exporter_kwargs):
             self.graph = nx.Graph()                                               # the exporter's own target
@@ -201,6 +239,11 @@ class MPGBacked:
         self.n_walls, self.n_junctions, self.n_cells = written["n_walls"], written["n_junctions"], written["n_cells"]
         self._wall_to_cells = dict(written["wall_to_cells"])
         self._network_built = True
+
+
+def _inherited(cls, name):
+    """The method *name* that *cls* inherits past MPGBacked."""
+    return next(c.__dict__[name] for c in cls.__mro__ if name in c.__dict__ and c is not MPGBacked)
 
 
 def _backed(cls):

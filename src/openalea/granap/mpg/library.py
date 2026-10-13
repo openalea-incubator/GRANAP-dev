@@ -102,7 +102,7 @@ class Template:
     @classmethod
     def from_organ(cls, organ, key, index) -> "Template":
         """The section of a generated MPG-backed organ (its stored network included), with vessel ids."""
-        organ.generate_cells()
+        organ.generate_section()
         g, w = organ.mpg, organ._mpg_written
         cells, protoplasts, apoplast, connections = w["cells"], w["protoplasts"], w["apoplast"], w["connections"]
         layer_index = {int(v): i for i, v in enumerate(w["layers"])}
