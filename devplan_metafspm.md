@@ -911,4 +911,28 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
 
 - **Q-B3 — next step.** Continue B2b–d as agreed (about 8–10 %, retires the views), or do an exact B5 first (the snap: about 21 % of generation now, perhaps half of it saved, some 150 lines)?
   - **Recommendation:** B5 first, exact, checked by the comparison folder. Then B2b–d, whose gain is mostly readability.
-  - → answer:
+  - → answer: yes to recommendation
+
+## 38. B5: the snap converted (2026-10-13; your answer Q-B3: B5 first)
+
+- **`mpg/pipeline/snap.py`:** GRANAP's `_build_topology`, converted. It is used by the topology cache (E1) and the stored topology for organs on the converted pipeline.
+  - the rings and edge lengths are read in bulk;
+  - the cluster means are summed as numpy does;
+  - the edge keys come from one comparison;
+  - the junction test reads each vertex's places in its rings, instead of scanning every ring around it (quadratic in the ring size).
+- **Exact:** every snap of every organ's generation (75 calls, 14 organs) was computed both ways. The results, and the iteration order of every dict and set returned, are identical.
+- **Found on the way:** since Python 3.12, `sum()` of exact floats is compensated (Neumaier), not a sum in order. A plain loop reproduces numpy. N1 is not affected: GRANAP's sums there run over `np.float64`, which take the plain path.
+- **Times** (medians of 5 interleaved runs):
+
+  | organ | before | after | change |
+  |---|---|---|---|
+  | dicot root | 4.90 s | 4.58 s | −7 % |
+  | monocot root | 2.24 s | 2.01 s | −10 % |
+  | dicot leaf | 3.61 s | 3.13 s | −13 % |
+
+- **Full check:**
+  - the comparison folder passes, 188 tests in 13 min (15 before);
+  - the capability tests pass;
+  - the 14 organs of `compare_sections.py` are identical.
+- **Also this step:** `compare_sections.py` covers every organ kind, with a panel of differences. It found an N1 bug on sections without shared junctions (ROI), now fixed and tested.
+- **Next:** B2b–d (your answer).

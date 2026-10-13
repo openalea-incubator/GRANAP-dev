@@ -27,10 +27,18 @@ def _valid_rows(cells):
     return rows, [cells[r].polygon for r in rows], set(r for r in rows if cells[r].protect_topology)
 
 
+def _snap(organ):
+    """GRANAP's _build_topology, or its converted copy (B5) for an organ on the converted pipeline."""
+    if getattr(organ, "converted_pipeline", False):
+        from openalea.granap.mpg.pipeline.snap import build_topology
+        return build_topology
+    return _ORIGINAL_BUILD
+
+
 def store_topology(g, segment, organ, written: dict) -> tuple:
     """Snap the final cells' vertices once (GRANAP's phase 0), store each ring on its protoplast; returns the topology."""
     ids, polys, protect = _valid_rows(organ.all_cells.cells)
-    topology = _ORIGINAL_BUILD(polys, ids, protect_ids=protect)
+    topology = _snap(organ)(polys, ids, protect_ids=protect)
     cell_vkeys = topology[0]
     boundary = g.properties().setdefault("boundary", {})
     for row, vkeys in cell_vkeys.items():
@@ -97,7 +105,7 @@ def stored_topology(organ):
         if ids is not None and [int(i) for i in cell_ids] == ids:
             organ.mpg_topology_reads = getattr(organ, "mpg_topology_reads", 0) + 1
             return topology_from_mpg(organ.mpg, organ.segment, written)
-        return _ORIGINAL_BUILD(polys, cell_ids, protect_ids=protect_ids)
+        return _snap(organ)(polys, cell_ids, protect_ids=protect_ids)
 
     CellGenerator._build_topology = staticmethod(build)
     try:

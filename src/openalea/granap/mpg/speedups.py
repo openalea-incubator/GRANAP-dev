@@ -6,7 +6,9 @@ in mpg/). The outputs are identical, bit for bit; the comparison folder checks i
         (the same polygons, coordinate for coordinate, the same ids and protected ids). The aerenchyma calibration
         simplifies the same cells at every attempt (9 of the 11 calls on a dicot root).
 
-with exact_speedups(organ): ...   active for the block (MPGBacked.generate_cells, when organ.exact_speedups)
+with exact_speedups(organ): ...   active for the block (MPGBacked.generate_cells, when organ.exact_speedups); the
+                                  topology computed by the converted snap (mpg/pipeline/snap.py, B5) when
+                                  organ.converted_pipeline
 """
 import hashlib
 from contextlib import contextmanager
@@ -30,6 +32,9 @@ def exact_speedups(organ, cache_size: int = 4):
     """Within the block, repeated _build_topology calls on identical input return the first call's result."""
     current = CellGenerator.__dict__["_build_topology"]
     compute = current.__func__ if isinstance(current, staticmethod) else current
+    if getattr(organ, "converted_pipeline", False) and compute is _DESCRIPTOR.__func__:
+        from openalea.granap.mpg.pipeline.snap import build_topology
+        compute = build_topology                         # B5: GRANAP's snap, converted (the same results)
     cache = {}
     stats = organ.__dict__.setdefault("speedup_stats", {"topology_hits": 0, "topology_calls": 0})
 
