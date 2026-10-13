@@ -655,3 +655,26 @@ Your answers in §3: Q10 (vessel ids, matching), Q11 (classes, defaults for root
   - `air_link_radius` keeps 1× the median wall, and the comment that said 3× is corrected (`mpg/pipeline/network.py`);
   - `mpg.create_from_input(input_data, seed=None)` passes the seed to the organ (a test checks it is reproducible).
 - **Q8 still open:** `cgroup` dropped by `process_voronoi_groups`, `id_layer=i_slice` on monocot metaxylem, multipart polygons in `_build_topology`. Their modules are not converted.
+
+## 28. N1 and N2: the section's network and cells built in the MPG — design (2026-10-13, your go-ahead)
+
+**Why.** The solve already runs on the MPG (the GraphView over Compartments and Connections). What still goes through GRANAP's intermediate objects is each template's generation: the cell GeoDataFrame built twice (in GRANAP's `generate_cells`, then again from the MPG), and the stored network built by the exporter into a networkx graph, copied into the MPG, and rebuilt as networkx from the MPG for the matrix. Measured on the dicot root (2834 cells, 41964 edges): snap 0.25 s, exporter 0.49 s, MPG write 0.45 s, networkx rebuilt for the matrix 0.22 s.
+
+**N1 — the network built in the MPG (`mpg/network.py`).**
+- **Input:** the section's Cells (`cell__polygon`, `cell__type`, `cell__protect_topology`, `cell__cgroup`) and the rings stored on the protoplasts (`topology_from_mpg`). No GeoDataFrame, no networkx.
+- **The exporter's rules, as array operations:**
+  - the wall walk: every ring cut at its junctions in one pass, walls keyed and numbered in first-encounter order (`np.unique`), the cells of each wall in encounter order;
+  - lengths, midpoints, thicknesses, distances and `d_vec` vectorised, with the exporter's rounding: sums in the same order, numpy's `mean` reproduced for segments under 8 vertices (sequential sum), numpy's own `mean` above;
+  - junctions sorted as tuples (`lexsort`), cell centroids and areas from shapely's vectorised functions;
+  - membrane, wall_air, wall and plasmodesmata edges as columns; the air links (both rules) on adjacency lists built from the walls, in the iteration order of GRANAP's sets and of networkx's neighbours, so that the `via_*` attributes are the same.
+- **Output:** written straight into the MPG in bulk: walls and junctions as Compartments anchored to the segment, Connections with their `edge__` attributes, the protoplasts' `node__` attributes and `mecha_index`, as today.
+- **The Connections' order** becomes the exporter's order of creation (it was networkx's iteration order). The graph is the same, node for node and edge for edge; only the Connections' numbering in the MPG differs.
+- **Kept on the converted exporter (P5.2):** exports with other settings (bridges for needles, `air_link_radius`, wall thicknesses). They are rare, and run once per organ.
+- **Views:** `organ.graph` is built from the MPG on first access (`network_from_mpg`). `export_to_adjencymatrix` reads the Connections' endpoints directly (COO, then LIL), without networkx.
+- **Check:** the cross-checks (graph, matrix, XML) against GRANAP's originals, and a test comparing N1 with the converted exporter on every organ of the cross-check.
+
+**N2 — `generate_cells` converted (`mpg/pipeline/generate.py`).**
+- GRANAP's `Organ.generate_cells`, copied: the same calls in the same order, the stage writes called where the stages end (instead of the method overrides), and no GeoDataFrame built at the end.
+- `_cells_gdf` becomes a view: built from the MPG's cells when first read, cached, and dropped when the cells change (stage writes, bridge cells, cells read back). GRANAP's code that reads it (XML writer, statistics, plots) or edits it in place (`retag_cells`) works unchanged.
+- For organs whose `generate_cells` is `Organ`'s; the CellSet and ROI organs keep theirs (P5.6).
+- **Check:** the comparison folder (176 tests).

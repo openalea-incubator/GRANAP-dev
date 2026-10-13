@@ -251,6 +251,7 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
                  label=[getattr(L.Connection, PATH_LABELS.get(data.get("path"), "Apoplastic")) for _, _, data in edges]))
     _write_present(g, "edge__", connections, [data for _, _, data in edges])
     written.update(apoplast=apo_vids, connections=connections, n_walls=n_walls, n_junctions=n_junctions,
+                   n_cells=network.n_cells,
                    wall_to_cells={int(w): list(c) for w, c in network._wall_to_cells.items()},
                    gdf_columns=list(gdf.columns))
     return written

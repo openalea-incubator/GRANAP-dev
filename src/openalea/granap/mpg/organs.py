@@ -16,6 +16,8 @@ MPG becomes the storage itself in P5.
 from types import SimpleNamespace
 
 import networkx as nx
+import numpy as np
+from scipy.sparse import coo_matrix
 
 from openalea.granap.cellset_organ import CellSetOrgan as _CellSetOrgan
 from openalea.granap.leaf_class import (DicotLeafAnatomy as _DicotLeaf, LeafAnatomy as _Leaf,
@@ -34,6 +36,7 @@ from openalea.granap.stem_monocot_class import MonocotStemAnatomy as _MonocotSte
 from openalea.granap.mpg.build import single_plant_mpg, write_cells, write_network
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.mpg.cells import CellStore, MPGCells
+from openalea.granap.mpg.network import build_network
 from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
@@ -49,6 +52,7 @@ class MPGBacked:
     mpg_stage_hooks = ()             # callables (organ, stage) after each stage write (tests, diagnostics)
     exact_speedups = True            # P4: GRANAP's pipeline with exact speed-ups (identical outputs); False: as is
     converted_pipeline = True        # P5: the converted copies of GRANAP's modules (mpg/pipeline/); False: GRANAP's
+    native_network = True            # N1: the stored network built in the MPG; False: the exporter, copied into it
 
     def generate_cells(self):
         if getattr(self, "_cells_gdf", None) is not None:
@@ -116,12 +120,16 @@ class MPGBacked:
 
     def _store_network(self) -> None:
         """
-        The hydraulic network of the final cells, stored in the MPG when the cells are generated (P2.2): GRANAP's
-        exporter run once into a scratch network, without bridges (which would add cells to the organ), so that
-        every section carries its walls, junctions and edges, and the export reads them instead of recomputing them.
+        The hydraulic network of the final cells, stored in the MPG when the cells are generated (P2.2), without
+        bridges (which would add cells to the organ), so that every section carries its walls, junctions and edges,
+        and the export reads them instead of recomputing them. Built in the MPG from the stored rings (N1), or by
+        the exporter into a scratch network copied into the MPG (native_network False).
         """
-        NetworkExporter = self._network_exporter()
         store_topology(self.mpg, self.segment, self, self._mpg_written)          # the one snapping of the section
+        if self.native_network:
+            build_network(self)
+            return
+        NetworkExporter = self._network_exporter()
         scratch = SimpleNamespace(graph=nx.Graph(), n_walls=0, n_junctions=0, n_cells=0, _wall_to_cells={})
         with stored_topology(self):
             NetworkExporter(self).export(scratch, bridges=False)
@@ -148,21 +156,51 @@ class MPGBacked:
         wants_bridges = exporter_kwargs.get("bridges", True)
         return not (wants_bridges and self.network_bridge_specs())
 
+    # ── The network (N1): stored in the MPG; GRANAP's graph and matrix are views of it ──
+
+    @property
+    def graph(self):
+        """The exporter's networkx graph, built from the MPG at its first read after the network is (re)built."""
+        graph = self.__dict__.get("_graph")
+        if graph is None:
+            graph = self.__dict__["_graph"] = network_from_mpg(self.mpg, self._mpg_written)
+        return graph
+
+    @graph.setter
+    def graph(self, value):
+        self.__dict__["_graph"] = value
+
+    def export_to_adjencymatrix(self, air_link_radius=None, **exporter_kwargs):
+        """GRANAP's adjacency matrix (a 1 per edge, both ways), from the section's Connections."""
+        self.generate_cells()
+        if self._matrix is not None:
+            return self._matrix
+        if not self.__dict__.get("_network_built"):
+            self._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
+        g, written = self.mpg, self._mpg_written
+        u_of, v_of = g.property("edge_u"), g.property("edge_v")
+        u = np.array([u_of[e] for e in written["connections"]], dtype=np.int64)
+        v = np.array([v_of[e] for e in written["connections"]], dtype=np.int64)
+        n = self.n_total
+        self._matrix = coo_matrix((np.ones(2 * u.size), (np.r_[u, v], np.r_[v, u])), shape=(n, n)).tolil()
+        return self._matrix
+
     def _build_anatnetwork(self, air_link_radius=None, **exporter_kwargs):
         if self.mpg is None:
             self.generate_cells()
         written = self._mpg_written
         if not self._stored_network_matches(air_link_radius, exporter_kwargs):
+            self.graph = nx.Graph()                                               # the exporter's own target
             with stored_topology(self):                                           # the stored rings, not a new snap
                 self._network_exporter()(self).export(self, air_link_radius=air_link_radius, **exporter_kwargs)
             written = write_network(self.mpg, self.segment, self, written)        # replaces the stored one
             n_real = len(written["cells"]) - len(written.get("bridge_cells", []))
             if len(written["cells"]) > n_real or "bridge" in self._cells_gdf.columns:
                 self._read_cells_back(n_real)
-        self.graph = network_from_mpg(self.mpg, written)
-        self.n_walls, self.n_junctions = written["n_walls"], written["n_junctions"]
-        self.n_cells = self.graph.number_of_nodes() - self.n_walls - self.n_junctions
+        self.graph = None                                                         # a view of the MPG, when read
+        self.n_walls, self.n_junctions, self.n_cells = written["n_walls"], written["n_junctions"], written["n_cells"]
         self._wall_to_cells = dict(written["wall_to_cells"])
+        self._network_built = True
 
 
 def _backed(cls):
