@@ -960,3 +960,26 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - the 14 organs of `compare_sections.py` are identical.
 - **Times** (medians of 5 interleaved runs): dicot root 4.09 → 3.95 s (−3 %), monocot root 1.85 → 1.76 s (−5 %), dicot leaf unchanged (its own intercellular spaces).
 - **Next:** B2d (`fuse_gaps`), then the full comparison folder.
+
+## 41. B2d: the gap fusion; B2 closed (2026-10-13, your go-ahead)
+
+- **`mpg/pipeline/gaps.py`:** GRANAP's `fuse_gaps` and `find_gaps`, converted.
+  - **The unions computed once:** the union of the cells, and its filled mass, were each computed up to three times (`find_gaps`, `_filled_cell_mass` called by both, `fuse_gaps`). Being of the same polygons in the same order, they give the same result.
+  - **The cells' properties recalculated in bulk:** the same GEOS centroid, distance and area; the angle stays `np.arctan2` cell by cell. This is also used for the final "cell properties" step of `generate.py`.
+- **Exact:** the 14 organs of `compare_sections.py` are identical.
+- **Full check:** the comparison folder passes, 188 tests in 12.6 min; the capability tests pass.
+- **Times** (medians of 4 interleaved runs, machine loaded by the suite): monocot stem 8.94 → 8.39 s (−6 %), dicot root 5.12 → 4.86 s (−5 %).
+- **From the start of the day** (`75bd5aa`, before N1) to now, generation plus matrix, medians of 3:
+
+  | organ | start of day | now | change |
+  |---|---|---|---|
+  | dicot root | 5.66 s | 3.80 s | −33 % |
+  | monocot root | 2.80 s | 1.75 s | −37 % |
+  | dicot leaf | 3.84 s | 2.89 s | −25 % |
+
+- **B2's end state:** the stages after the grouping run as converted copies on bulk operations.
+  - **Still present, so not retired:**
+    - the view layer (`cells.py`), because the stems', leaves' and needles' own methods still work on Cell objects;
+    - the method overrides of the MPG-backed class, which now choose between the converted copies and GRANAP's.
+  - **Retiring them** comes with P5.6, the organ-specific stages.
+- **Open:** C1 (the network as DataStructure variables), C2 (the process-wide patches), B3 (the seeds as arrays), P5.6.

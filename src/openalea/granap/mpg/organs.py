@@ -41,6 +41,7 @@ from openalea.granap.mpg.pipeline.aerenchyma import add_aerenchyma_to_proportion
 from openalea.granap.mpg.pipeline.generate import generate_cells
 from openalea.granap.mpg.pipeline.merge import merge_intercellular_aerenchyma
 from openalea.granap.mpg.pipeline.intercellular import apply_intercellular
+from openalea.granap.mpg.pipeline.gaps import fuse_gaps
 from openalea.granap.mpg.speedups import exact_speedups
 from openalea.granap.mpg.topology import store_topology, stored_topology
 from openalea.granap.mpg.views import cells_from_mpg, gdf_from_cells, network_from_mpg
@@ -154,7 +155,10 @@ class MPGBacked:
         return super().merge_intercellular_aerenchyma()
 
     def fuse_gaps(self, *args, **kwargs):
-        fused = super().fuse_gaps(*args, **kwargs)
+        if self.converted_pipeline and _inherited(type(self), "fuse_gaps") is _Organ.__dict__["fuse_gaps"]:
+            fused = fuse_gaps(self, *args, **kwargs)       # B2d: the unions shared, the properties in bulk
+        else:
+            fused = super().fuse_gaps(*args, **kwargs)
         if not self._converted_generation:             # the converted generation writes the stage itself
             self._mpg_stage("fused_gaps")
         return fused

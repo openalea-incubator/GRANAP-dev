@@ -18,6 +18,7 @@ from shapely.ops import unary_union
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.organ_class import log
+from openalea.granap.mpg.pipeline.gaps import recalculate_cell_properties
 from openalea.granap.mpg.pipeline.merge import simplify_cells
 
 
@@ -93,5 +94,5 @@ def generate_cells(organ) -> None:
     log.info("Layer population:        %.3fs", time.time() - t_start)
 
     t_start = time.time()
-    organ.all_cells.recalculate_cell_properties()
+    recalculate_cell_properties(organ.all_cells.cells)         # B2d: the geometry in bulk
     log.info("Cell properties:         %.3fs", time.time() - t_start)
