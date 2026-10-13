@@ -936,3 +936,14 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
   - the 14 organs of `compare_sections.py` are identical.
 - **Also this step:** `compare_sections.py` covers every organ kind, with a panel of differences. It found an N1 bug on sections without shared junctions (ROI), now fixed and tested.
 - **Next:** B2b–d (your answer).
+
+## 39. B2b: the aerenchyma fill planned once per calibration (2026-10-13, your go-ahead)
+
+- **`mpg/pipeline/aerenchyma.py`:** GRANAP's `add_aerenchyma`, converted, in two parts.
+  - **`fill_plan`:** the candidates, the areas and each file's fill order (connected radial channel or by distance), kept as positions in the cell list.
+  - **The fill itself**, for a given target.
+- **Every attempt of the calibration starts from the same snapshot copies,** so the plan is computed at the first attempt and reused by the others. Before, the whole preparation, the STRtree adjacency of `_connected_radial_order` included, was redone at each of the up to 21 attempts.
+- **Scope:** used by the calibration for organs whose `add_aerenchyma` is `Organ`'s. A direct call to `organ.add_aerenchyma` stays GRANAP's.
+- **Exact:** the stage tests, the dicot and needle cross-checks, and the replayed dicot-root and special-tissue tests pass (15). The aerenchymatous organs of `compare_sections.py` are identical.
+- **Times** (medians of 5 interleaved runs): dicot root 4.47 → 4.24 s (−5 %), monocot root 2.00 → 1.89 s (−5 %).
+- **Next:** B2c (the intercellular spaces) and B2d (`fuse_gaps`).
