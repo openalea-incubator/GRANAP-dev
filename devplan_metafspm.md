@@ -1186,7 +1186,7 @@ Not scheduled. Each is a candidate step, to be designed when chosen. The second 
 - **Examples:**
   - `example/comparison/compare_sections.py` compares legacy and GRANAP: the 14 organs are identical;
   - `example/mpg/` holds the component examples;
-  - GRANAP's other examples use its names, so they run the port. A sample run was not done (your interrupt).
+  - GRANAP's other examples use its names, so they run the port. All 36 were run on the port afterwards (2026-10-14; non-interactive plotting backend): 36 ran without error, the longest `root/dicot_oak.py` (227 s).
 - **README and packaging:** metafspm is required (comments in `pyproject.toml` and `conda/environment.yaml`); `legacy` is described in the README.
 
 ## 52. O1–O4 under metafspm's logic — design and measurements (2026-10-14, your go-ahead and question)
