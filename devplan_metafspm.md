@@ -874,7 +874,41 @@ Most of it goes to passes over the whole MPG, made on every step to find what ch
 
 - **Q-B1 — the calibration's number of attempts.** Keep GRANAP's bisection (exact), or replace it with a secant search on the measured proportion (fewer attempts, about half; the goldens of aerenchymatous organs change, reviewed)?
   - **Recommendation:** keep the bisection for now, and revisit after B2 has made each attempt cheaper.
-  - → answer:
+  - → answer: yes to recommendation
 - **Q-B2 — B2 as designed (§34): converted stages working on the MPG's columns, in the order B2a–d, exact, checked step by step?**
   - **Recommendation:** yes, starting with B2a, with a measurement before going on.
+  - → answer: yes to recommendation
+
+## 36. B2a: the merge on the MPG's columns (2026-10-13; your answers Q-B1 and Q-B2: recommendations)
+
+- **B2a done, `mpg/pipeline/merge.py`:**
+  - `simplify_cells`: its polygons rebuilt and validated in bulk (`linearrings`, `polygons`, `is_valid`);
+  - GRANAP's merge, copied, with that simplification and the carving in bulk (`intersects`, `difference`, `area`; one removal instead of one per cell);
+  - polygons written straight into the MPG's column for the cells that are views.
+
+  It is used for the grouping's simplification (`generate.py`) and, through the MPG-backed class, for organs whose merge is `Organ`'s. Exact: the stage tests and the cross-checks (monocot, dicot, needle) pass.
+- **Measured** (dicot root, no profiler):
+  - the merge, over 8 calibration attempts: 0.45 → 0.25 s (−45 %);
+  - the grouping's simplification: unchanged (0.52 s; it is the section's first snap);
+  - medians of 5 interleaved runs: monocot root 2.45 → 2.21 s (−10 %), dicot root −4 %, leaf unchanged (its own calibration).
+- **What B2b–d can still give** (dicot root, 4.24 s in all):
+
+  | part | time | exactly gainable |
+  |---|---|---|
+  | the intercellular spaces | 0.88 s | about 0.2 s (polygon rebuild, carving, perhaps the smoothing) |
+  | the aerenchyma fill, 8 attempts | 0.19 s | about 0.1 s (fill order computed once) |
+  | `fuse_gaps` | 0.11 s | little |
+  | view adoption | 0.12 s | 0.12 s |
+
+  Within the intercellular spaces, the rest is GEOS unions (0.32 s profiled) and a snap. In all, B2b–d give about 8–10 % for some 460 lines of converted code; retiring the view layer is mostly a readability gain.
+- **What weighs more: the snap** (`CellGenerator._build_topology`). It is computed 4–5 times per section (grouping, air spaces, calibration, network): 0.90 s of the dicot root's 4.34 s (21 %), 0.44 of 2.29 s on the monocot root.
+  - Its greedy clustering can be reproduced exactly: the same visiting order, means summed as numpy does, Python's `round`.
+  - So can its maps (phases 1–2), with arrays.
+
+  This is B5, which I had marked "hard to keep exact"; reading the code, it is not.
+
+## 37. Question (2026-10-13)
+
+- **Q-B3 — next step.** Continue B2b–d as agreed (about 8–10 %, retires the views), or do an exact B5 first (the snap: about 21 % of generation now, perhaps half of it saved, some 150 lines)?
+  - **Recommendation:** B5 first, exact, checked by the comparison folder. Then B2b–d, whose gain is mostly readability.
   - → answer:

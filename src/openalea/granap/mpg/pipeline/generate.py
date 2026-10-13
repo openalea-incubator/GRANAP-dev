@@ -18,6 +18,7 @@ from shapely.ops import unary_union
 from openalea.granap.cell_manager import CellManager
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.organ_class import log
+from openalea.granap.mpg.pipeline.merge import simplify_cells
 
 
 def generate_cells(organ) -> None:
@@ -60,7 +61,7 @@ def generate_cells(organ) -> None:
 
     t_start = time.time()
     grouped_cells = CellGenerator.process_voronoi_groups(organ.all_cells, vor).cells
-    grouped_cells = CellGenerator.simplify_cells(grouped_cells)
+    grouped_cells = simplify_cells(grouped_cells)                   # B2a: the polygons rebuilt in bulk
     # simplify_cells rebuilds each polygon independently, which can distort
     # small cells (few vertices) into a neighbour and leave them rendered
     # one-inside-another; drop those, keeping the larger cell.
