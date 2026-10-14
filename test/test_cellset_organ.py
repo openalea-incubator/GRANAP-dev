@@ -24,6 +24,8 @@ from openalea.granap.special_tissues import weld_points_onto_rings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CELLSET = os.path.join(HERE, "inputs", "partial_CellSet_brasicaceae.xml")
+# GRANAR's output (<granardata>, mm, several names per group id): MECHA's tutorial section.
+GRANAR = os.path.join(HERE, "inputs", "granar_current_root.xml")
 SEED = 0
 
 # Measured from the file itself (areas in um^2).
@@ -359,7 +361,8 @@ def test_write_to_xml_roundtrip(organ, tmp_path):
     path = tmp_path / "hybrid.xml"
     AnatomyWriter(organ).write_to_xml(str(path))
 
-    back = read_cellset(str(path), scale=1.0)   # already in mm
+    back = read_cellset(str(path))              # <granardata>: already in mm
+    assert back.source_format == "granardata" and back.scale == 1.0
     assert len(back.cells) == len(organ.all_cells.cells)
     assert not back.annular_cells               # the whole point of the exercise
 
@@ -375,3 +378,45 @@ def test_write_to_xml_roundtrip(organ, tmp_path):
     groups = sorted({c.group for c in back.cells})
     assert 2 in groups and 3 in groups and 4 in groups and 13 in groups
     assert 16 in groups                          # pericycle, from the graft
+
+
+def test_written_file_is_read_back_unchanged(organ, tmp_path):
+    """A GRANAP export read again by CellSetOrgan: its stele is resolved, so nothing is regenerated."""
+    path = tmp_path / "hybrid.xml"
+    AnatomyWriter(organ).write_to_xml(str(path))
+    again = CellSetOrgan(str(path), seed=SEED)
+    again.generate_cells()
+    assert again.regenerate == () and again.graft_report == []
+    assert len(again.all_cells.cells) == len(organ.all_cells.cells)
+
+
+# ---------------------------------------------------------------- GRANAR files
+
+GRANAR_CENSUS = {      # cells per tissue, areas in mm^2, from the file's first group names
+    "epidermis": (270, 0.0451), "exodermis": (86, 0.0679), "cortex": (259, 0.3996),
+    "endodermis": (46, 0.0218), "pericycle": (82, 0.0109), "phloem": (91, 0.0095),
+    "companion_cell": (32, 0.0036), "xylem": (21, 0.0159), "stele": (168, 0.0201),
+}
+
+
+def test_granar_file_is_read_in_mm_with_its_first_group_names():
+    """GRANAR lists aliases after a group id's tissue (4: cortex, inter_cellular_space, aerenchyma): the first wins."""
+    section = read_cellset(GRANAR)
+    assert section.source_format == "granardata" and section.scale == 1.0
+    assert len(section.cells) == 1055 and not section.annular_cells
+    census = section.census()
+    assert set(census) == set(GRANAR_CENSUS)
+    for tag, (n, area) in GRANAR_CENSUS.items():
+        assert census[tag][0] == n
+        assert census[tag][1] == pytest.approx(area, abs=1e-4)
+
+
+def test_granar_file_is_imported_without_regeneration():
+    """A GRANAR section is fully resolved: every cell imported verbatim, none grafted."""
+    organ = CellSetOrgan(GRANAR, seed=SEED)
+    organ.generate_cells()
+    assert organ.scale == 1.0 and organ.regenerate == () and organ.graft_report == []
+    counts = {}
+    for cell in organ.all_cells.cells:
+        counts[cell.type] = counts.get(cell.type, 0) + 1
+    assert counts == {tag: n for tag, (n, _) in GRANAR_CENSUS.items()}
