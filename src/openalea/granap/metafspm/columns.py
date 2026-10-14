@@ -1,13 +1,14 @@
 """
 The section's hydraulic network as numeric variables (devplan_metafspm.md, §42, C1): one column per quantity, on every
-Compartment and every anatomy Connection, NaN where a quantity does not apply. These are the MPG properties a
+Compartment and every anatomy Connection: where a quantity does not apply, 0 for the extensive ones (wall_length,
+cell_area: their sums over a segment stay defined), NaN for the others. These are the MPG properties a
 DataStructure reads as declared variables (numeric, present on every node or edge); GRANAP's networkx graph is
 rebuilt from them (views.network_from_mpg) with exactly the exporter's keys and values.
 
     Compartments    section_x, section_y            the position in the section (mm)
-                    wall_length                     walls (0 at junctions)
+                    wall_length                     walls (0 at junctions and protoplasts)
                     wall_thickness                  walls
-                    cell_area, cgroup,              protoplasts
+                    cell_area, cgroup,              protoplasts (cell_area 0 elsewhere)
                     protect_topology, bridge
     Connections     network_path                    PATH_CODES: membrane 0, wall_air 1, wall 2, plasmodesmata 3,
                                                     air_link 4
@@ -25,6 +26,7 @@ import math
 import numpy as np
 
 PATH_CODES = {"membrane": 0, "wall_air": 1, "wall": 2, "plasmodesmata": 3, "air_link": 4}
+JUNCTION_PATH = 5                # the axial junctions between successive sections (created by the wiring)
 PATHS = {code: path for path, code in PATH_CODES.items()}
 NAN = float("nan")
 
@@ -48,7 +50,7 @@ def node_columns(attrs: dict) -> dict:
     """The columns of one exporter node (its attribute dict)."""
     x, y = attrs["position"]
     out = dict.fromkeys(NODE_COLUMNS, NAN)
-    out.update(section_x=x, section_y=y)
+    out.update(section_x=x, section_y=y, wall_length=0., cell_area=0.)       # extensive quantities: 0 where absent
     if attrs.get("type") == "apo":
         out["wall_length"] = attrs.get("length", NAN)
         out["wall_thickness"] = attrs.get("wall_thickness", NAN)

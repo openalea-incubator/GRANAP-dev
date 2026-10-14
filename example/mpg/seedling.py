@@ -135,7 +135,7 @@ def main():
     template_of = {s: find_template(libraries, int(template[owners[s][0]])) for s in segments}
     size = {s: _extent(template_of[s]) for s in segments}
     offsets = layout(g, segments, size)
-    types = sorted({tissue[v] for s in segments for v in owners[s] if v in tissue})
+    types = sorted({tissue[v] for s in segments for v in owners[s] if tissue.get(v) is not None})
     palette = matplotlib.colormaps["tab20"]
     colours = {t: palette(i % 20) for i, t in enumerate(types)}
 

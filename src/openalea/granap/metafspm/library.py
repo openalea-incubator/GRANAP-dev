@@ -2,9 +2,9 @@
 The anatomy library (devplan_metafspm.md, P3): one template per anatomy class, generated once, instantiated on every
 segment of the class.
 
-    key = ClassBins().key(diameter_mm, tip_mm, junction_mm)     a class: binned diameter and distances (mm)
+    key = class_key(class_inputs, g, segment)                   a class: its class inputs' binned values
     library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
-    template = library.template(key)                             generated at the first request (MPG-backed organ)
+    template = library.template(key, plant=overrides)           generated at the first request (per plant overrides)
     written = template.instantiate(g, segment)                   the segment's own Layers, Cells, protoplasts,
                                                                  walls, junctions and Connections, in bulk
 
@@ -29,16 +29,66 @@ SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
 
 @dataclass(frozen=True)
-class ClassBins:
-    """Bin widths (mm) of an anatomy class; a width of 0 ignores that dimension (one bin)."""
-    diameter: float = 0.05
-    tip: float = 0.
-    junction: float = 0.
+class ClassInput:
+    """
+    One dimension of an anatomy class: a SubOrgan input variable (declared by the anatomy component, given by the
+    architecture model), binned. A segment's class is the tuple of its class inputs' binned values.
 
-    def key(self, diameter, tip=0., junction=0.) -> tuple:
-        def binned(value, width):
-            return 0. if width <= 0 else round(round(float(value) / width) * width, 9)
-        return binned(diameter, self.diameter), binned(tip, self.tip), binned(junction, self.junction)
+      variable   the SubOrgan property (e.g. "radius")
+      width      the bin width, in the unit of value * factor (0: one bin, the variable is not read)
+      factor     the variable's value times factor gives the binned quantity (e.g. radius in m -> diameter in mm: 2000)
+      target     (GRANAP section, field) set to the binned value in the class's parameters (e.g. ("cortex", "n_layers")),
+                 or None: the class is keyed only (the class's own parametrization says what differs)
+      compute    a function (g, segment) -> value computing the variable from the segment's inputs instead of reading
+                 it (e.g. the distance from the root-shoot junction, from the segments' lengths)
+    """
+    variable: str
+    width: float = 0.
+    factor: float = 1.
+    target: tuple = None
+    compute: object = None
+
+    def binned(self, value) -> float:
+        return 0. if self.width <= 0 else round(round(float(value) * self.factor / self.width) * self.width, 9)
+
+    def value(self, g, segment) -> float:
+        if self.width <= 0:
+            return 0.
+        if self.compute is not None:
+            return self.binned(self.compute(g, segment))
+        values = g.property(self.variable)
+        if segment not in values:
+            raise KeyError(f"class input '{self.variable}': no value on segment {segment} (an input the architecture "
+                           f"model gives)")
+        return self.binned(values[segment])
+
+
+def class_key(class_inputs, g, segment) -> tuple:
+    """A segment's anatomy class: its class inputs' binned values."""
+    return tuple(c.value(g, segment) for c in class_inputs)
+
+
+def class_targets(class_inputs, key) -> dict:
+    """The class inputs' parameter overrides of the class *key* ({section: {field: binned value}})."""
+    out = {}
+    for c, value in zip(class_inputs, key):
+        if c.target is not None and c.width > 0:
+            section, field_name = c.target
+            out.setdefault(section, {})[field_name] = value
+    return out
+
+
+def merged(*overrides) -> dict:
+    """{section: {field: value}} overrides applied in order (the later win)."""
+    out = {}
+    for layer in overrides:
+        for section, values in (layer or {}).items():
+            out.setdefault(section, {}).update(values)
+    return out
+
+
+def _frozen(overrides) -> tuple:
+    return tuple(sorted((section, tuple(sorted(values.items()))) for section, values in (overrides or {}).items()))
 
 
 def preset_parameters(preset: str):
@@ -160,8 +210,10 @@ class Template:
 class AnatomyLibrary:
     """
     Templates by class, generated at their first request. A class's parameters: *parameters(key, overrides=...)*
-    (default: the root preset), with the class's own parametrization from *class_parameters*: {key: overrides} or
-    a callable key -> overrides (None: the base parameters), where overrides is {param: {field: value}}.
+    (default: the root preset), with, in order, the plant's overrides (its scenario's granap_overrides), the class's
+    own parametrization from *class_parameters* ({key: overrides} or a callable key -> overrides), and the class
+    inputs' targets; overrides are {section: {field: value}}. Templates are keyed by (class, plant's overrides): plants
+    parametrized alike share them.
     """
 
     def __init__(self, parameters=default_root_parameters, class_parameters=None, seed: int = 0, organ_class=None):
@@ -174,11 +226,14 @@ class AnatomyLibrary:
         source = self.class_parameters
         return (source(key) if callable(source) else source.get(key)) or {}
 
-    def template(self, key) -> Template:
-        if key not in self.templates:
-            organ = self.organ_class(self.parameters(key, overrides=self.overrides(key)), seed=self.seed)
-            self.templates[key] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
-        return self.templates[key]
+    def template(self, key, plant: dict = None, targets: dict = None) -> Template:
+        """The template of class *key* for a plant with overrides *plant*, the class inputs' *targets* applied."""
+        entry = key if not plant else (key, _frozen(plant))
+        if entry not in self.templates:
+            overrides = merged(plant, self.overrides(key), targets)
+            organ = self.organ_class(self.parameters(key, overrides=overrides), seed=self.seed)
+            self.templates[entry] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
+        return self.templates[entry]
 
     def by_index(self, index) -> Template:
         return next(t for t in self.templates.values() if t.index == index)

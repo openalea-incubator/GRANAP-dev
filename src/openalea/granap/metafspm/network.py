@@ -337,9 +337,9 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     columns.write(g, {                                       # C1: one numeric column per quantity
         "section_x": np.concatenate((mid_x, xy[used, 0], cx[valid])),
         "section_y": np.concatenate((mid_y, xy[used, 1], cy[valid])),
-        "wall_length": np.concatenate((lengths, np.zeros(n_junctions), nan_c)),
+        "wall_length": np.concatenate((lengths, np.zeros(n_junctions), np.zeros(n_cells))),     # extensive: 0
         "wall_thickness": np.concatenate((thickness, nan_j, nan_c)),
-        "cell_area": np.concatenate((nan_w, nan_j, areas)),
+        "cell_area": np.concatenate((np.zeros(n_walls), np.zeros(n_junctions), areas)),        # extensive: 0
         "cgroup": np.concatenate((nan_w, nan_j, np.asarray(cgroup, dtype=float))),
         "protect_topology": np.concatenate((nan_w, nan_j, [float(bool(cells["protect"][r])) for r in valid_list])),
         "bridge": np.concatenate((nan_w, nan_j, np.zeros(n_cells))),

@@ -65,9 +65,9 @@ def test_the_variables_hold_the_exporters_values(section):
         attrs = graph.nodes[int(mecha[v])]
         assert x[i] == attrs["position"][0]
         if attrs["type"] == "cell":
-            assert area[i] == attrs["area"] and np.isnan(wall_length[i])
+            assert area[i] == attrs["area"] and wall_length[i] == 0.          # extensive: 0 where absent
         else:
-            assert wall_length[i] == attrs["length"] and np.isnan(area[i])
+            assert wall_length[i] == attrs["length"] and area[i] == 0.
     u, w = g.property("edge_u"), g.property("edge_v")
     edges = ds.entity_ids("edge")
     length, dx, path = ds.get("edge_length"), ds.get("edge_dx"), ds.get("network_path")

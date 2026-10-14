@@ -1342,10 +1342,33 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
 
 - **Q-K1 — the kinds** of §57 (non-inertial extensive for areas and wall lengths, non-inertial intensive for positions, thicknesses and distances, descriptors for codes), and the 3D quantities (`wall_surface`, `membrane_surface`, `cell_volume`) recomputed in a `@state` step from the segment's length?
   - **Recommendation:** yes.
-  - → answer:
+  - → answer: yes
 - **Q-K2 — class inputs** (SubOrgan input variables mapped to GRANAP fields with bins, replacing the three fixed bins) as the way the architecture model instructs the generation?
   - **Recommendation:** yes.
-  - → answer:
+  - → answer:yes 
 - **Q-C1a — the junctions' geometry** as above (axial length, in-plane offset, path code 5)?
   - **Recommendation:** yes.
-  - → answer:
+  - → answer: yes
+
+## 59. The anatomy component's declared i/o: done (2026-10-14; your answers Q-K1, Q-K2, Q-C1a: yes)
+
+- **Declared fields of `GranapAnatomy`** (a dataclass, as metafspm components are):
+  - **inputs, `by="Architecture"`** (the role the composite's translator maps to the architecture model): `radius` and `distance_from_tip` at the SubOrgan scale; `length` broadcast to the Compartments;
+  - **state variables, each of its kind:**
+    - SubOrgan: `anatomy_template` (descriptor, -1 without an anatomy);
+    - Compartment: `tissue` (object), `kind`, `cgroup` (descriptors); `section_x`/`y`, `wall_thickness` (non-inertial intensive); `wall_length`, `cell_area`, `wall_surface`, `cell_volume` (non-inertial extensive);
+    - Connection: `network_path` (descriptor); `edge_length`, `edge_dx`/`dy`, `edge_dist`, `edge_wall_thickness`, `lateral_distance`, `distnode_wall_cell` (non-inertial intensive); `membrane_surface` (non-inertial extensive).
+- **The extensive columns are 0 where they do not apply** (`wall_length` on protoplasts, `cell_area` on walls and junctions; NaN before), so their sums over a segment are defined. The graph view is unchanged.
+- **3D quantities:** written for each new copy at its instantiation, and recomputed every time step by an array-style `@state` step (`_wall_surface`) as the segments elongate:
+  - walls' surfaces, protoplasts' volumes, membranes' surfaces = 2D value × segment length;
+  - the axial junctions' lengths = the mean of the two segments' lengths.
+- **Junction geometry (Q-C1a):** `junction_rules` gives the junctions' properties through a new metafspm wiring hook (metafspm: a rule's "properties"). They are `network_path = 5`, the length between the sections' centres, and the in-plane offset between the two vessels; the other columns NaN, the membrane surface 0. They are set at the junctions' creation, so declared edge variables can be read on every edge.
+- **Class inputs (Q-K2):** `ClassInput(variable, width, factor, target, compute)` replaces `ClassBins`.
+  - **Defaults:** the diameter (from `radius`, 0.05 mm bins) and the distances from the tip and from the junction (not binned; the junction one computed from the segments' lengths). The class keys keep their form, e.g. `(1.1, 0., 0.)`.
+  - **A class input with a target** sets a GRANAP field from an architecture variable (e.g. `cortex_layers` → `cortex.n_layers`).
+- **Per-plant parametrization:** a plant's scenario `granap_overrides` (`{section: {field: value}}`) is kept on its Plant vertex. Templates are keyed by (class, plant's overrides), and parameters apply in order: preset, plant, class's own, class inputs' targets. One instance serves every plant.
+- **Found while testing:** the DataStructure is the reference for declared variables. A model changing `radius` must write it through the DataStructure (`ds.set`), as the growth test now does; a direct MPG edit is overwritten by the next synchronisation. That is metafspm's logic.
+- **Tests:**
+  - `test/component/test_coupling.py`: a MECHA-like component declares GRANAP's outputs as `input_variable(by="GranapAnatomy")` and reads them on every node and edge, the junctions included; the 3D quantities follow elongation;
+  - `test/component/test_class_inputs.py`: plants alike share templates and differ otherwise; a class input sets a field;
+  - the component tests pass (17), the quick comparison subset passes, metafspm's suite passes (796), and the three component examples run.

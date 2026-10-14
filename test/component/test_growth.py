@@ -71,7 +71,9 @@ def test_a_segment_changing_class_is_replaced_and_starts_from_the_defaults(plant
     g, ds, anatomy = plant
     lateral = min(_root_segments(g), key=lambda s: (g.property("radius")[s], s))     # the lateral's first segment
     old = list(g.compartments_by_owner(g.scales.SubOrgan)[lateral])
-    g.property("radius")[lateral] = MAIN_RADIUS                                   # it thickens into the main class
+    radius = ds.get("radius").copy()                     # it thickens into the main class, as the architecture
+    radius[ds.entity_ids("SubOrgan") == lateral] = MAIN_RADIUS    # model would write it: through the DataStructure
+    ds.set("radius", radius)
     anatomy()
     assert anatomy.last_update == {"emerged": [], "replaced": [lateral]}
     new = g.compartments_by_owner(g.scales.SubOrgan)[lateral]

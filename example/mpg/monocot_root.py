@@ -76,13 +76,13 @@ def main():
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     tissue, template, row = g.property("tissue"), g.property("template"), g.property("template_row")
     templates = {t.index: t for t in Anatomy.library.templates.values()}
-    types = sorted({tissue[v] for s in segments for v in owners[s] if v in tissue})
+    types = sorted({tissue[v] for s in segments for v in owners[s] if tissue.get(v) is not None})
     colours = {t: matplotlib.colormaps["tab20"](i) for i, t in enumerate(types)}
     fig, axes = plt.subplots(1, len(segments), figsize=(4 * len(segments), 4.6))
     for ax, s in zip(axes, segments):
         patches, faces = [], []
         for v in owners[s]:
-            if v in row and v in tissue:                               # protoplasts (walls have no polygon)
+            if v in row and tissue.get(v) is not None:                 # protoplasts (walls have no polygon)
                 polygon = templates[int(template[v])].polygons[int(row[v])]
                 if polygon is not None and polygon.geom_type == "Polygon":
                     patches.append(PolygonPatch(np.asarray(polygon.exterior.coords)))

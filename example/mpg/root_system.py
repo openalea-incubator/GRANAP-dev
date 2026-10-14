@@ -73,7 +73,7 @@ def main():
     tissue, family = g.property("tissue"), g.property("family")
     px, py = g.property("section_x"), g.property("section_y")
     templates = {t.index: t for t in Anatomy.library.templates.values()}
-    types = sorted({tissue[v] for s in segments for v in owners[s] if v in tissue})
+    types = sorted({tissue[v] for s in segments for v in owners[s] if tissue.get(v) is not None})
     palette = matplotlib.colormaps["tab20"]
     colours = {t: palette(i % 20) for i, t in enumerate(types)}
 

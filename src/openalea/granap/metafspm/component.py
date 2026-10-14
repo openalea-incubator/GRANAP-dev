@@ -16,17 +16,44 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from openalea.metafspm.coupling.component import StructuralComponent
-from openalea.metafspm.solve.decorator import postsegmentation
+from openalea.metafspm.coupling.component import StructuralComponent, input_variable, state_variable
+from openalea.metafspm.data_structure.configs import ScalesConfig
+from openalea.metafspm.solve.decorator import postsegmentation, state
 
-from openalea.granap.metafspm.library import AnatomyLibrary, ClassBins
+from openalea.granap.metafspm import columns
+from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput, class_key, class_targets
+
+SCALES = ScalesConfig()
+MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's lengths in m
+
+
+def _doc(unit, description, **values):
+    return dict(unit=unit, unit_comment="", description=description, min_value=-1e12, max_value=1e12,
+                value_comment="", references="GRANAP", DOI=[], **values)
 
 
 @dataclass
 class OrganAnatomy:
-    """The anatomy of one kind of segment: its library and the property giving its class's size (None: one class)."""
+    """
+    The anatomy of one kind of segment: its library and its class inputs (default: the diameter from *size*, binned by
+    0.05 mm; the distance from the tip and from the root-shoot junction, not binned). *size*: the SubOrgan property
+    giving the section's size (None: one class).
+    """
     library: AnatomyLibrary
     size: str = "radius"
+    class_inputs: tuple = None
+
+    def __post_init__(self):
+        if self.class_inputs is None:
+            self.class_inputs = default_class_inputs(self.size)
+
+
+def default_class_inputs(size="radius") -> tuple:
+    """The default class inputs: diameter (mm, from the radius in m, bins of 0.05 mm), distance from the tip and from
+    the root-shoot junction (mm, not binned: give them a width to bin them)."""
+    return (ClassInput(size or "radius", 0.05 if size else 0., 2. * MM_PER_M),
+            ClassInput("distance_from_tip", 0., MM_PER_M),
+            ClassInput("distance_from_junction", 0., MM_PER_M, compute=lambda g, segment: distance_from_junction(g, segment)))
 
 
 def _segments(g, plant, labels_handled=("RootSegment",)):
@@ -222,24 +249,100 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     return sources
 
 
+@dataclass
 class GranapAnatomy(StructuralComponent):
     """
-    The cross-section anatomies of root segments. Class attributes (set on a subclass, or before initiation):
-      library      the AnatomyLibrary (its parameters(key) function: default_root_parameters)
-      bins         the ClassBins (mm)
-      mm_per_unit  the MPG's length unit in mm (1000: lengths in m)
-      radius, length, distance_from_tip   the names of the segments' properties
+    The cross-section anatomies of a population's segments (roots, and the stems and leaves of *shoot*): each segment
+    gets the anatomy of its class, one template generated per class and plant parametrization, a copy per segment.
+    One instance serves the whole population.
+
+    Instructions for the generation:
+      library        the roots' AnatomyLibrary (its parameters(key, overrides=...): GRANAP's root preset by default)
+      shoot          {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves
+      a plant's scenario parameters may give granap_overrides: {section: {field: value}} applied to GRANAP's
+      parameters for that plant (e.g. a genotype's cortex), before the class's own and its class inputs' targets
+      each organ's class_inputs (OrganAnatomy) bin SubOrgan inputs of the architecture model into the class, and may
+      set GRANAP fields from them (ClassInput.target)
+      mm_per_unit    the MPG's length unit in mm (1000: lengths in m)
+
+    Declared below: the inputs read from the architecture model (role "Architecture" in the composite's translator),
+    and the state variables a coupled model (e.g. MECHA's) reads: the network of every section (Compartments and
+    Connections, quantities in mm, mm2, mm3), its codes, and the 3D quantities recomputed as the segments elongate.
     """
+    # ── Inputs: the segments' architecture ──
+    radius: float = input_variable(**_doc("m", "the segment's radius (the diameter class input)"),
+                                   by="Architecture", scale=SCALES.SubOrgan, state_variable_type="intensive")
+    distance_from_tip: float = input_variable(**_doc("m", "the segment's distance from its axis' tip"),
+                                              by="Architecture", scale=SCALES.SubOrgan, state_variable_type="intensive")
+    length: float = input_variable(**_doc("m", "the segment's length, broadcast to its Compartments"),
+                                   by="Architecture", scale=SCALES.SubOrgan, location="node",
+                                   state_variable_type="intensive")
+
+    # ── State variables: the anatomies ──
+    anatomy_template: float = state_variable(**_doc("", "the segment's anatomy template (-1: none)"), initialize=-1.,
+                                             scale=SCALES.SubOrgan, state_variable_type="descriptor")
+    tissue: object = state_variable(**_doc("", "the protoplast's tissue (None: a wall or a junction)"), initialize=None,
+                                    scale=SCALES.Compartment, location="node", dtype=object,
+                                    state_variable_type="descriptor")
+    kind: float = state_variable(**_doc("", "0 protoplast, 1 wall, 2 wall junction"), initialize=0.,
+                                 scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
+    cgroup: float = state_variable(**_doc("", "the protoplast's MECHA cell group (NaN: apoplast)"), initialize=np.nan,
+                                   scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
+    section_x: float = state_variable(**_doc("mm", "position in the section"), initialize=np.nan,
+                                      scale=SCALES.Compartment, location="node", state_variable_type="NonInertialIntensive")
+    section_y: float = state_variable(**_doc("mm", "position in the section"), initialize=np.nan,
+                                      scale=SCALES.Compartment, location="node", state_variable_type="NonInertialIntensive")
+    wall_length: float = state_variable(**_doc("mm", "the wall's length in the section (0: not a wall)"), initialize=0.,
+                                        scale=SCALES.Compartment, location="node",
+                                        state_variable_type="NonInertialExtensive")
+    wall_thickness: float = state_variable(**_doc("mm", "the wall's thickness (NaN: not a wall)"), initialize=np.nan,
+                                           scale=SCALES.Compartment, location="node",
+                                           state_variable_type="NonInertialIntensive")
+    cell_area: float = state_variable(**_doc("mm2", "the protoplast's area in the section (0: apoplast)"),
+                                      initialize=0., scale=SCALES.Compartment, location="node",
+                                      state_variable_type="NonInertialExtensive")
+    wall_surface: float = state_variable(**_doc("mm2", "the wall's surface: its length times the segment's"),
+                                         initialize=0., scale=SCALES.Compartment, location="node",
+                                         state_variable_type="NonInertialExtensive")
+    cell_volume: float = state_variable(**_doc("mm3", "the protoplast's volume: its area times the segment's length"),
+                                        initialize=0., scale=SCALES.Compartment, location="node",
+                                        state_variable_type="NonInertialExtensive")
+    network_path: float = state_variable(**_doc("", "edge type: membrane 0, wall_air 1, wall 2, plasmodesmata 3, "
+                                                    "air_link 4, axial junction 5"), initialize=np.nan,
+                                         scale=SCALES.Connection, location="edge", state_variable_type="descriptor")
+    edge_length: float = state_variable(**_doc("mm", "the edge's length (the wall's for membranes; between the sections "
+                                                     "for axial junctions)"), initialize=np.nan,
+                                        scale=SCALES.Connection, location="edge",
+                                        state_variable_type="NonInertialIntensive")
+    edge_dx: float = state_variable(**_doc("mm", "the edge's vector in the section, x"), initialize=np.nan,
+                                    scale=SCALES.Connection, location="edge", state_variable_type="NonInertialIntensive")
+    edge_dy: float = state_variable(**_doc("mm", "the edge's vector in the section, y"), initialize=np.nan,
+                                    scale=SCALES.Connection, location="edge", state_variable_type="NonInertialIntensive")
+    edge_dist: float = state_variable(**_doc("mm", "the distance between the edge's nodes (NaN: wall edges)"),
+                                      initialize=np.nan, scale=SCALES.Connection, location="edge",
+                                      state_variable_type="NonInertialIntensive")
+    edge_wall_thickness: float = state_variable(**_doc("mm", "the wall's thickness on membrane and wall edges"),
+                                                initialize=np.nan, scale=SCALES.Connection, location="edge",
+                                                state_variable_type="NonInertialIntensive")
+    lateral_distance: float = state_variable(**_doc("mm", "wall edges: the lateral distance"), initialize=np.nan,
+                                             scale=SCALES.Connection, location="edge",
+                                             state_variable_type="NonInertialIntensive")
+    distnode_wall_cell: float = state_variable(**_doc("mm", "wall edges: the mean wall-cell distance"),
+                                               initialize=np.nan, scale=SCALES.Connection, location="edge",
+                                               state_variable_type="NonInertialIntensive")
+    membrane_surface: float = state_variable(**_doc("mm2", "membrane edges: the membrane's surface (the wall's length "
+                                                           "times the segment's); 0 otherwise"), initialize=0.,
+                                             scale=SCALES.Connection, location="edge",
+                                             state_variable_type="NonInertialExtensive")
+
     library = AnatomyLibrary()
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
-    bins = ClassBins()
-    mm_per_unit = 1000.
-    radius, length, distance_from_tip = "radius", "length", "distance_from_tip"
+    mm_per_unit = MM_PER_M
 
     @classmethod
     def organs(cls) -> dict:
         """{SubOrgan label name: OrganAnatomy}: the root segments with cls.library, and cls.shoot."""
-        return {"RootSegment": OrganAnatomy(cls.library, cls.radius), **cls.shoot}
+        return {"RootSegment": OrganAnatomy(cls.library, "radius"), **cls.shoot}
 
     @classmethod
     def organ_of(cls, g, segment) -> OrganAnatomy:
@@ -248,19 +351,15 @@ class GranapAnatomy(StructuralComponent):
 
     @classmethod
     def segment_class(cls, g, segment) -> tuple:
-        to_mm, organ = cls.mm_per_unit, cls.organ_of(g, segment)
-        if organ.size is None:
-            return cls.bins.key(0.)
-        diameter = 2. * float(g.property(organ.size)[segment]) * to_mm
-        if g.property("label").get(segment) != g.labels.SubOrgan.RootSegment:
-            return cls.bins.key(diameter)
-        tip = float(g.property(cls.distance_from_tip).get(segment, 0.)) * to_mm
-        junction = distance_from_junction(g, segment, cls.length) * to_mm
-        return cls.bins.key(diameter, tip, junction)
+        """The segment's anatomy class: its organ's class inputs, binned."""
+        return class_key(cls.organ_of(g, segment).class_inputs, g, segment)
 
     @classmethod
     def initiate_plant(cls, g, plant_vid: int, parameters: dict) -> None:
-        """Each root segment of the plant gets its class's anatomy, instantiated from the library."""
+        """Each segment of the plant gets its class's anatomy; the plant's granap_overrides (scenario) are kept on it."""
+        overrides = (parameters or {}).get("granap_overrides")
+        if overrides:
+            g.properties().setdefault("granap_overrides", {})[plant_vid] = overrides
         cls.update_anatomies(g, _segments(g, plant_vid, tuple(cls.organs())))
 
     @classmethod
@@ -270,6 +369,8 @@ class GranapAnatomy(StructuralComponent):
         class's copy; a segment whose class changed has its anatomy replaced. Returns {"emerged", "replaced"}.
         """
         anatomy_class = g.properties().setdefault("anatomy_class", {})
+        template_of = g.properties().setdefault("anatomy_template", {})
+        plants = g.properties().get("granap_overrides", {})
         done = {"emerged": [], "replaced": []}
         for segment in segments:
             key = cls.segment_class(g, segment)
@@ -281,28 +382,60 @@ class GranapAnatomy(StructuralComponent):
                 done["replaced"].append(segment)
             else:
                 done["emerged"].append(segment)
-            cls.organ_of(g, segment).library.template(key).instantiate(g, segment)
+            organ = cls.organ_of(g, segment)
+            plant = plants.get(g.complex_at_scale(segment, g.scales.Plant)) if plants else None
+            template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
+            written = template.instantiate(g, segment)
+            _write_3d(g, written, float(g.property("length").get(segment, 0.)) * cls.mm_per_unit)
             anatomy_class[segment] = key
+            template_of[segment] = float(template.index)
         return done
 
     def __post_init__(self):
+        g = self.data_structure.mtg
+        segments = set(self.data_structure.entity_ids("SubOrgan").tolist())
+        template_of = g.properties().setdefault("anatomy_template", {})
+        for segment in segments - set(template_of):            # segments without an anatomy (labels not handled)
+            template_of[segment] = -1.
         super().__post_init__()
         self._replaced = set()
         self.data_structure.inheritance = lambda ds, new, known: granap_inheritance(ds, new, known, self._replaced)
 
     @postsegmentation
     def _anatomies(self):
-        """MPG-style: every root segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
+        """MPG-style: every segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
         g = self.mtg
+        handled = tuple(self.organs())
         segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant)
-                    for s in _segments(g, plant, tuple(self.organs()))]
+                    for s in _segments(g, plant, handled)]
         alive = set(segments)
         anatomy_class = g.properties().get("anatomy_class", {})
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
             del anatomy_class[gone]
         done = self.update_anatomies(g, segments)
+        template_of = g.properties()["anatomy_template"]
+        for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
+            template_of.setdefault(int(segment), -1.)
         self._replaced = set(done["replaced"])
         self.last_update = done
+
+    @state
+    def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
+            -> tuple[np.ndarray, str, np.ndarray, str, np.ndarray, str, np.ndarray]:
+        """
+        The 3D quantities, as the segments elongate: the walls' surfaces, the protoplasts' volumes, the membranes'
+        surfaces (2D values times the segment's length), and the axial junctions' lengths (between the two sections'
+        centres, the mean of the segments' lengths).
+        """
+        length_mm = np.asarray(length, dtype=float) * self.mm_per_unit
+        ends = abs(self.data_structure.incidence_matrix()).T                # (edges, nodes): the edge's two nodes
+        edge_mm = 0.5 * np.asarray(ends @ length_mm).reshape(-1)
+        path = np.asarray(network_path)
+        membranes = (path == columns.PATH_CODES["membrane"]) | (path == columns.PATH_CODES["wall_air"])
+        return (wall_length * length_mm,
+                "cell_volume", cell_area * length_mm,
+                "membrane_surface", np.where(membranes, edge_length * edge_mm, 0.),
+                "edge_length", np.where(path == columns.JUNCTION_PATH, edge_mm, edge_length))
 
 
 def _vessels(g, compartments, family):
@@ -360,9 +493,48 @@ def _vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     return sorted(pairs)
 
 
-def junction_rules(g) -> list:
-    """The wiring rules of anatomy mode: axial xylem junctions (apoplastic) and phloem junctions (symplastic)."""
+def _write_3d(g, written, length_mm) -> None:
+    """A new copy's 3D quantities: its walls' surfaces, protoplasts' volumes and membranes' surfaces, for a segment of
+    *length_mm* (then recomputed at each step as it elongates, GranapAnatomy._wall_surface)."""
+    nodes = list(written["protoplasts"]) + list(written["apoplast"])
+    wall_length, area = g.property("wall_length"), g.property("cell_area")
+    g.set_values("wall_surface", nodes, [wall_length.get(v, 0.) * length_mm for v in nodes])
+    g.set_values("cell_volume", nodes, [area.get(v, 0.) * length_mm for v in nodes])
+    edges = list(written["connections"])
+    path, edge_length = g.property("network_path"), g.property("edge_length")
+    membranes = (columns.PATH_CODES["membrane"], columns.PATH_CODES["wall_air"])
+    g.set_values("membrane_surface", edges, [edge_length[e] * length_mm if path.get(e) in membranes else 0.
+                                             for e in edges])
+
+
+def junction_geometry(mm_per_unit=MM_PER_M):
+    """
+    The geometry of the axial junctions a wiring rule creates (Q-C1a): their length between the two sections' centres
+    (the mean of the segments' lengths), the in-plane offset between the two vessels, the path code of an axial
+    junction (5); the other network columns NaN, the membrane surface 0.
+    """
+    def properties(g, parent, child, pairs):
+        n = len(pairs)
+        lengths = g.property("length")
+        between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
+        x, y = g.property("section_x"), g.property("section_y")
+        out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
+        out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
+                   edge_dx=[x[b] - x[a] for a, b in pairs], edge_dy=[y[b] - y[a] for a, b in pairs],
+                   membrane_surface=[0.] * n)
+        return out
+    return properties
+
+
+def junction_rules(g, mm_per_unit=MM_PER_M) -> list:
+    """
+    The wiring rules of anatomy mode: axial xylem junctions (apoplastic) and phloem junctions (symplastic), with their
+    geometry (junction_geometry).
+    """
+    geometry = junction_geometry(mm_per_unit)
     return [
-        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 0), "edge_label": g.labels.Connection.Apoplastic},
-        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 1), "edge_label": g.labels.Connection.Symplastic},
+        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 0), "edge_label": g.labels.Connection.Apoplastic,
+         "properties": geometry},
+        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 1), "edge_label": g.labels.Connection.Symplastic,
+         "properties": geometry},
     ]
