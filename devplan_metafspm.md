@@ -1372,3 +1372,40 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
   - `test/component/test_coupling.py`: a MECHA-like component declares GRANAP's outputs as `input_variable(by="GranapAnatomy")` and reads them on every node and edge, the junctions included; the 3D quantities follow elongation;
   - `test/component/test_class_inputs.py`: plants alike share templates and differ otherwise; a class input sets a field;
   - the component tests pass (17), the quick comparison subset passes, metafspm's suite passes (796), and the three component examples run.
+
+## 60. Design note: stomata as air nodes, the leaves' air network, the leaf-surface node (2026-10-16)
+
+**Why:** MECHA's transpiration model is now a single one (MECHA's plan §26, your answers Q-T1–Q-T5): the organ's transpiration imposed at one leaf-surface node per leaf organ, joined to every stoma, the flow reaching it from the evaporating walls through the air spaces. It needs three things of GRANAP's graph (Q-T3, agreed).
+
+**What GRANAP does today** (code map, monocot leaf preset and needle):
+- **Each stoma** (`special_tissues.place_stomata`) is two guard cells, a sub-stomatal chamber (an `air space`, `protect_topology` only) and a pore (`pore`, a protoplast, cgroup 4).
+  - The pore touches its two guard cells and the leaf's outer wall, never its chamber: the guard cells meet between them.
+  - It has membranes to its walls, and plasmodesmata to the guard cells (the needle's also to its cap epidermis).
+- **Membranes become `wall_air`** (`metafspm/network.py:283`, and the exporter's `anatomy_writer.py:1272`) only for a protected air space whose wall has a protected interior vertex (`has_sig`). Only shape-protected cells keep such vertices.
+  - So the chambers (protect_topology, not shape) keep membranes: they are liquid cells in the network.
+  - In the monocot leaf, only its 6 inter-bundle lacunae are air nodes (29 wall_air edges).
+- **The monocot leaf preset has no intercellular spaces** (only its lacunae, stomata and protoxylem lacunae), and its lacunae are too far apart for an air link (the proximity radius is the median wall length): 0 air links. The dicot leaf has 106, the needle 872.
+- **The anatomy component** instantiates each section's template under its segment; the axial junctions are wired by `junction_rules` between consecutive sections.
+
+**Proposed changes:**
+1. **The pores are air nodes.**
+   - The air types become `("air space", "pore")` (one organ-level `AIR_TYPES`, next to `APOPLASTIC_ONLY_TYPES`), and `place_stomata` sets `protect_topology` on the pore.
+   - The pore's plasmodesmata then drop out by the existing rule (only between two cells both air or both not).
+   - Its membranes become `wall_air` by 2.
+2. **Every membrane of an air node becomes `wall_air`** (the `has_sig` condition dropped). An air space is air on all its walls, so its chambers and every protected air space evaporate from all their walls. The signature condition was a topological stand-in for "this is an air-space wall", which the cell's own type already says.
+   - It changes the needle's and the dicot leaf's networks a little (their air spaces' walls without a protected interior vertex: membranes become wall_air), and the monocot leaf's chambers.
+   - A reviewed difference against the frozen legacy, as in MECHA.
+3. **An explicit air link from each pore to its own chamber.** `place_stomata` creates them together; the pairing is kept on the pore (its chamber's group). The network adds the link, of length the distance between their centroids. The proximity rule would happen to link most of them too (gap 3–4 µm against a radius of 11.6 µm), but not by design.
+4. **Intercellular spaces in the monocot leaf preset** (its mesophyll, the dicot leaf's spongy-mesophyll parameters): a mesophyll air network to link. A preset change: its golden parameters are updated deliberately.
+5. **The leaf-surface node and the stomatal Connections** (in the anatomy component, after the sections' instances, in `initiate_plant` and `_anatomies`):
+   - per leaf organ, one Compartment of a new kind 3 (`leaf surface`, tissue `leaf surface`), owned by the organ's basal leaf element (the element whose parent is outside the organ);
+   - one Connection per pore of every section of the organ, `network_path` 6 (`stomatal`), anchored to the pore's section;
+   - rebuilt for the whole organ whenever one of its sections is (re)instantiated, so that no edge dangles;
+   - never `is_junction`;
+   - their columns: `edge_length` the pore's depth, plus the pore's aperture width as node columns of the pore (`pore_width`, `pore_depth`), for MECHA's anatomical g_max (MECHA's plan §26f).
+6. **MECHA-side consequences** (its plan): `section_parts` leaves kind 3 and path 6 out of the sections; `INTERCELLULAR_TYPES` gets `pore`; its per-template geometry is unaffected (the surface node is not a template node).
+
+**Tests:**
+- `test/comparison/test_network.py` and `test_cross_check.py` (MPG vs legacy): equality everywhere except the reviewed differences (each listed, by rule).
+- The golden census and parameters: updated deliberately (the monocot leaf's new air spaces).
+- New tests: every pore an air node with wall_air edges and one air link to its chamber; every protected air space's membranes wall_air; one surface node per leaf organ with one stomatal Connection per pore; rebuilt when a section is replaced.
