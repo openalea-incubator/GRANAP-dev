@@ -407,6 +407,9 @@ class GranapAnatomy(StructuralComponent):
             template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
             written = template.instantiate(g, segment)
             _write_3d(g, written, float(g.property("length").get(segment, 0.)) * cls.mm_per_unit)
+            nodes = list(written["protoplasts"]) + list(written["apoplast"])        # the pores' (leaf surfaces, §60)
+            g.set_values("pore_width", nodes, [np.nan] * len(nodes))
+            g.set_values("pore_depth", nodes, [np.nan] * len(nodes))
             anatomy_class[segment] = key
             template_of[segment] = float(template.index)
         return done
@@ -448,8 +451,11 @@ class GranapAnatomy(StructuralComponent):
             surface = g.add_components_bulk(s.anchors[s.Compartment], 1, topo_parents=[basal], **_build_props(
                 s.Compartment, label=L.Compartment.Apoplastic, kind=float(LEAF_SURFACE)))[0]
             g.set_values("tissue", [surface], ["leaf surface"])
-            for name in columns.NODE_COLUMNS:
+            for name in columns.NODE_COLUMNS + ("pore_width", "pore_depth"):
                 g.set_values(name, [surface], [0. if name in ("wall_length", "cell_area") else np.nan])
+            for name, value in cls._declared_initial("node").items():           # the other declared variables
+                if surface not in g.property(name):
+                    g.set_values(name, [surface], [value])
             surfaces[organ] = int(surface)
             template_of = g.property("anatomy_template")
             for element, vids in pores.items():
@@ -468,6 +474,16 @@ class GranapAnatomy(StructuralComponent):
                               membrane_surface=[0.] * n)
                 for name, column in values.items():
                     g.set_values(name, edges, column)
+                for name, value in cls._declared_initial("edge").items():
+                    if name not in values:
+                        g.set_values(name, edges, [value] * n)
+
+    @classmethod
+    def _declared_initial(cls, location) -> dict:
+        """{name: initial value} of the declared state variables at *location* ("node" or "edge")."""
+        from dataclasses import fields
+        return {f.name: f.metadata.get("initialize", f.default) for f in fields(cls)
+                if f.metadata.get("variable_type") == "state_variable" and f.metadata.get("location") == location}
 
     def __post_init__(self):
         g = self.data_structure.mtg
