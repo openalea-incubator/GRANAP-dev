@@ -3,7 +3,7 @@ Plant anatomy base module providing abstract interface.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Tuple, Union
 import geopandas as gpd
 import logging
 import matplotlib.pyplot as plt
@@ -116,6 +116,10 @@ class Organ(AbstractNetwork, ABC):
     #: are flagged ``protect_topology`` so NetworkExporter wires them as dedicated
     #: wall_air network nodes.  False for root/stem; leaves override this True.
     PROTECT_AIR_TOPOLOGY: bool = False
+
+    #: Cell types that are air whatever their protect flags: the stomatal pores (plan §60). Their membranes are
+    #: wall_air edges, they carry no plasmodesmata, and each is air-linked to its sub-stomatal chamber.
+    PORE_TYPES: Tuple[str, ...] = ("pore",)
 
     #: Cell types that must NEVER carry a symplastic (plasmodesmata) edge,
     #: even when they legitimately flank a real two-cell wall -- apoplastic-only

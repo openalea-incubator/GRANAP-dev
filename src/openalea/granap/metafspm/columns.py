@@ -27,6 +27,7 @@ import numpy as np
 
 PATH_CODES = {"membrane": 0, "wall_air": 1, "wall": 2, "plasmodesmata": 3, "air_link": 4}
 JUNCTION_PATH = 5                # the axial junctions between successive sections (created by the wiring)
+STOMATAL_PATH = 6                # a stomatal pore to its leaf organ's surface node (plan §60)
 PATHS = {code: path for path, code in PATH_CODES.items()}
 NAN = float("nan")
 

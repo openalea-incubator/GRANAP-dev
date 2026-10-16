@@ -21,6 +21,7 @@ from openalea.metafspm.data_structure.configs import ScalesConfig
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
 from openalea.granap.metafspm import columns
+from openalea.granap.metafspm.build import LEAF_SURFACE, _props as _build_props
 from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput, class_key, class_targets
 
 SCALES = ScalesConfig()
@@ -72,6 +73,12 @@ def distance_from_junction(g, segment, length="length") -> float:
         total += float(lengths.get(parent, 0.))
         parent = g.parent(parent)
     return total
+
+
+def _rectangle_sides(rectangle):
+    """The two side lengths of a (rotated) rectangle polygon (mm)."""
+    xy = np.asarray(rectangle.exterior.coords)[:3]
+    return float(np.hypot(*(xy[1] - xy[0]))), float(np.hypot(*(xy[2] - xy[1])))
 
 
 def remove_anatomy(g, segment) -> None:
@@ -284,8 +291,15 @@ class GranapAnatomy(StructuralComponent):
     tissue: object = state_variable(**_doc("", "the protoplast's tissue (None: a wall or a junction)"), initialize=None,
                                     scale=SCALES.Compartment, location="node", dtype=object,
                                     state_variable_type="descriptor")
-    kind: float = state_variable(**_doc("", "0 protoplast, 1 wall, 2 wall junction"), initialize=0.,
+    kind: float = state_variable(**_doc("", "0 protoplast, 1 wall, 2 wall junction, 3 a leaf organ's surface"),
+                                 initialize=0.,
                                  scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
+    pore_width: float = state_variable(**_doc("mm", "a stomatal pore's aperture width in the section (NaN: not a pore)"),
+                                       initialize=np.nan, scale=SCALES.Compartment, location="node",
+                                       state_variable_type="NonInertialIntensive")
+    pore_depth: float = state_variable(**_doc("mm", "a stomatal pore's depth through the epidermis (NaN: not a pore)"),
+                                       initialize=np.nan, scale=SCALES.Compartment, location="node",
+                                       state_variable_type="NonInertialIntensive")
     cgroup: float = state_variable(**_doc("", "the protoplast's MECHA cell group (NaN: apoplast)"), initialize=np.nan,
                                    scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
     section_x: float = state_variable(**_doc("mm", "position in the section"), initialize=np.nan,
@@ -310,7 +324,8 @@ class GranapAnatomy(StructuralComponent):
                                         initialize=0., scale=SCALES.Compartment, location="node",
                                         state_variable_type="NonInertialExtensive")
     network_path: float = state_variable(**_doc("", "edge type: membrane 0, wall_air 1, wall 2, plasmodesmata 3, "
-                                                    "air_link 4, axial junction 5"), initialize=np.nan,
+                                                    "air_link 4, axial junction 5, stomatal 6"),
+                                         initialize=np.nan,
                                          scale=SCALES.Connection, location="edge", state_variable_type="descriptor")
     edge_length: float = state_variable(**_doc("mm", "the edge's length (the wall's for membranes; between the sections "
                                                      "for axial junctions)"), initialize=np.nan,
@@ -339,6 +354,7 @@ class GranapAnatomy(StructuralComponent):
 
     library = AnatomyLibrary()
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
+    leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node (plan §60)
     mm_per_unit = MM_PER_M
 
     @classmethod
@@ -362,7 +378,9 @@ class GranapAnatomy(StructuralComponent):
         overrides = (parameters or {}).get("granap_overrides")
         if overrides:
             g.properties().setdefault("granap_overrides", {})[plant_vid] = overrides
-        cls.update_anatomies(g, _segments(g, plant_vid, tuple(cls.organs())))
+        segments = _segments(g, plant_vid, tuple(cls.organs()))
+        cls.update_anatomies(g, segments)
+        cls.update_leaf_surfaces(g, segments)
 
     @classmethod
     def update_anatomies(cls, g, segments) -> dict:
@@ -393,6 +411,64 @@ class GranapAnatomy(StructuralComponent):
             template_of[segment] = float(template.index)
         return done
 
+    @classmethod
+    def update_leaf_surfaces(cls, g, segments) -> None:
+        """
+        The leaf organs of *segments* get (again) their surface (plan §60): one Compartment of kind 3 (tissue
+        "leaf surface"), owned by the organ's basal leaf element, and one Connection (network_path 6) from every
+        stomatal pore of each of the organ's sections to it, anchored to the pore's section. The pores get their
+        aperture's width and depth (pore_width, pore_depth: the short and long sides of their polygon's minimum
+        rotated rectangle). The organ's previous surface and stomatal Connections are removed first, so that none
+        dangles when a section was replaced.
+        """
+        import shapely
+        s, L = g.scales, g.labels
+        labels = g.property("label")
+        codes = {getattr(L.SubOrgan, name) for name in cls.leaf_labels if name in cls.organs()}
+        organs = sorted({int(g.complex_at_scale(v, s.Organ)) for v in segments if labels.get(v) in codes})
+        if not organs:
+            return
+        surfaces = g.properties().setdefault("leaf_surface", {})
+        path, tissue = g.property("network_path"), g.property("tissue")
+        template_row = g.property("template_row")
+        for organ in organs:
+            elements = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan) if labels.get(v) in codes]
+            stomatal = [c for e in elements for c in list(g._children.get(e, []))
+                        if g.scale(c) == s.Connection and path.get(c) == columns.STOMATAL_PATH]
+            g.remove_connections(stomatal)
+            old = surfaces.pop(organ, None)
+            if old is not None and g.has_vertex(old):
+                g.remove_connections([old])
+            pores = {e: [int(c) for c in g.components_at_scale(e, scale=s.Compartment) if tissue.get(c) == "pore"]
+                     for e in elements}
+            if not any(pores.values()):
+                continue
+            inside = set(elements)
+            basal = next((e for e in elements if g.parent(e) not in inside), elements[0])
+            surface = g.add_components_bulk(s.anchors[s.Compartment], 1, topo_parents=[basal], **_build_props(
+                s.Compartment, label=L.Compartment.Apoplastic, kind=float(LEAF_SURFACE)))[0]
+            g.set_values("tissue", [surface], ["leaf surface"])
+            for name in columns.NODE_COLUMNS:
+                g.set_values(name, [surface], [0. if name in ("wall_length", "cell_area") else np.nan])
+            surfaces[organ] = int(surface)
+            template_of = g.property("anatomy_template")
+            for element, vids in pores.items():
+                if not vids:
+                    continue
+                template = cls.organ_of(g, element).library.by_index(int(template_of[element]))
+                rectangles = [shapely.minimum_rotated_rectangle(template.polygons[int(template_row[v])]) for v in vids]
+                sides = np.array([sorted(_rectangle_sides(r)) for r in rectangles])
+                g.set_values("pore_width", vids, sides[:, 0].tolist())
+                g.set_values("pore_depth", vids, sides[:, 1].tolist())
+                n = len(vids)
+                edges = g.add_components_bulk(s.anchors[s.Connection], n, topo_parents=[element] * n, **_build_props(
+                    s.Connection, label=L.Connection.Apoplastic, n_id_a=vids, n_id_b=[int(surface)] * n))
+                values = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
+                values.update(network_path=[float(columns.STOMATAL_PATH)] * n, edge_length=sides[:, 1].tolist(),
+                              membrane_surface=[0.] * n)
+                for name, column in values.items():
+                    g.set_values(name, edges, column)
+
     def __post_init__(self):
         g = self.data_structure.mtg
         segments = set(self.data_structure.entity_ids("SubOrgan").tolist())
@@ -415,6 +491,7 @@ class GranapAnatomy(StructuralComponent):
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
             del anatomy_class[gone]
         done = self.update_anatomies(g, segments)
+        self.update_leaf_surfaces(g, done["emerged"] + done["replaced"])
         template_of = g.properties()["anatomy_template"]
         for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
             template_of.setdefault(int(segment), -1.)

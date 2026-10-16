@@ -769,6 +769,9 @@ class NetworkExporter:
                            & (cells_gdf["type"] == "air space")
                            ]
         )
+        # The stomatal pores are air too (plan §60), by their type: wall_air
+        # edges, no plasmodesmata, an air link to their chamber.
+        pore_cells = set(cells_gdf.index[cells_gdf["type"].isin(getattr(self.organ, "PORE_TYPES", ()))])
 
         # Cells whose type must NEVER carry a symplastic (plasmodesmata) edge
         apoplastic_cells = set(
@@ -1228,6 +1231,7 @@ class NetworkExporter:
             )
 
         air_nodes = { cell_row_to_node[row_idx] for row_idx in protected_air_cells}   
+        wall_air_nodes = air_nodes | {cell_row_to_node[row_idx] for row_idx in pore_cells}
 
         # Phase 6 — add edges
         network._wall_to_cells = {
@@ -1269,10 +1273,8 @@ class NetworkExporter:
 
                 # Identify edges connecting to protected air spaces.
 
-                if (
-                    cn in air_nodes
-                    and bool(wd.get("shape_signature"))
-                ):
+                # every wall of an air node evaporates into it (plan §60)
+                if cn in wall_air_nodes:
 
                     network.graph.add_edge(
                         cn,
@@ -1326,8 +1328,8 @@ class NetworkExporter:
 
                 cid_a, cid_b = wd["cells"]
 
-                a_special = cid_a in protected_air_cells
-                b_special = cid_b in protected_air_cells
+                a_special = cid_a in protected_air_cells or cid_a in pore_cells
+                b_special = cid_b in protected_air_cells or cid_b in pore_cells
 
                 if a_special != b_special:
                     continue
@@ -1599,6 +1601,30 @@ class NetworkExporter:
                     dist=dist,
                     d_vec=d_vec,
                 )
+
+        # ------------------------------------------------------------------
+        # Step 5 — each stomatal pore air-linked to its sub-stomatal chamber,
+        # the protected air space nearest to it (they share no wall: the guard
+        # cells meet between them; plan §60)
+        # ------------------------------------------------------------------
+        chamber_rows = sorted(protected_air_cells)
+        for row_p in sorted(pore_cells):
+            if not chamber_rows:
+                break
+            geom_p = cells_gdf.loc[row_p, "geometry"]
+            distances = [geom_p.distance(cells_gdf.loc[r, "geometry"]) for r in chamber_rows]
+            row_c = chamber_rows[int(np.argmin(distances))]
+            pore, chamber = cell_row_to_node[row_p], cell_row_to_node[row_c]
+            pos_p = network.graph.nodes[pore]["position"]
+            pos_c = network.graph.nodes[chamber]["position"]
+            dist = np.hypot(pos_c[0] - pos_p[0], pos_c[1] - pos_p[1])
+            network.graph.add_edge(
+                pore, chamber,
+                path="air_link",
+                length=dist,
+                dist=dist,
+                d_vec=np.array([pos_c[0] - pos_p[0], pos_c[1] - pos_p[1]]),
+            )
 
         # ------------------------------------------------------------------
         # Keep ``organ.all_cells`` / ``organ._cells_gdf`` aligned with the

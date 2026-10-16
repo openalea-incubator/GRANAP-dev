@@ -236,6 +236,8 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
         return written
     valid_list = valid.tolist()
     protected_air_cells = set(r for r in valid_list if cells["protect"][r] and types[r] == "air space")
+    # the stomatal pores are air too (plan §60): by their type, without protect_topology (which would split walls)
+    pore_cells = [r for r in valid_list if types[r] in getattr(organ, "PORE_TYPES", ())]
     apoplastic_types = set(getattr(organ, "APOPLASTIC_ONLY_TYPES", ()))
     apoplastic_cells = set(r for r in valid_list if types[r] in apoplastic_types)
     get_thickness = _thickness(cell_wall_thickness)
@@ -271,7 +273,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
 
     # phase 6: membrane (or wall_air), wall and plasmodesmata edges, in the exporter's order (wall by wall)
     is_air = np.zeros(n_rows, dtype=bool)
-    is_air[list(protected_air_cells)] = True
+    is_air[list(protected_air_cells) + pore_cells] = True
     is_apoplastic = np.zeros(n_rows, dtype=bool)
     is_apoplastic[list(apoplastic_cells)] = True
     has_sig = walls["signature"] > 0
@@ -280,7 +282,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     dx, dy = mid_x[mem_w] - cx[mem_r], mid_y[mem_w] - cy[mem_r]
     dist = np.hypot(dx, dy)
     blocks.append((mem_w * slots + (np.arange(mem_w.size) - np.repeat(starts, counts)), node_of_row[mem_r], mem_w,
-                   dict(path=np.where(is_air[mem_r] & has_sig[mem_w], "wall_air", "membrane").tolist(),
+                   dict(path=np.where(is_air[mem_r], "wall_air", "membrane").tolist(),      # every air wall (§60)
                         length=lengths[mem_w], dist=dist, d_vec=list(np.column_stack((dx, dy))),
                         wall_thickness=thickness[mem_w].tolist())))
     mean_dist = _means(dist, counts)
@@ -315,6 +317,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
         linked = set(map(frozenset, zip(na[first].tolist(), nb[first].tolist())))
         air_links = _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_cells, cell_node,
                                position, linked, lengths, cells["polygons"])
+    air_links += _pore_links(pore_cells, protected_air_cells, cell_node, cx, cy, cells["polygons"])
     for i, (u_, v_, attributes) in enumerate(air_links):
         blocks.append((np.array([n_walls * slots + i]), np.array([u_]), np.array([v_]),
                        {k: [x] for k, x in attributes.items()}))
@@ -381,6 +384,25 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     written.update(apoplast=list(apo_vids), connections=connections.tolist(), n_walls=n_walls,
                    n_junctions=n_junctions, n_cells=n_cells, wall_to_cells=wall_to_cells)
     return written
+
+
+def _pore_links(pore_cells, air_cells, cell_node, cx, cy, polygons):
+    """
+    One air link from each stomatal pore to its sub-stomatal chamber, the protected air space nearest to it (the guard
+    cells meet between them, so they share no wall; place_stomata creates them together, a few µm apart).
+    """
+    edges = []
+    rows = sorted(air_cells)
+    if not rows:
+        return edges
+    for r in pore_cells:
+        distances = shapely.distance(polygons[r], polygons[rows])
+        chamber = rows[int(np.argmin(distances))]
+        dx, dy = float(cx[chamber] - cx[r]), float(cy[chamber] - cy[r])
+        dist = float(np.hypot(dx, dy))
+        edges.append((cell_node[r], cell_node[chamber], dict(path="air_link", length=dist, dist=dist,
+                                                           d_vec=np.array([dx, dy]))))
+    return edges
 
 
 def _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_cells, cell_node, position, linked,

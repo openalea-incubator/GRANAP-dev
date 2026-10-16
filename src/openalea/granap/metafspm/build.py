@@ -23,7 +23,7 @@ from openalea.metafspm.data_structure.mpg import MPG
 
 from openalea.granap.metafspm import columns
 
-PROTOPLAST, WALL, JUNCTION = 0, 1, 2          # Compartment kinds
+PROTOPLAST, WALL, JUNCTION, LEAF_SURFACE = 0, 1, 2, 3          # Compartment kinds (3: a leaf organ's surface, §60)
 PATH_LABELS = {"membrane": "Transmembrane", "wall_air": "Transmembrane", "plasmodesmata": "Symplastic",
                "wall": "Apoplastic", "air_link": "Apoplastic"}
 

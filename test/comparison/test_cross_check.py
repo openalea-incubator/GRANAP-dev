@@ -80,6 +80,39 @@ def _check_cells(old, new):
     assert all(_same(a, b) for a, b in zip(og.geometry, ng.geometry))
 
 
+def _apply_plan60(old):
+    """
+    The legacy's network with plan §60's rules applied (the reviewed differences of the main package): the stomatal
+    pores are air (their membranes wall_air, their plasmodesmata gone) and every membrane of a protected air space is
+    wall_air; each pore is air-linked to its nearest protected air space (its chamber). In place; returns old.
+    """
+    import numpy as np
+    graph, nwj = old.graph, old.n_walls + old.n_junctions
+    cells = old._cells_gdf
+    node = lambda row: nwj + int(row)                                                     # noqa: E731
+    pore_types = set(getattr(old, "PORE_TYPES", ("pore",)))
+    chambers = sorted(r for r in cells.index if cells.loc[r, "type"] == "air space" and
+                      bool(cells.loc[r, "protect_topology"]) and graph.has_node(node(r)))
+    pores = sorted(r for r in cells.index if cells.loc[r, "type"] in pore_types and graph.has_node(node(r)))
+    air = {node(r) for r in chambers} | {node(r) for r in pores}
+    for u, v, data in list(graph.edges(data=True)):
+        if data.get("path") == "membrane" and (u in air or v in air):
+            data["path"] = "wall_air"
+        elif data.get("path") == "plasmodesmata" and ((u in air) != (v in air)):
+            graph.remove_edge(u, v)
+    for r in pores:
+        if not chambers:
+            break
+        geometry = cells.loc[r, "geometry"]
+        chamber = chambers[int(np.argmin([geometry.distance(cells.loc[c, "geometry"]) for c in chambers]))]
+        p, c = graph.nodes[node(r)]["position"], graph.nodes[node(chamber)]["position"]
+        dist = np.hypot(c[0] - p[0], c[1] - p[1])
+        graph.add_edge(node(r), node(chamber), path="air_link", length=dist, dist=dist,
+                       d_vec=np.array([c[0] - p[0], c[1] - p[1]]))
+    old._matrix = None                                        # its adjacency matrix, rebuilt from the graph
+    return old
+
+
 def _check_network(old, new):
     assert (old.n_walls, old.n_junctions, old.n_cells) == (new.n_walls, new.n_junctions, new.n_cells)
     assert set(old.graph.nodes) == set(new.graph.nodes)
@@ -120,6 +153,6 @@ def test_the_mpg_backed_organ_gives_the_same_section(name, tmp_path):
         assert getattr(new, "mpg_topology_reads", 0) >= 1
         old.export_to_adjencymatrix()
         new.export_to_adjencymatrix()
-        _check_network(old, new)
+        _check_network(_apply_plan60(old), new)            # the legacy's, with plan §60's reviewed differences
         _check_cells(old, new)                  # the bridge cells too, after the export
     _check_mpg(new)

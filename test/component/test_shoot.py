@@ -61,3 +61,56 @@ def test_stems_leaves_and_roots_get_their_kinds_anatomy_and_are_joined():
     linked = {(kinds[section_of[int(a[e])]], kinds[section_of[int(b[e])]]) for e in g.junction_vids()}
     assert {(L.StemElement, L.StemElement), (L.StemElement, L.LeafElement), (L.StemElement, L.RootSegment)} <= linked
     assert ds.n_nodes() == sum(len(owners[s]) for s in segments)
+
+
+class TwoElementLeaf(StructuralComponent):
+    @classmethod
+    def initiate_plant(cls, g, plant, parameters):
+        L = g.labels.SubOrgan
+        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode", True), 1, L.StemElement, 2.5e-3)
+        _chain(g, _organ(g, plant, "Shoot", "Leaf", True), 2, L.LeafElement, 2.5e-3, bearer=stem[0])
+
+
+def test_leaf_surface_and_stomatal_connections():
+    """
+    Plan §60: each leaf organ gets one surface Compartment (kind 3), owned by its basal element, joined to every
+    stomatal pore of its sections (network_path 6); the pores are air (wall_air walls, no plasmodesmata, one air link
+    to their chamber) with their aperture's width and depth; rebuilding the surface leaves nothing dangling.
+    """
+    table = pd.DataFrame([dict(plant="p0", model=None, x=0., y=0., z=0., rotation=0., scenario={"parameters": {}})])
+    g, _ = build_population(table, initiators=(TwoElementLeaf, ShootAnatomy))
+    g.convert_properties_to_arraydict()
+    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    L, s = g.labels.SubOrgan, g.scales
+    labels = g.property("label")
+    leaves = sorted(int(v) for v in g.property("anatomy_class") if labels[int(v)] == L.LeafElement)
+    organs = {int(g.complex_at_scale(v, s.Organ)) for v in leaves}
+    assert len(leaves) == 2 and len(organs) == 1
+    surfaces = g.property("leaf_surface")
+    surface = surfaces[organs.pop()]
+    kind, tissue, path = g.property("kind"), g.property("tissue"), g.property("network_path")
+    assert kind[surface] == 3 and tissue[surface] == "leaf surface"
+    basal = next(v for v in leaves if g.parent(v) not in set(leaves))
+    assert g.compartments_by_owner(s.SubOrgan)[basal].count(surface) == 1
+    a, b = g.property("n_id_a"), g.property("n_id_b")
+    stomatal = [c for c in path if path[c] == 6]
+    pores = sorted(int(v) for v in tissue if tissue[v] == "pore" and g.scale(int(v)) == s.Compartment)
+    assert len(pores) > 0 and sorted(int(a[c]) for c in stomatal) == pores and {int(b[c]) for c in stomatal} == {surface}
+    width, depth = g.property("pore_width"), g.property("pore_depth")
+    assert all(0 < width[p] <= depth[p] for p in pores)
+    # the pores are air nodes: no plasmodesmata, wall_air walls, one air link (to an air space)
+    edges_of = {}
+    for c in path:
+        if g.scale(c) == s.Connection and c in a:
+            for end, other in ((a[c], b[c]), (b[c], a[c])):
+                edges_of.setdefault(int(end), []).append((int(path[c]), int(other)))
+    for p in pores:
+        kinds = [k for k, _ in edges_of[p]]
+        assert 3 not in kinds and 0 not in kinds and kinds.count(4) == 1 and 1 in kinds
+        assert tissue[next(o for k, o in edges_of[p] if k == 4)] == "air space"
+    # rebuilt: the same surface structure, nothing left of the old one
+    n_edges = ds.n_edges()
+    ShootAnatomy.update_leaf_surfaces(g, leaves)
+    path = g.property("network_path")
+    assert sum(1 for c in path if path[c] == 6) == len(pores)
+    assert not g.has_vertex(surface) and len(g.property("leaf_surface")) == 1

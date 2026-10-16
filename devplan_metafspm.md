@@ -1409,3 +1409,41 @@ Per-plant parameters come from the scenario (`initiate_plant(g, plant, parameter
 - `test/comparison/test_network.py` and `test_cross_check.py` (MPG vs legacy): equality everywhere except the reviewed differences (each listed, by rule).
 - The golden census and parameters: updated deliberately (the monocot leaf's new air spaces).
 - New tests: every pore an air node with wall_air edges and one air link to its chamber; every protected air space's membranes wall_air; one surface node per leaf organ with one stomatal Connection per pore; rebuilt when a section is replaced.
+
+## 61. Plan §60 done, without the monocot leaf's intercellular spaces (2026-10-16)
+
+**Your answers:**
+- go ahead;
+- the air-link radius stays the median wall length (Q-P5h);
+- the leaves' air network is only their stomatal chambers for now, to limit the changes in GRANAP: no intercellular spaces added to the monocot leaf preset (§60's item 4 dropped; its preset and golden parameters unchanged).
+
+**Done** (`metafspm/network.py`, `anatomy_writer.py`'s exporter, `organ_class.py`, `metafspm/component.py`, `build.py`, `columns.py`):
+- **The stomatal pores are air nodes** (`Organ.PORE_TYPES = ("pore",)`, by type, without protect_topology, which would split walls). Their membranes are `wall_air` edges, their plasmodesmata dropped (the existing air/non-air rule).
+- **Every membrane of an air node** (a protected air space, or a pore) is `wall_air`; the `has_sig` condition dropped. The sub-stomatal chambers, liquid cells before, are air.
+- **One air link from each pore to its chamber** (the nearest protected air space: they share no wall), in both builders.
+- **The leaf surface** (`GranapAnatomy.update_leaf_surfaces`, after the instances, in `initiate_plant` and `_anatomies`):
+  - per leaf organ (`leaf_labels = ("LeafElement",)`), one Compartment of kind 3 (`LEAF_SURFACE`, tissue `leaf surface`), owned by the basal leaf element;
+  - one Connection per pore of each of its sections, `network_path` 6 (`columns.STOMATAL_PATH`), anchored to the pore's section, length the pore's depth;
+  - rebuilt for the whole organ when one of its sections is (re)instantiated;
+  - the pores get `pore_width` and `pore_depth` (mm: the short and long sides of their template polygon's minimum rotated rectangle), declared state variables.
+
+**Monocot leaf (seed 0):**
+
+| edges | before | after |
+|---|---|---|
+| wall_air | 29 | 269 |
+| plasmodesmata | 4498 | 4458 |
+| air links | 0 | 20 (pore ↔ chamber) |
+
+**Needle (seed 42):**
+
+| edges | before | after |
+|---|---|---|
+| wall_air | 1104 | 1150 |
+| membranes | 14 847 | 14 801 |
+| plasmodesmata | 6172 | 6156 |
+| air links | 872 | 876 |
+
+**Tests:**
+- `test/comparison/test_network.py` and `test_cross_check.py`: the legacy's network with §60's rules replayed on it (`_apply_plan60`) equals the main package's, node for node, edge for edge, attribute for attribute, its adjacency matrix too. The rules are the only differences.
+- `test/component/test_shoot.py`: the leaf surface and stomatal Connections (two leaf elements; the pores as air nodes; a rebuild leaves nothing dangling).

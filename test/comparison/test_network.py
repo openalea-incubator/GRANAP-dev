@@ -3,6 +3,8 @@ The network stored at generation (built in the MPG from the section's cells and 
 against the legacy exporter's (openalea.granap.legacy): node for node, edge for edge, every attribute, the counts and
 the wall map, and the adjacency matrix read from the Connections. On every organ kind: roots, stems, leaves (protected
 air spaces, air links), the needle, and the sections read from files (ROI: no junction shared by two rings; CellSet).
+The legacy's network gets plan §60's rules first (pores as air nodes, every air space's membrane wall_air, the
+pores' links to their chambers): those are the only differences allowed.
 """
 import os
 
@@ -16,7 +18,7 @@ from openalea.granap.legacy.leaf_class import LeafAnatomy as LegacyLeaf
 from openalea.granap.legacy.roi_organ import RoiOrgan as LegacyRoi
 from openalea.granap.roi_organ import RoiOrgan
 
-from test_cross_check import ORGANS, SEED, _check_network, legacy
+from test_cross_check import ORGANS, SEED, _apply_plan60, _check_network, legacy
 
 INPUTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
 ROI = dict(folder_path=os.path.join(INPUTS, "Hypocotyl_RoiSet"), mm_per_pixel=0.001, smooth_factor=0.05)
@@ -39,4 +41,4 @@ def test_the_stored_network_is_the_legacy_exporters(name):
         organ.generate_cells()
     old.export_to_adjencymatrix(bridges=False)
     new.export_to_adjencymatrix(bridges=False)                 # the stored network, as stored
-    _check_network(old, new)
+    _check_network(_apply_plan60(old), new)                    # the legacy's, with plan §60's reviewed differences
