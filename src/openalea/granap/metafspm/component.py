@@ -295,7 +295,9 @@ class GranapAnatomy(StructuralComponent):
     wall_length: float = state_variable(**_doc("mm", "the wall's length in the section (0: not a wall)"), initialize=0.,
                                         scale=SCALES.Compartment, location="node",
                                         state_variable_type="NonInertialExtensive")
-    wall_thickness: float = state_variable(**_doc("mm", "the wall's thickness (NaN: not a wall)"), initialize=np.nan,
+    wall_thickness: float = state_variable(**_doc("µm", "the wall's thickness: its cells' wall layers (the "
+                                                        "AnatomyWriter's per-tissue values, µm; NaN: not a wall)"),
+                                           initialize=np.nan,
                                            scale=SCALES.Compartment, location="node",
                                            state_variable_type="NonInertialIntensive")
     cell_area: float = state_variable(**_doc("mm2", "the protoplast's area in the section (0: apoplast)"),
@@ -321,7 +323,7 @@ class GranapAnatomy(StructuralComponent):
     edge_dist: float = state_variable(**_doc("mm", "the distance between the edge's nodes (NaN: wall edges)"),
                                       initialize=np.nan, scale=SCALES.Connection, location="edge",
                                       state_variable_type="NonInertialIntensive")
-    edge_wall_thickness: float = state_variable(**_doc("mm", "the wall's thickness on membrane and wall edges"),
+    edge_wall_thickness: float = state_variable(**_doc("µm", "the wall's thickness on membrane and wall edges"),
                                                 initialize=np.nan, scale=SCALES.Connection, location="edge",
                                                 state_variable_type="NonInertialIntensive")
     lateral_distance: float = state_variable(**_doc("mm", "wall edges: the lateral distance"), initialize=np.nan,

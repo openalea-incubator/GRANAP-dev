@@ -7,7 +7,7 @@ rebuilt from them (views.network_from_mpg) with exactly the exporter's keys and 
 
     Compartments    section_x, section_y            the position in the section (mm)
                     wall_length                     walls (0 at junctions and protoplasts)
-                    wall_thickness                  walls
+                    wall_thickness                  walls (µm, as the exporter's: the cells' wall layers)
                     cell_area, cgroup,              protoplasts (cell_area 0 elsewhere)
                     protect_topology, bridge
     Connections     network_path                    PATH_CODES: membrane 0, wall_air 1, wall 2, plasmodesmata 3,
