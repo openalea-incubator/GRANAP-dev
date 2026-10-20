@@ -24,6 +24,7 @@ from openalea.granap.metafspm.vessels import vessel_ids
 
 GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
 _TEMPLATE_IDS = itertools.count()                 # template ids, unique across libraries (roots, stems, leaves)
+TEMPLATES = {}                                    # {template id: Template}, every library's
 LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
 SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
@@ -220,7 +221,7 @@ class Template:
 class AnatomyLibrary:
     """
     Templates by class, generated at their first request. A class's parameters: *parameters(key, overrides=...)*
-    (default: the root preset), with, in order, the plant's overrides (its scenario's granap_overrides), the class's
+    (default: the root preset), with, in order, the plant's overrides (its scenario's root_anatomy, stem_anatomy or leaf_anatomy), the class's
     own parametrization from *class_parameters* ({key: overrides} or a callable key -> overrides), and the class
     inputs' targets; overrides are {section: {field: value}}. Templates are keyed by (class, plant's overrides): plants
     parametrized alike share them.
@@ -242,15 +243,23 @@ class AnatomyLibrary:
         if entry not in self.templates:
             overrides = merged(plant, self.overrides(key), targets)
             organ = self.organ_class(self.parameters(key, overrides=overrides), seed=self.seed)
-            self.templates[entry] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
+            template = self.templates[entry] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
+            TEMPLATES[template.index] = template
         return self.templates[entry]
 
     def by_index(self, index) -> Template:
         return next(t for t in self.templates.values() if t.index == index)
 
 
+def template_by_index(index) -> Template:
+    """The template of id *index* (its segments' anatomy_template), whichever library generated it."""
+    return TEMPLATES[int(index)]
+
+
 def find_template(libraries, index) -> Template:
-    """The template of id *index* among several libraries."""
+    """The template of id *index* among several libraries (any library: template_by_index)."""
+    if int(index) in TEMPLATES:
+        return TEMPLATES[int(index)]
     for library in libraries:
         for template in library.templates.values():
             if template.index == index:
