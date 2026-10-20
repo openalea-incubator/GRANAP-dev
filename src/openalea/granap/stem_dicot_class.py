@@ -138,7 +138,8 @@ class DicotStemAnatomy(StemAnatomy):
             return float(self.vascular_params["thickness"]) / 2.0
         return float(np.sqrt(polygon.area / np.pi))
 
-    def _ring_contour(self, cx: float, cy: float, r_default: float, spec: dict) -> Polygon:
+    def _ring_contour(self, cx: float, cy: float, r_default: float, spec: dict,
+                      polygon: Polygon = None) -> Polygon:
         """A ring contour in the ``ring_shape`` family from a bundle / cylinder spec.
 
         Shared by the eustele bundle ring and the continuous cylinder.  ``circle`` /
@@ -147,8 +148,15 @@ class DicotStemAnatomy(StemAnatomy):
         peak/valley parameterisation as the root** — ``radius_peak_side`` /
         ``radius_valley_side`` (mm) + ``arc_peak_side`` / ``arc_valley_side`` +
         ``n_peaks`` — so there is a single way to describe a star contour across
-        organs (``r_default`` is not used for a star)."""
+        organs (``r_default`` is not used for a star).  ``outline`` is ``polygon``
+        itself — the pith/cortex boundary — so the ring follows any ``base_shape``."""
         shape = spec.get("ring_shape", "circle")
+        if shape == "outline":
+            # Pulled inward so its equivalent radius is r_default: the boundary itself
+            # in primary growth (r_default = sqrt(area/pi)), the pith radius under
+            # secondary growth, where the central region is enlarged for the wood.
+            inset = float(np.sqrt(polygon.area / np.pi)) - r_default
+            return polygon.buffer(-inset) if inset > 1e-9 else polygon
         if shape == "star":
             return GeometryProcessor.contour_polygon(
                 "star", cx=cx, cy=cy,
@@ -166,7 +174,7 @@ class DicotStemAnatomy(StemAnatomy):
         cambium ring — in the ``ring_shape`` family."""
         bp = self._get_param("vascular_bundle")
         cx, cy = polygon.centroid.x, polygon.centroid.y
-        return self._ring_contour(cx, cy, self._primary_ring_radius(polygon), bp)
+        return self._ring_contour(cx, cy, self._primary_ring_radius(polygon), bp, polygon)
 
     def _contour_slots(self, contour: Polygon, cx: float, cy: float,
                        n: int) -> List[Tuple[float, float, float]]:
@@ -675,7 +683,7 @@ class DicotStemAnatomy(StemAnatomy):
 
         r_prim = self._primary_ring_radius(polygon)
         r_sec = self._secondary_cambium_radius()
-        primary_contour = self._ring_contour(cx, cy, r_prim, bp)
+        primary_contour = self._ring_contour(cx, cy, r_prim, bp, polygon)
         # Inner radius of the secondary-xylem annulus.  On a non-circular primary ring
         # (star / ellipse) the bundles sit at varying radii, so the sectors and the
         # interfascicular fills must start at the *minimum* contour radius (the star

@@ -20,15 +20,22 @@ from openalea.granap.input_data import OrganInputData, DicotMedularRaysParams
 SEED = 0
 
 
+_BUILT: dict = {}
+
+
 def make_secondary_root(**mr_kwargs) -> RootAnatomy:
-    """Dicot secondary-growth root with a medullar-ray param entry."""
-    data = OrganInputData.for_dicot_root()
-    data.set_value("secondary_growth", "value", True)
-    data.set_value("stele", "thickness", 1.2)
-    data.params.append(DicotMedularRaysParams(**mr_kwargs))
-    root = RootAnatomy(data, seed=SEED)
-    root.generate_cells()
-    return root
+    """Dicot secondary-growth root with a medullar-ray param entry, memoised on its
+    kwargs — the rate=0 reference root is wanted by two tests and takes ~12 s."""
+    key = tuple(sorted(mr_kwargs.items()))
+    if key not in _BUILT:
+        data = OrganInputData.for_dicot_root()
+        data.set_value("secondary_growth", "value", True)
+        data.set_value("stele", "thickness", 1.2)
+        data.params.append(DicotMedularRaysParams(**mr_kwargs))
+        root = RootAnatomy(data, seed=SEED)
+        root.generate_cells()
+        _BUILT[key] = root
+    return _BUILT[key]
 
 
 def _center(root):
@@ -84,22 +91,27 @@ def test_rate_zero_matches_n_medullar():
 
 
 def test_rate_adds_rays_outward():
-    """With rate>0 the outer wood holds more distinct rays than the inner wood."""
-    root = make_secondary_root(
-        n_medullar=6, n_medullar_rate=150.0, start_radius=0.0,
-        start_radius_sd=0.1, allow_non_vascular=True,
-    )
+    """With rate>0 the outer wood holds more distinct rays than the inner wood.
+
+    Built with the same kwargs as the rate=150 root in
+    :func:`test_rate_increases_total_rays` so the two share one build; the
+    ``start_radius`` overrides this used to carry were incidental to the claim
+    (inner 24 vs outer 50 without them)."""
+    root = make_secondary_root(n_medullar=6, n_medullar_rate=150.0, allow_non_vascular=True)
     inner = distinct_rays(root, 0.0, 0.45)
     outer = distinct_rays(root, 0.55, 1.0)
     assert outer > inner, f"Expected denser outer rays (inner={inner}, outer={outer})"
 
 
 def test_rate_increases_total_rays():
-    """A higher rate yields more medullar-ray cells overall (monotonic)."""
+    """A higher rate yields more medullar-ray cells overall.
+
+    Two points, not three: the intermediate rate=50 build cost 13 s and only re-stated
+    what the endpoints already show.  The rate=0 root is shared with
+    :func:`test_rate_zero_matches_n_medullar`."""
     n0 = len(_ray_cells(make_secondary_root(n_medullar=6, n_medullar_rate=0.0, allow_non_vascular=True)))
-    n1 = len(_ray_cells(make_secondary_root(n_medullar=6, n_medullar_rate=50.0, allow_non_vascular=True)))
-    n2 = len(_ray_cells(make_secondary_root(n_medullar=6, n_medullar_rate=150.0, allow_non_vascular=True)))
-    assert n0 < n1 < n2, f"Ray cell count should grow with rate ({n0}, {n1}, {n2})"
+    n1 = len(_ray_cells(make_secondary_root(n_medullar=6, n_medullar_rate=150.0, allow_non_vascular=True)))
+    assert n0 < n1, f"Ray cell count should grow with rate ({n0} -> {n1})"
 
 
 def test_rate_driven_rays_still_reach_phloem():

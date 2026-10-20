@@ -11,8 +11,10 @@ the arrangement that defines each bundle type:
     amphicribral  -> phloem rings a xylem core (phloem farther from centre)
     face (monocot)-> metaxylem outer of protoxylem, + a lacuna void
 
-Two whole-organ smoke tests then confirm the dicot eustele and monocot
-atactostele presets generate, and that a hollow pith leaves the centre empty.
+Two whole-organ tests then confirm the monocot atactostele preset generates and
+that a hollow pith leaves the centre empty.  (The dicot eustele is not re-checked
+here: ``test_vascular_regression.test_dicot_stem_golden`` builds the same preset at
+the same seed and pins its exact census.)
 """
 
 import os
@@ -142,6 +144,60 @@ def test_caps_are_asymmetric_and_scale_with_count():
         "the 4-layer outward cap must extend the bundle farther than the 2-layer inward cap"
 
 
+# -- tapered outward cap (n_caps_layers_outward_flank) ------------------------
+# At theta=0 the outward pole is +x and the flanks are the +/-y sides.
+
+def _fibre_xy(cells):
+    return np.array([(c.x, c.y) for c in cells.cells if c.type == "sclerenchyma"])
+
+
+def test_outward_flank_unset_or_equal_is_the_uniform_cap():
+    # None (default) and a flank count equal to the pole count are both "no taper":
+    # the same fibres in the same places as the plain uniform cap.
+    ref = _fibre_xy(_build(sheath="none", n_caps_layers_outward=4)[0])
+    for flank in (None, 4):
+        got = _fibre_xy(_build(sheath="none", n_caps_layers_outward=4,
+                               n_caps_layers_outward_flank=flank)[0])
+        assert got.shape == ref.shape and np.allclose(got, ref), \
+            f"flank={flank} must reproduce the uniform 4-layer cap"
+
+
+def test_outward_flank_above_pole_is_clamped():
+    ref = _fibre_xy(_build(sheath="none", n_caps_layers_outward=3)[0])
+    got = _fibre_xy(_build(sheath="none", n_caps_layers_outward=3,
+                           n_caps_layers_outward_flank=7)[0])
+    assert got.shape == ref.shape and np.allclose(got, ref), \
+        "a flank count above the pole count is clamped to it (uniform cap)"
+
+
+def test_tapered_cap_keeps_pole_depth_and_thins_at_flanks():
+    # 5 layers over the pole, 1 at the flanks: the cap reaches as far out at the
+    # pole as the uniform 5-layer cap, but holds fewer fibres and stays thin on the
+    # tangential sides.
+    _, uni = _build(sheath="none", n_caps_layers_outward=5)
+    _, tap = _build(sheath="none", n_caps_layers_outward=5, n_caps_layers_outward_flank=1)
+    uni_cells, _ = _build(sheath="none", n_caps_layers_outward=5)
+    tap_cells, _ = _build(sheath="none", n_caps_layers_outward=5, n_caps_layers_outward_flank=1)
+    n_uni, n_tap = len(_fibre_xy(uni_cells)), len(_fibre_xy(tap_cells))
+    assert 0 < n_tap < n_uni, "the tapered cap must hold fewer fibres than the uniform one"
+
+    _, uy0, ux1, uy1 = uni.envelope.bounds
+    _, ty0, tx1, ty1 = tap.envelope.bounds
+    scl = _params()[0]["sclerenchyma_cell_diameter"]
+    assert abs(tx1 - ux1) < 0.5 * scl, "the pole (+x) keeps the full cap depth"
+    assert (ty1 - ty0) < (uy1 - uy0) - scl, "the flanks (+/-y) carry a thinner cap"
+
+
+def test_tapered_cap_layer_count_follows_the_angle():
+    # Layer i survives where the linearly interpolated count rounds above it:
+    # flank 2, pole 5 -> 2 / 3 / 4 / 5 layers at 0 / 30 / 60 / 90 degrees.
+    from openalea.granap.vascular_bundle import _cap_layer_threshold
+    def count(deg):
+        a = np.radians(deg)
+        return sum(1 for i in range(5) if a >= _cap_layer_threshold(i, 5, 2))
+    assert [count(d) for d in (0, 30, 60, 90)] == [2, 3, 4, 5]
+
+
 # -- whole-organ smoke -------------------------------------------------------
 
 def _census(organ):
@@ -150,15 +206,6 @@ def _census(organ):
     for cell in organ.all_cells.cells:
         c[cell.type] = c.get(cell.type, 0) + 1
     return c
-
-
-def test_dicot_eustele_generates():
-    c = _census(StemAnatomy(OrganInputData.for_dicot_stem(), seed=SEED))
-    # Central ground tissue is tagged 'parenchyma' (the stem pith); xylem is a single
-    # 'xylem' tag (no metaxylem/protoxylem split).
-    for t in ("xylem", "sieve element", "cambium", "parenchyma", "cortex", "epidermis"):
-        assert c.get(t, 0) > 0, f"dicot stem missing {t}"
-    assert c.get("aerenchyma", 0) == 0, "a plain dicot stem must not default to aerenchyma"
 
 
 def test_monocot_atactostele_generates():
@@ -183,3 +230,24 @@ def test_hollow_pith_leaves_cavity_empty():
     covering = [c for c in organ.all_cells.cells
                 if c.polygon is not None and c.polygon.contains(center)]
     assert not covering, "no cell should fill the hollow medullary cavity"
+
+
+def test_outline_ring_follows_a_square_stem():
+    # ring_shape='outline' lays the bundle ring on the pith/cortex boundary itself,
+    # so on a square stem the bundles follow the square into its corners instead of
+    # sitting on a circle of the same area, and every bundle cell stays inside.
+    from shapely.geometry import Point
+    data = OrganInputData.for_dicot_stem()
+    data.set_value("vascular_bundle", "ring_shape", "outline")
+    data.params.append({"name": "base_shape", "shape": "square", "width": 1.4})
+    organ = StemAnatomy(data, seed=SEED)
+    organ.generate_cells()
+    outline = organ.generate_base_shape()
+    vascular = [c for c in organ.all_cells.cells
+                if c.type in ("xylem", "sieve element", "cambium")]
+    assert vascular, "the square stem should carry bundles"
+    assert all(outline.contains(Point(c.x, c.y)) for c in vascular)
+    # The corners are farther from the centre than the side middles: the outline
+    # ring reaches ~0.85 here, the default circle ring stops at ~0.69.
+    r = max(np.hypot(c.x - outline.centroid.x, c.y - outline.centroid.y) for c in vascular)
+    assert r > 0.7, f"bundles should follow the square into its corners (max r = {r:.2f})"
