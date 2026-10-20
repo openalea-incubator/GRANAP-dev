@@ -43,6 +43,28 @@ def _needle_features():
     return build_gallery_needle_data()
 
 
+def _monocot_distributions():
+    """The tissue branch's size distributions (plan §62): lognormal vessels, gamma sieve elements."""
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "vessel_diameter_distribution", {"family": "lognormal"})
+    data.set_value("phloem", "sieve_diameter_distribution", {"family": "gamma"})
+    return data
+
+
+def _monocot_no_metaxylem():
+    """The tissue branch's zero-metaxylem apex: protoxylem and phloem poles only."""
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "n_vascular_bundles", 0)
+    return data
+
+
+def _dicot_stem_outline():
+    """The tissue branch's eustele ring following the pith/cortex outline."""
+    data = OrganInputData.for_dicot_stem()
+    data.set_value("vascular_bundle", "ring_shape", "outline")
+    return data
+
+
 ORGANS = {          # name: (legacy class, GRANAP's class, input data, network compared)
     "monocot_default": (RootAnatomy, Root, OrganInputData.for_root, True),
     "monocot_arch": (RootAnatomy, Root, _monocot_arch, False),
@@ -52,6 +74,9 @@ ORGANS = {          # name: (legacy class, GRANAP's class, input data, network c
     "needle_features": (NeedleAnatomy, Needle, _needle_features, False),
     "dicot_stem": (StemAnatomy, Stem, OrganInputData.for_dicot_stem, False),
     "monocot_stem": (StemAnatomy, Stem, OrganInputData.for_monocot_stem, False),
+    "monocot_distributions": (RootAnatomy, Root, _monocot_distributions, True),
+    "monocot_no_metaxylem": (RootAnatomy, Root, _monocot_no_metaxylem, False),
+    "dicot_stem_outline": (StemAnatomy, Stem, _dicot_stem_outline, False),
 }
 QUICK = {"monocot_default"}
 

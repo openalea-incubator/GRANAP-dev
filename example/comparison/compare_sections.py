@@ -19,7 +19,9 @@ GRANAP/example/comparison:
 
 Organs: every kind GRANAP builds (roots: monocot, monocot with arch xylem, monocot with aerenchyma, dicot primary,
 secondary and woody; stems: dicot, continuous dicot, monocot; leaves: monocot, dicot; the needle; a section read from
-a CellSet file; one read from ImageJ ROIs).
+a CellSet file; one read from ImageJ ROIs), and the tissue branch's features (plan §62: size distributions of the
+vessels and sieve elements, a root apex with no metaxylem, the dicot ring following the outline, and its examples'
+buttercup stem, maize stem and holly leaf).
 """
 import os
 import sys
@@ -63,6 +65,21 @@ def _data(preset, changes=None):
     return make
 
 
+def _builder_organ(original, ported, module, builder):
+    """(the legacy organ, GRANAP's organ) from an example's input builder (example/<folder>/<module>.py), the legacy
+    one on its own copy of the input."""
+    def data():
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", module.split("/")[0])
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
+        return getattr(__import__(module.split("/")[1]), builder)()
+
+    def legacy_data():
+        made = data()                                          # an OrganInputData, or its list of section dicts
+        return LegacyInputData.from_dict_list(made if isinstance(made, list) else made.to_dict_list())
+    return (lambda: original(legacy_data(), seed=SEED), lambda: ported(data(), seed=SEED))
+
+
 def _input_organ(original, ported, preset, changes=None):
     """(the legacy organ, GRANAP's organ), built from an input data preset (the legacy one gets its own copy)."""
     data = _data(preset, changes)
@@ -86,6 +103,17 @@ ORGANS = {          # name: (build GRANAP's organ, build the MPG-backed organ)
     "monocot_leaf": _input_organ(LegacyLeaf, LeafAnatomy, "for_monocot_leaf"),
     "dicot_leaf": _input_organ(LegacyLeaf, LeafAnatomy, "for_dicot_leaf"),
     "needle": _input_organ(LegacyNeedle, NeedleAnatomy, "for_needle"),
+    # the tissue branch's features (plan §62)
+    "monocot_root_distributions": _input_organ(LegacyRoot, RootAnatomy, "for_root", {
+        ("xylem", "vessel_diameter_distribution"): {"family": "lognormal"},
+        ("phloem", "sieve_diameter_distribution"): {"family": "gamma"}}),
+    "monocot_root_no_metaxylem": _input_organ(LegacyRoot, RootAnatomy, "for_root",
+                                              {("xylem", "n_vascular_bundles"): 0}),
+    "dicot_stem_outline": _input_organ(LegacyStem, StemAnatomy, "for_dicot_stem",
+                                       {("vascular_bundle", "ring_shape"): "outline"}),
+    "dicot_stem_buttercup": _builder_organ(LegacyStem, StemAnatomy, "stem/dicot_buttercup", "build_buttercup"),
+    "monocot_stem_maize": _builder_organ(LegacyStem, StemAnatomy, "stem/monocot_maize", "build_maize"),
+    "dicot_leaf_holly": _builder_organ(LegacyLeaf, LeafAnatomy, "leaf/dicot_holly", "build_holly"),
     "cellset": (lambda: LegacyCellSet(CELLSET, seed=SEED), lambda: CellSetOrgan(CELLSET, seed=SEED)),
     "roi": (lambda: LegacyRoi(**ROI), lambda: RoiOrgan(**ROI)),
 }

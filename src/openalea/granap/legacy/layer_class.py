@@ -26,6 +26,9 @@ class LayerPolygon:
     cell_width: float = 0.0
     id_layer: int = 0
     shift: float = 0.0
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
+    axial_height: Optional[float] = None
     # Transfusion-tissue fields (needle-specific)
     transfusion_type: bool = False
     tt_diameter: float = 0.0
@@ -81,6 +84,9 @@ class Layer:
     order: int = 0
     cell_width: Optional[float] = None
     shift: float = 0.0
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
+    axial_height: Optional[float] = None
     additional_params: Dict[str, Any] = field(default_factory=dict)
     cells: List[Cell] = field(default_factory=list)
     polygon: Optional[Polygon] = None
@@ -107,6 +113,8 @@ class Layer:
         }
         if self.cell_width is not None:
             result["cell_width"] = self.cell_width
+        if self.axial_height is not None:
+            result["axial_height"] = self.axial_height
         result.update(self.additional_params)
         return result
     
@@ -121,13 +129,14 @@ class Layer:
         order = data.get("order", _defaults.order_default)
         cell_width = data.get("cell_width", data.get("cell_diameter", _defaults.cell_width_default))
         shift = data.get("shift", _defaults.shift_default)
-        
+        axial_height = data.get("axial_height", _defaults.axial_height_default)
+
         # Everything else goes into additional_params
         additional_params = {
-            k: v for k, v in data.items() 
-            if k not in ["name", "cell_diameter", "n_layers", "order", "cell_width", "shift"]
+            k: v for k, v in data.items()
+            if k not in ["name", "cell_diameter", "n_layers", "order", "cell_width", "shift", "axial_height"]
         }
-        
+
         return cls(
             name=name,
             cell_diameter=cell_diameter,
@@ -135,6 +144,7 @@ class Layer:
             order=order,
             cell_width=cell_width,
             shift=shift,
+            axial_height=axial_height,
             additional_params=additional_params
         )
     

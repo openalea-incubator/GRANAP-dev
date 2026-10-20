@@ -27,6 +27,7 @@ from openalea.granap.legacy.cell_manager import CellManager
 from openalea.granap.legacy.network_base import AbstractNetwork
 from openalea.granap.legacy.input_data import OrganInputData
 from openalea.granap.legacy.tissue_class import TissueRecipe, retag_tissue
+from openalea.granap.legacy.generate_cell_3d import generate_cells_3d as _generate_cells_3d, Cells3DResult
 
 class Organ(AbstractNetwork, ABC):
     """
@@ -245,6 +246,7 @@ class Organ(AbstractNetwork, ABC):
                 shift=layer["shift"],
                 n_points=layer.get("n_points"),
                 protect_shape=layer.get("protect_shape", False),
+                axial_height=layer.get("axial_height"),
             ))
         
         # Add central layers (vascular, parenchyma, etc.)
@@ -357,6 +359,45 @@ class Organ(AbstractNetwork, ABC):
             log.info("GeoDataFrame export:     %.3fs", time.time() - t_start)
         
         return self._cells_gdf
+
+    def generate_cells_3d(self, n_axial_repeats: float = 8.0,
+                          default_axial_height: Optional[float] = None,
+                          aerenchyma_mode: str = "before",
+                          seed: Optional[int] = None) -> Cells3DResult:
+        """Build a 3D model of this organ by extruding its 2D cross-section.
+
+        Generates a fresh 2D cross-section — *ordinary* intercellular space
+        disabled (3D intercellular space isn't modelled yet), aerenchyma
+        handled per ``aerenchyma_mode`` — and stacks literal copies of each
+        cell's real 2D polygon along Z at its own tissue-type height; vessels
+        get one extrusion spanning the whole segment. See
+        :mod:`generate_cell_3d` for the full mechanics and the reasoning
+        behind this design (it replaced an earlier 3D-Voronoi approach that
+        proved too fragile/expensive).
+
+        This organ is left as it was found — the parameters overridden for the
+        2D pass are restored and cached geometry is invalidated, so a later
+        :meth:`generate_cells` returns this organ's own 2D section.
+
+        Args:
+            n_axial_repeats: segment length as a multiple of the tallest
+                ordinary tissue's own axial height.
+            default_axial_height: override for any tissue whose own
+                ``axial_height`` isn't explicitly configured (else each
+                falls back to ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``).
+            aerenchyma_mode: when aerenchyma is applied relative to the
+                extrusion. ``"before"`` (default) builds it in 2D and extrudes
+                each lacuna as one full-span prism — continuous axial
+                channels, the rice-root case. ``"after"`` suppresses the 2D
+                pass and instead retypes individual extruded prisms to "air
+                space" — a distributed void network, the leaf case.
+                ``"none"`` disables it entirely.
+            seed: RNG seed for the per-cell axial phase shift; defaults to
+                this organ's own seeded ``self.rng``.
+        """
+        return _generate_cells_3d(self, n_axial_repeats=n_axial_repeats,
+                                  default_axial_height=default_axial_height,
+                                  aerenchyma_mode=aerenchyma_mode, seed=seed)
 
     def retag_cells(self, old_tag: str, new_tag: str) -> int:
         """Rename every cell tagged ``old_tag`` to ``new_tag``.
@@ -1208,7 +1249,12 @@ class Organ(AbstractNetwork, ABC):
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 10))
         
-        cells_gdf.plot(
+        # `categories` pins the type -> colour mapping.  Without it the mapping is
+        # built from the types present in THIS organ, so a section that happens to
+        # lack one (a series apex with no metaxylem left) shifts every other
+        # colour and reads as a different plant.  Callers drawing several organs
+        # together should pass the union of their types.
+        plot_kwargs = dict(
             ax=ax,
             column='type',
             categorical=True,
@@ -1217,8 +1263,12 @@ class Organ(AbstractNetwork, ABC):
             linewidth=0.5,
             alpha=0.5,
             legend=True,
-            legend_kwds={'title': 'Cell Type', 'loc': 'best'}
+            legend_kwds={'title': 'Cell Type', 'loc': 'best'},
         )
+        categories = kwargs.get('categories')
+        if categories is not None:
+            plot_kwargs['categories'] = list(categories)
+        cells_gdf.plot(**plot_kwargs)
         
         ax.set_aspect("equal", "box")
         ax.set_xlabel("x (mm)")

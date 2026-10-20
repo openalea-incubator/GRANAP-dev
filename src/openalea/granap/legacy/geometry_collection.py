@@ -13,6 +13,7 @@ from scipy.spatial import Delaunay, ConvexHull
 from shapely.ops import unary_union
 
 from openalea.granap.legacy.math_functions import GRADIENT_FUNCTIONS, rescale
+from openalea.granap.legacy.distribution import draw
 
 
 #: Grid the polygon fed to :func:`shapely.maximum_inscribed_circle` is snapped to
@@ -875,6 +876,7 @@ class GeometryProcessor:
         ellipse_max_aspect:  float                       = 2.0,
         pack_strategy:       str                         = "space",
         rng                                              = None,
+        distribution                                     = None,
     ) -> List[Tuple[float, float, float]]:
         """
         Unified Apollonian circle packing with proportion stop, directional gradient,
@@ -891,6 +893,9 @@ class GeometryProcessor:
                                  max(diameter_max - 3*diameter_sd, diameter_max * 0.01).
             diameter_sd:         Per-circle diameter noise std-dev.  For direction=None with
                                  gradient_function="normal" this is the sampling std-dev.
+            distribution:        Shape of that noise (a Distribution or its dict; see
+                                 openalea.granap.legacy.distribution), moment-matched to the same
+                                 mean and sd.  None = normal, as before.
             gradient_function:   "five_pl" | "linear" (spatial) or "normal" | "uniform" (random).
                                  "gaussian" is accepted as an alias for "normal".
             gradient_inflection: Inflection point in [0, 1] for five_pl.
@@ -1023,9 +1028,8 @@ class GeometryProcessor:
             if direction is None or base_fn is None:
                 if gradient_function == "normal":
                     mean_diam   = (diameter_max + diameter_min) / 2.0
-                    target_diam = float(np.clip(
-                        _rng.normal(mean_diam, diameter_sd), diameter_min, diameter_max
-                    ))
+                    target_diam = draw(_rng, mean_diam, diameter_sd,
+                                       diameter_min, diameter_max, distribution)
                 elif gradient_function == "uniform":
                     target_diam = float(_rng.uniform(diameter_min, diameter_max))
                 else:
@@ -1048,9 +1052,8 @@ class GeometryProcessor:
                 gradient_t = t
                 target_diam = base_fn(t)
                 if diameter_sd > 0.0:
-                    target_diam = float(np.clip(
-                        _rng.normal(target_diam, diameter_sd), diameter_min, np.inf
-                    ))
+                    target_diam = draw(_rng, target_diam, diameter_sd,
+                                       diameter_min, None, distribution)
 
             r = min(r_ins, target_diam / 2)
 
@@ -1280,13 +1283,15 @@ class GeometryProcessor:
         for i in range(n_slices):
             angle_start = 2 * np.pi * i / n_slices
             angle_end = 2 * np.pi * (i + 1) / n_slices
-            
-            # Create a wedge polygon
-            # Points: center, point at angle_start, point at angle_end
-            p1 = (cx + radius * np.cos(angle_start), cy + radius * np.sin(angle_start))
-            p2 = (cx + radius * np.cos(angle_end), cy + radius * np.sin(angle_end))
-            
-            wedge = sp.Polygon([(cx, cy), p1, p2])
+
+            # Create a wedge polygon: the center plus points along the arc, at
+            # most 45 deg apart.  A plain triangle (center, start, end) collapses
+            # to zero area when the wedge spans 180 deg (n_slices == 2).
+            n_arc = max(1, int(np.ceil((angle_end - angle_start) / (np.pi / 4))))
+            arc = [(cx + radius * np.cos(a), cy + radius * np.sin(a))
+                   for a in np.linspace(angle_start, angle_end, n_arc + 1)]
+
+            wedge = sp.Polygon([(cx, cy), *arc])
             
             slice_polygon = polygon.intersection(wedge)
             if not slice_polygon.is_empty:
