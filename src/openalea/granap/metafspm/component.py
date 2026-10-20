@@ -265,6 +265,7 @@ class GranapAnatomy(StructuralComponent):
 
     Instructions for the generation:
       library        the roots' AnatomyLibrary (its parameters(key, overrides=...): GRANAP's root preset by default)
+      root           the roots' OrganAnatomy, to give them other class inputs (None: library, by diameter)
       shoot          {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves
       a plant's scenario parameters may give granap_overrides: {section: {field: value}} applied to GRANAP's
       parameters for that plant (e.g. a genotype's cortex), before the class's own and its class inputs' targets
@@ -353,14 +354,15 @@ class GranapAnatomy(StructuralComponent):
                                              state_variable_type="NonInertialExtensive")
 
     library = AnatomyLibrary()
+    root = None                      # the roots' OrganAnatomy (None: library, its classes by diameter)
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
     leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node (plan §60)
     mm_per_unit = MM_PER_M
 
     @classmethod
     def organs(cls) -> dict:
-        """{SubOrgan label name: OrganAnatomy}: the root segments with cls.library, and cls.shoot."""
-        return {"RootSegment": OrganAnatomy(cls.library, "radius"), **cls.shoot}
+        """{SubOrgan label name: OrganAnatomy}: the root segments (cls.root, or cls.library by diameter), and cls.shoot."""
+        return {"RootSegment": cls.root or OrganAnatomy(cls.library, "radius"), **cls.shoot}
 
     @classmethod
     def organ_of(cls, g, segment) -> OrganAnatomy:

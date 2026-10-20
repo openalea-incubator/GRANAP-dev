@@ -422,12 +422,17 @@ def _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_ce
     junction_nodes = set(range(n_walls, n_walls + used.size))
     old_junction_nodes = junction_nodes - new_junction_nodes
 
+    neighbours_of_wall = {}
+
     def wall_neighbours(w):
-        """networkx's neighbours of a wall node: its cells (membrane edges), then its junctions."""
-        out = list(dict.fromkeys(cell_node[r] for r in wall_cells[w]))
-        for j in (int(j_start[w]), int(j_end[w])):
-            if j not in out:
-                out.append(j)
+        """networkx's neighbours of a wall node: its cells (membrane edges), then its junctions (once per wall)."""
+        out = neighbours_of_wall.get(w)
+        if out is None:
+            out = list(dict.fromkeys(cell_node[r] for r in wall_cells[w]))
+            for j in (int(j_start[w]), int(j_end[w])):
+                if j not in out:
+                    out.append(j)
+            neighbours_of_wall[w] = out
         return out
 
     walls_of_junction = {}
@@ -447,6 +452,23 @@ def _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_ce
                     attached.add(j)
         air_to_new_junctions[air] = attached
 
+    # the junctions a motif can end on from each new junction: a pair whose junctions meet none of them has no
+    # motif, so it is skipped without the search (the pairs searched, their order and their motifs unchanged)
+    ends_from = {}
+    for j1 in new_junction_nodes:
+        ends = set()
+        for wall_1 in walls_of_junction.get(j1, []):
+            for old_j in wall_neighbours(wall_1):
+                if old_j not in old_junction_nodes:
+                    continue
+                for wall_2 in walls_of_junction.get(old_j, []):
+                    if wall_2 != wall_1:
+                        ends.update(wall_neighbours(wall_2))
+        ends.discard(j1)
+        ends_from[j1] = ends
+    reachable = {air: set().union(*(ends_from.get(j, set()) for j in juncs)) if juncs else set()
+                 for air, juncs in air_to_new_junctions.items()}
+
     linked = set(linked)
     edges = []
     for air_a in air_nodes:
@@ -454,7 +476,7 @@ def _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_ce
             if air_a >= air_b or frozenset((air_a, air_b)) in linked:
                 continue
             juncs_a, juncs_b = air_to_new_junctions.get(air_a, set()), air_to_new_junctions.get(air_b, set())
-            if not juncs_a or not juncs_b:
+            if not juncs_a or not juncs_b or reachable[air_a].isdisjoint(juncs_b):
                 continue
             found = _motif(juncs_a, juncs_b, walls_of_junction, wall_neighbours, old_junction_nodes)
             if found is None:
@@ -470,13 +492,16 @@ def _air_links(walls, wall_cells, junction_node, n_walls, used, protected_air_ce
     positive = [x for x in lengths.tolist() if x > 0]
     radius = float(np.median(np.asarray(lengths)[np.asarray(lengths) > 0])) if positive else 0.0
     rows = list(protected_air_cells)
+    shapes = [polygons[r] for r in rows]
+    tree = shapely.STRtree(shapes)                       # candidates by their boxes, a superset; then each distance
     for i in range(len(rows)):
-        air_a, geom_a = cell_node[rows[i]], polygons[rows[i]]
-        for j in range(i + 1, len(rows)):
+        air_a, geom_a = cell_node[rows[i]], shapes[i]
+        near = tree.query(shapely.box(*shapely.bounds(geom_a)).buffer(radius, join_style="mitre"))
+        for j in sorted(int(k) for k in near if k > i):
             air_b = cell_node[rows[j]]
             if frozenset((air_a, air_b)) in linked:
                 continue
-            if geom_a.distance(polygons[rows[j]]) > radius:
+            if geom_a.distance(shapes[j]) > radius:
                 continue
             pa, pb = position[air_a], position[air_b]
             dist = np.hypot(pb[0] - pa[0], pb[1] - pa[1])

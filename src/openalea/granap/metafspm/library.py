@@ -87,8 +87,18 @@ def merged(*overrides) -> dict:
     return out
 
 
+def _hashable(value):
+    """*value* as a hashable key: dicts as sorted (key, value) tuples, lists and sets as tuples, recursively (a
+    field's value may be a dict, e.g. a size distribution)."""
+    if isinstance(value, dict):
+        return tuple(sorted((k, _hashable(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_hashable(v) for v in (sorted(value) if isinstance(value, set) else value))
+    return value
+
+
 def _frozen(overrides) -> tuple:
-    return tuple(sorted((section, tuple(sorted(values.items()))) for section, values in (overrides or {}).items()))
+    return tuple(sorted((section, _hashable(values)) for section, values in (overrides or {}).items()))
 
 
 def preset_parameters(preset: str):

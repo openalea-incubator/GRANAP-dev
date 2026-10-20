@@ -101,6 +101,23 @@ CGROUP_MAP: Dict[str, int] = {
     "protophloem": 23,
 }
 
+# The tags GRANAP generates that had no entry, so they fell back to 4 (plan §62, Q-T2): the shoots' sieve elements
+# and companion cells (MECHA found no phloem in stems and leaves), the leaves' spongy mesophyll, the needle's
+# transfusion tissue, the fibres, the periderm and the medullary rays (explicitly 4 until MECHA gives them a role).
+# A reviewed difference with the legacy, which the comparisons replay on it.
+CGROUPS_ADDED: Dict[str, int] = {
+    "sieve element": 11,
+    "companion cell": 12,
+    "spongy": 4,
+    "transfusion": 17,
+    "sclerenchyma": 4,
+    "phellem": 4,
+    "phelloderm": 4,
+    "phellogen": 4,
+    "medullar_ray": 4,
+}
+CGROUP_MAP.update(CGROUPS_ADDED)
+
 class AnatomyWriter:
     """
     Class to export Organ anatomy to various formats (XML, OBJ, GEO).

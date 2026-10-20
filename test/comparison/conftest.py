@@ -8,6 +8,8 @@ The comparison folder: GRANAP (the main package, generating into metafspm's MPG)
 import os
 import sys
 
+import pytest
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 for path in (HERE, os.path.dirname(HERE)):                # the comparison helpers, and the tests' (needle_configs)
     if path not in sys.path:
@@ -16,3 +18,16 @@ for path in (HERE, os.path.dirname(HERE)):                # the comparison helpe
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: the heaviest cross-checks (minutes each)")
+
+
+
+@pytest.fixture(autouse=True)
+def _reviewed_cgroups():
+    """Plan §62, Q-T2: the main package's added cgroups, replayed on the legacy's map (its only difference there)."""
+    from openalea.granap.anatomy_writer import CGROUPS_ADDED
+    from openalea.granap.legacy import anatomy_writer as legacy
+    saved = dict(legacy.CGROUP_MAP)
+    legacy.CGROUP_MAP.update(CGROUPS_ADDED)
+    yield
+    legacy.CGROUP_MAP.clear()
+    legacy.CGROUP_MAP.update(saved)
