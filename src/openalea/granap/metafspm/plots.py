@@ -20,10 +20,10 @@ def tissue_colour(tissue):
     return TISSUE_COLOURS.setdefault(tissue, _PALETTE[len(TISSUE_COLOURS) % len(_PALETTE)])
 
 
-def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=None):
+def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=None, offset=(0., 0.)):
     """
-    The segment's cells (its template's polygons, mm), coloured by tissue, or by *values* (one per DataStructure node,
-    e.g. ds.get("psi")). Returns the PatchCollection.
+    The segment's cells (its template's polygons, mm, shifted by *offset*), coloured by tissue, or by *values* (one per
+    DataStructure node, e.g. ds.get("psi")). Returns the PatchCollection.
     """
     g = ds.mtg
     template = template_by_index(g.property("anatomy_template")[int(segment)])
@@ -35,7 +35,7 @@ def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=
     for i, v in zip(nodes, vids):
         polygon = template.polygons[int(row[int(v)])]
         if polygon is not None and polygon.geom_type == "Polygon":
-            patches.append(PolygonPatch(np.asarray(polygon.exterior.coords)))
+            patches.append(PolygonPatch(np.asarray(polygon.exterior.coords) + np.asarray(offset)))
             keep.append(i)
     if values is None:
         collection = PatchCollection(patches, facecolor=[tissue_colour(tissue[i]) for i in keep], edgecolor="0.3",
