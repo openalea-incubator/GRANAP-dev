@@ -25,9 +25,9 @@ class SmallShoot(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode", True), 2, L.StemElement, 2.5e-3)
-        _chain(g, _organ(g, plant, "Shoot", "Leaf", True), 1, L.LeafElement, 2.5e-3, bearer=stem[1])
-        _chain(g, _organ(g, plant, "Root", "RootInternode", False), 1, L.RootSegment, 0.55e-3, bearer=stem[0])
+        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode"), 2, L.StemElement, 2.5e-3)
+        _chain(g, _organ(g, plant, "Shoot", "Leaf"), 1, L.LeafElement, 2.5e-3, bearer=stem[1])
+        _chain(g, _organ(g, plant, "Root", "RootInternode"), 1, L.RootSegment, 0.55e-3, bearer=stem[0])
 
 
 class ShootAnatomy(GranapAnatomy):
@@ -67,8 +67,8 @@ class TwoElementLeaf(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode", True), 1, L.StemElement, 2.5e-3)
-        _chain(g, _organ(g, plant, "Shoot", "Leaf", True), 2, L.LeafElement, 2.5e-3, bearer=stem[0])
+        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode"), 1, L.StemElement, 2.5e-3)
+        _chain(g, _organ(g, plant, "Shoot", "Leaf"), 2, L.LeafElement, 2.5e-3, bearer=stem[0])
 
 
 def test_leaf_surface_and_stomatal_connections():

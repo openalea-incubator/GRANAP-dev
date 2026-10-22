@@ -3,6 +3,7 @@ Drawing GRANAP's sections from a DataStructure (its Compartments' tissues and po
 
     draw_section(ax, ds, segment)                 one section's cells, coloured by tissue (or by a node variable)
     draw_sections(ds, titles=None)                every section of the DataStructure, one panel each
+    draw_plant(ax, ds, offsets)                   every section at its place, with the axial junctions
 """
 import matplotlib
 import matplotlib.pyplot as plt
@@ -76,3 +77,28 @@ def draw_sections(ds, titles=None, columns=4, panel=(3.6, 3.6)):
     fig.tight_layout(rect=(0, legend / (height * rows + legend), 1, 1))
     tissue_legend(fig)
     return fig
+
+
+def draw_plant(ax, ds, offsets, junctions=True, linewidth=0.3, alpha=0.5):
+    """
+    Every section of *ds* at its drawing offset (*offsets*: {segment: (dx, dy)} mm, the segments to draw), coloured
+    by tissue, and the axial junctions between them as lines (xylem black, phloem magenta).
+    """
+    for segment, offset in offsets.items():
+        draw_section(ax, ds, segment, offset=offset)
+    if junctions:
+        view, owner = ds.to_graph_view(), ds.owner("SubOrgan")
+        segments = np.asarray(ds.entity_ids("SubOrgan"))
+        shift = np.array([offsets.get(int(s), (np.nan, np.nan)) for s in segments], dtype=float)
+        x, y, tissue = ds.get("section_x"), ds.get("section_y"), np.asarray(ds.get("tissue"), dtype=object)
+        e = np.flatnonzero(ds.get("network_path") == 5)
+        a, b = view.tail[e], view.head[e]
+        for xylem, colour in ((True, "black"), (False, "magenta")):
+            chosen = np.isin(tissue[a], ("metaxylem", "protoxylem", "xylem")) == xylem
+            ends = np.stack([np.c_[x[a] + shift[owner[a], 0], y[a] + shift[owner[a], 1]],
+                             np.c_[x[b] + shift[owner[b], 0], y[b] + shift[owner[b], 1]]], axis=1)[chosen]
+            ax.add_collection(matplotlib.collections.LineCollection(ends[np.isfinite(ends).all(axis=(1, 2))],
+                                                                    colors=colour, linewidths=linewidth, alpha=alpha,
+                                                                    zorder=3))
+    ax.autoscale_view()
+    ax.set_aspect("equal")
