@@ -8,3 +8,5 @@ ROOT_SERIES_PLAN.md
 
 # figures written by the examples
 example/**/outputs/
+
+/dev*.md
