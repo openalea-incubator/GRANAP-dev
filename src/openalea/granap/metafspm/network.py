@@ -1,5 +1,5 @@
 """
-The section's hydraulic network built in the MPG (devplan_metafspm.md, §28, N1).
+The section's hydraulic network built in the MPG.
 
 GRANAP's NetworkExporter (anatomy_writer.py; converted copy in mpg/pipeline/network.py) walks the cell rings of a
 GeoDataFrame into a networkx graph, which P2 then copied into the MPG. Here the same network is built from the MPG
@@ -236,7 +236,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
         return written
     valid_list = valid.tolist()
     protected_air_cells = set(r for r in valid_list if cells["protect"][r] and types[r] == "air space")
-    # the stomatal pores are air too (plan §60): by their type, without protect_topology (which would split walls)
+    # the stomatal pores are air too: by their type, without protect_topology (which would split walls)
     pore_cells = [r for r in valid_list if types[r] in getattr(organ, "PORE_TYPES", ())]
     apoplastic_types = set(getattr(organ, "APOPLASTIC_ONLY_TYPES", ()))
     apoplastic_cells = set(r for r in valid_list if types[r] in apoplastic_types)

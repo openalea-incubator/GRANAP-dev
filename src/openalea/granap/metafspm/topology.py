@@ -1,5 +1,5 @@
 """
-The section's topology, built once and stored in the MPG (devplan_metafspm.md, P2.2-P2.3).
+The section's topology, built once and stored in the MPG.
 
 GRANAP derives walls and junctions from the cell polygons with CellGenerator._build_topology: vertex snapping
 (phase 0), then the rings, the vertex and edge maps (phase 1) and the junctions (phase 2). Only phase 0 needs the

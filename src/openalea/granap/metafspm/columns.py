@@ -1,5 +1,5 @@
 """
-The section's hydraulic network as numeric variables (devplan_metafspm.md, §42, C1): one column per quantity, on every
+The section's hydraulic network as numeric variables: one column per quantity, on every
 Compartment and every anatomy Connection: where a quantity does not apply, 0 for the extensive ones (wall_length,
 cell_area: their sums over a segment stay defined), NaN for the others. These are the MPG properties a
 DataStructure reads as declared variables (numeric, present on every node or edge); GRANAP's networkx graph is
@@ -27,7 +27,7 @@ import numpy as np
 
 PATH_CODES = {"membrane": 0, "wall_air": 1, "wall": 2, "plasmodesmata": 3, "air_link": 4}
 JUNCTION_PATH = 5                # the axial junctions between successive sections (created by the wiring)
-STOMATAL_PATH = 6                # a stomatal pore to its leaf organ's surface node (plan §60)
+STOMATAL_PATH = 6                # a stomatal pore to its leaf organ's surface node
 PATHS = {code: path for path, code in PATH_CODES.items()}
 NAN = float("nan")
 

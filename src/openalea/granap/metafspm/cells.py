@@ -1,5 +1,5 @@
 """
-The pipeline's cells as views of the MPG (devplan_metafspm.md, P5.1; your answers Q-P5a, Q-P5e c).
+The pipeline's cells as views of the MPG.
 
 From the Voronoi grouping on, the organ's cell list (organ.all_cells) holds CellViews: Cell objects that keep nothing
 themselves, their attributes read from and written to their Cell vertex's properties (cell__<name>). GRANAP's

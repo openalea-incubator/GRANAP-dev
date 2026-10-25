@@ -1,5 +1,5 @@
 """
-Vessel and pole ids of a generated section (devplan_metafspm.md, P3, Q-P3a): GRANAP keeps no grouping on its cells,
+Vessel and pole ids of a generated section: GRANAP keeps no grouping on its cells,
 so the ids are recovered from what the generation leaves on the organ.
 
     vessel_id   every conducting xylem and phloem cell (CONDUCTING types), numbered in cell order; -1 otherwise

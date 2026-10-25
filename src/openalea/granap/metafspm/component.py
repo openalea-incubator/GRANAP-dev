@@ -1,5 +1,5 @@
 """
-GRANAP as a metafspm structural component (devplan_metafspm.md, P3).
+GRANAP as a metafspm structural component.
 
     class Seedling(CompositeModel):
         initiators = (RootArchitecture, GranapAnatomy)          # the anatomies after the architecture
@@ -10,7 +10,7 @@ GranapAnatomy.initiate_plant gives each root segment of a plant the anatomy of i
 from the tip, distance from the root-shoot junction), from the library: one template generated per class, a copy per
 segment (its own vertices and state, the template's geometry). junction_rules pairs the conducting cells of
 successive sections (xylem with xylem, phloem with phloem): by track_id where both have one, else the nearest in
-(angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions (Q-P3b).
+(angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions.
 """
 from dataclasses import dataclass
 
@@ -56,11 +56,6 @@ def preset_library(preset: str, seed: int = 0) -> AnatomyLibrary:
         _LIBRARIES[key] = AnatomyLibrary(parameters=preset_parameters(preset), organ_class=organ_class(preset),
                                          seed=int(seed))
     return _LIBRARIES[key]
-
-
-def _doc(unit, description, **values):
-    return dict(unit=unit, unit_comment="", description=description, min_value=-1e12, max_value=1e12,
-                value_comment="", references="GRANAP", DOI=[], **values)
 
 
 @dataclass
@@ -315,86 +310,98 @@ class GranapAnatomy(StructuralComponent):
     Connections, quantities in mm, mm2, mm3), its codes, and the 3D quantities recomputed as the segments elongate.
     """
     # ── Inputs: the segments' architecture ──
-    radius: float = input_variable(**_doc("m", "the segment's radius (the diameter class input)"),
-                                   by="Architecture", scale=SCALES.SubOrgan, state_variable_type="intensive")
-    distance_from_tip: float = input_variable(**_doc("m", "the segment's distance from its axis' tip"),
-                                              by="Architecture", scale=SCALES.SubOrgan, state_variable_type="intensive")
-    length: float = input_variable(**_doc("m", "the segment's length, broadcast to its Compartments"),
-                                   by="Architecture", scale=SCALES.SubOrgan, location="node",
+    radius: float = input_variable(unit="m", description="the segment's radius (the diameter class input)",
+                                   references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
+                                   state_variable_type="intensive")
+    distance_from_tip: float = input_variable(unit="m", description="the segment's distance from its axis' tip",
+                                              references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
+                                              state_variable_type="intensive")
+    length: float = input_variable(unit="m", description="the segment's length, broadcast to its Compartments",
+                                   references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, location="node",
                                    state_variable_type="intensive")
 
     # ── State variables: the anatomies ──
-    anatomy_template: float = state_variable(**_doc("", "the segment's anatomy template (-1: none)"), initialize=-1.,
-                                             scale=SCALES.SubOrgan, state_variable_type="descriptor")
-    tissue: object = state_variable(**_doc("", "the protoplast's tissue (None: a wall or a junction)"), initialize=None,
-                                    scale=SCALES.Compartment, location="node", dtype=object,
-                                    state_variable_type="descriptor")
-    kind: float = state_variable(**_doc("", "0 protoplast, 1 wall, 2 wall junction, 3 a leaf organ's surface"),
-                                 initialize=0.,
-                                 scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
-    pore_width: float = state_variable(**_doc("mm", "a stomatal pore's aperture width in the section (NaN: not a pore)"),
-                                       initialize=np.nan, scale=SCALES.Compartment, location="node",
-                                       state_variable_type="NonInertialIntensive")
-    pore_depth: float = state_variable(**_doc("mm", "a stomatal pore's depth through the epidermis (NaN: not a pore)"),
-                                       initialize=np.nan, scale=SCALES.Compartment, location="node",
-                                       state_variable_type="NonInertialIntensive")
-    cgroup: float = state_variable(**_doc("", "the protoplast's MECHA cell group (NaN: apoplast)"), initialize=np.nan,
-                                   scale=SCALES.Compartment, location="node", state_variable_type="descriptor")
-    section_x: float = state_variable(**_doc("mm", "position in the section"), initialize=np.nan,
-                                      scale=SCALES.Compartment, location="node", state_variable_type="NonInertialIntensive")
-    section_y: float = state_variable(**_doc("mm", "position in the section"), initialize=np.nan,
-                                      scale=SCALES.Compartment, location="node", state_variable_type="NonInertialIntensive")
-    wall_length: float = state_variable(**_doc("mm", "the wall's length in the section (0: not a wall)"), initialize=0.,
-                                        scale=SCALES.Compartment, location="node",
+    anatomy_template: float = state_variable(unit="", description="the segment's anatomy template (-1: none)",
+                                             references="GRANAP", initialize=-1., scale=SCALES.SubOrgan,
+                                             state_variable_type="descriptor")
+    tissue: object = state_variable(unit="", description="the protoplast's tissue (None: a wall or a junction)",
+                                    references="GRANAP", initialize=None, scale=SCALES.Compartment, location="node",
+                                    dtype=object, state_variable_type="descriptor")
+    kind: float = state_variable(unit="", description="0 protoplast, 1 wall, 2 wall junction, 3 a leaf organ's surface",
+                                 references="GRANAP", initialize=0., scale=SCALES.Compartment, location="node",
+                                 state_variable_type="descriptor")
+    pore_width: float = state_variable(unit="mm",
+                                       description="a stomatal pore's aperture width in the section (NaN: not a pore)",
+                                       references="GRANAP", initialize=np.nan, scale=SCALES.Compartment,
+                                       location="node", state_variable_type="NonInertialIntensive")
+    pore_depth: float = state_variable(unit="mm",
+                                       description="a stomatal pore's depth through the epidermis (NaN: not a pore)",
+                                       references="GRANAP", initialize=np.nan, scale=SCALES.Compartment,
+                                       location="node", state_variable_type="NonInertialIntensive")
+    cgroup: float = state_variable(unit="", description="the protoplast's MECHA cell group (NaN: apoplast)",
+                                   references="GRANAP", initialize=np.nan, scale=SCALES.Compartment, location="node",
+                                   state_variable_type="descriptor")
+    section_x: float = state_variable(unit="mm", description="position in the section", references="GRANAP",
+                                      initialize=np.nan, scale=SCALES.Compartment, location="node",
+                                      state_variable_type="NonInertialIntensive")
+    section_y: float = state_variable(unit="mm", description="position in the section", references="GRANAP",
+                                      initialize=np.nan, scale=SCALES.Compartment, location="node",
+                                      state_variable_type="NonInertialIntensive")
+    wall_length: float = state_variable(unit="mm", description="the wall's length in the section (0: not a wall)",
+                                        references="GRANAP", initialize=0., scale=SCALES.Compartment, location="node",
                                         state_variable_type="NonInertialExtensive")
-    wall_thickness: float = state_variable(**_doc("µm", "the wall's thickness: its cells' wall layers (the "
-                                                        "AnatomyWriter's per-tissue values, µm; NaN: not a wall)"),
-                                           initialize=np.nan,
+    wall_thickness: float = state_variable(unit="µm", description="the wall's thickness: its cells' wall layers (the "
+                                                                  "AnatomyWriter's per-tissue values, µm; NaN: not a "
+                                                                  "wall)", references="GRANAP", initialize=np.nan,
                                            scale=SCALES.Compartment, location="node",
                                            state_variable_type="NonInertialIntensive")
-    cell_area: float = state_variable(**_doc("mm2", "the protoplast's area in the section (0: apoplast)"),
-                                      initialize=0., scale=SCALES.Compartment, location="node",
+    cell_area: float = state_variable(unit="mm2", description="the protoplast's area in the section (0: apoplast)",
+                                      references="GRANAP", initialize=0., scale=SCALES.Compartment, location="node",
                                       state_variable_type="NonInertialExtensive")
-    wall_surface: float = state_variable(**_doc("mm2", "the wall's surface: its length times the segment's"),
-                                         initialize=0., scale=SCALES.Compartment, location="node",
+    wall_surface: float = state_variable(unit="mm2", description="the wall's surface: its length times the segment's",
+                                         references="GRANAP", initialize=0., scale=SCALES.Compartment, location="node",
                                          state_variable_type="NonInertialExtensive")
-    cell_volume: float = state_variable(**_doc("mm3", "the protoplast's volume: its area times the segment's length"),
-                                        initialize=0., scale=SCALES.Compartment, location="node",
+    cell_volume: float = state_variable(unit="mm3",
+                                        description="the protoplast's volume: its area times the segment's length",
+                                        references="GRANAP", initialize=0., scale=SCALES.Compartment, location="node",
                                         state_variable_type="NonInertialExtensive")
-    network_path: float = state_variable(**_doc("", "edge type: membrane 0, wall_air 1, wall 2, plasmodesmata 3, "
-                                                    "air_link 4, axial junction 5, stomatal 6"),
-                                         initialize=np.nan,
+    network_path: float = state_variable(unit="", description="edge type: membrane 0, wall_air 1, wall 2, "
+                                                              "plasmodesmata 3, air_link 4, axial junction 5, "
+                                                              "stomatal 6", references="GRANAP", initialize=np.nan,
                                          scale=SCALES.Connection, location="edge", state_variable_type="descriptor")
-    edge_length: float = state_variable(**_doc("mm", "the edge's length (the wall's for membranes; between the sections "
-                                                     "for axial junctions)"), initialize=np.nan,
-                                        scale=SCALES.Connection, location="edge",
+    edge_length: float = state_variable(unit="mm", description="the edge's length (the wall's for membranes; between "
+                                                               "the sections for axial junctions)", references="GRANAP",
+                                        initialize=np.nan, scale=SCALES.Connection, location="edge",
                                         state_variable_type="NonInertialIntensive")
-    edge_dx: float = state_variable(**_doc("mm", "the edge's vector in the section, x"), initialize=np.nan,
-                                    scale=SCALES.Connection, location="edge", state_variable_type="NonInertialIntensive")
-    edge_dy: float = state_variable(**_doc("mm", "the edge's vector in the section, y"), initialize=np.nan,
-                                    scale=SCALES.Connection, location="edge", state_variable_type="NonInertialIntensive")
-    edge_dist: float = state_variable(**_doc("mm", "the distance between the edge's nodes (NaN: wall edges)"),
-                                      initialize=np.nan, scale=SCALES.Connection, location="edge",
+    edge_dx: float = state_variable(unit="mm", description="the edge's vector in the section, x", references="GRANAP",
+                                    initialize=np.nan, scale=SCALES.Connection, location="edge",
+                                    state_variable_type="NonInertialIntensive")
+    edge_dy: float = state_variable(unit="mm", description="the edge's vector in the section, y", references="GRANAP",
+                                    initialize=np.nan, scale=SCALES.Connection, location="edge",
+                                    state_variable_type="NonInertialIntensive")
+    edge_dist: float = state_variable(unit="mm", description="the distance between the edge's nodes (NaN: wall edges)",
+                                      references="GRANAP", initialize=np.nan, scale=SCALES.Connection, location="edge",
                                       state_variable_type="NonInertialIntensive")
-    edge_wall_thickness: float = state_variable(**_doc("µm", "the wall's thickness on membrane and wall edges"),
-                                                initialize=np.nan, scale=SCALES.Connection, location="edge",
-                                                state_variable_type="NonInertialIntensive")
-    lateral_distance: float = state_variable(**_doc("mm", "wall edges: the lateral distance"), initialize=np.nan,
-                                             scale=SCALES.Connection, location="edge",
-                                             state_variable_type="NonInertialIntensive")
-    distnode_wall_cell: float = state_variable(**_doc("mm", "wall edges: the mean wall-cell distance"),
-                                               initialize=np.nan, scale=SCALES.Connection, location="edge",
-                                               state_variable_type="NonInertialIntensive")
-    membrane_surface: float = state_variable(**_doc("mm2", "membrane edges: the membrane's surface (the wall's length "
-                                                           "times the segment's); 0 otherwise"), initialize=0.,
-                                             scale=SCALES.Connection, location="edge",
-                                             state_variable_type="NonInertialExtensive")
+    edge_wall_thickness: float = state_variable(unit="µm",
+                                                description="the wall's thickness on membrane and wall edges",
+                                                references="GRANAP", initialize=np.nan, scale=SCALES.Connection,
+                                                location="edge", state_variable_type="NonInertialIntensive")
+    lateral_distance: float = state_variable(unit="mm", description="wall edges: the lateral distance",
+                                             references="GRANAP", initialize=np.nan, scale=SCALES.Connection,
+                                             location="edge", state_variable_type="NonInertialIntensive")
+    distnode_wall_cell: float = state_variable(unit="mm", description="wall edges: the mean wall-cell distance",
+                                               references="GRANAP", initialize=np.nan, scale=SCALES.Connection,
+                                               location="edge", state_variable_type="NonInertialIntensive")
+    membrane_surface: float = state_variable(unit="mm2", description="membrane edges: the membrane's surface (the "
+                                                                     "wall's length times the segment's); 0 otherwise",
+                                             references="GRANAP", initialize=0., scale=SCALES.Connection,
+                                             location="edge", state_variable_type="NonInertialExtensive")
 
     scenario_keys = tuple(ANATOMY_KEYS.values())   # read per plant by initiate_plant: they may differ between plants
     library = AnatomyLibrary()
     root = None                      # the roots' OrganAnatomy (None: library, its classes by diameter)
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
-    leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node (plan §60)
+    leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node
     mm_per_unit = MM_PER_M
 
     @classmethod
@@ -488,7 +495,7 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def update_leaf_surfaces(cls, g, segments) -> None:
         """
-        The leaf organs of *segments* get (again) their surface (plan §60): one Compartment of kind 3 (tissue
+        The leaf organs of *segments* get (again) their surface: one Compartment of kind 3 (tissue
         "leaf surface"), owned by the organ's basal leaf element, and one Connection (network_path 6) from every
         stomatal pore of each of the organ's sections to it, anchored to the pore's section. The pores get their
         aperture's width and depth (pore_width, pore_depth: the short and long sides of their polygon's minimum
@@ -586,7 +593,7 @@ class GranapAnatomy(StructuralComponent):
 
     @state
     def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
-            -> tuple[np.ndarray, str, np.ndarray, str, np.ndarray, str, np.ndarray]:
+            -> dict:
         """
         The 3D quantities, as the segments elongate: the walls' surfaces, the protoplasts' volumes, the membranes'
         surfaces (2D values times the segment's length), and the axial junctions' lengths (between the two sections'
@@ -597,10 +604,9 @@ class GranapAnatomy(StructuralComponent):
         edge_mm = 0.5 * np.asarray(ends @ length_mm).reshape(-1)
         path = np.asarray(network_path)
         membranes = (path == columns.PATH_CODES["membrane"]) | (path == columns.PATH_CODES["wall_air"])
-        return (wall_length * length_mm,
-                "cell_volume", cell_area * length_mm,
-                "membrane_surface", np.where(membranes, edge_length * edge_mm, 0.),
-                "edge_length", np.where(path == columns.JUNCTION_PATH, edge_mm, edge_length))
+        return {"wall_surface": wall_length * length_mm, "cell_volume": cell_area * length_mm,
+                "membrane_surface": np.where(membranes, edge_length * edge_mm, 0.),
+                "edge_length": np.where(path == columns.JUNCTION_PATH, edge_mm, edge_length)}
 
 
 def _vessels(g, compartments, family):

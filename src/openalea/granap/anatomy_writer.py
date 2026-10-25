@@ -101,7 +101,7 @@ CGROUP_MAP: Dict[str, int] = {
     "protophloem": 23,
 }
 
-# The tags GRANAP generates that had no entry, so they fell back to 4 (plan §62, Q-T2): the shoots' sieve elements
+# The tags GRANAP generates that had no entry, so they fell back to 4: the shoots' sieve elements
 # and companion cells (MECHA found no phloem in stems and leaves), the leaves' spongy mesophyll, the needle's
 # transfusion tissue, the fibres, the periderm and the medullary rays (explicitly 4 until MECHA gives them a role).
 # A reviewed difference with the legacy, which the comparisons replay on it.
@@ -786,7 +786,7 @@ class NetworkExporter:
                            & (cells_gdf["type"] == "air space")
                            ]
         )
-        # The stomatal pores are air too (plan §60), by their type: wall_air
+        # The stomatal pores are air too, by their type: wall_air
         # edges, no plasmodesmata, an air link to their chamber.
         pore_cells = set(cells_gdf.index[cells_gdf["type"].isin(getattr(self.organ, "PORE_TYPES", ()))])
 
@@ -1290,7 +1290,7 @@ class NetworkExporter:
 
                 # Identify edges connecting to protected air spaces.
 
-                # every wall of an air node evaporates into it (plan §60)
+                # every wall of an air node evaporates into it
                 if cn in wall_air_nodes:
 
                     network.graph.add_edge(
@@ -1584,8 +1584,8 @@ class NetworkExporter:
         # boundary-to-boundary gap, not centroid distance — elongated rhombi
         # can have a centroid well outside the radius while their nearest tip
         # is right next to the other air space). Defaults to the median wall
-        # length (1x, kept as the code has it; the comment said 3x — Q8, your
-        # answer Q-P5h), so the radius scales with the organ's own cell size.
+        # length (1x, kept as the code has it; the comment said 3x), so the
+        # radius scales with the organ's own cell size.
         # ------------------------------------------------------------------
 
         radius = air_link_radius
@@ -1622,7 +1622,7 @@ class NetworkExporter:
         # ------------------------------------------------------------------
         # Step 5 — each stomatal pore air-linked to its sub-stomatal chamber,
         # the protected air space nearest to it (they share no wall: the guard
-        # cells meet between them; plan §60)
+        # cells meet between them)
         # ------------------------------------------------------------------
         chamber_rows = sorted(protected_air_cells)
         for row_p in sorted(pore_cells):

@@ -1,5 +1,5 @@
 """
-Every cell type GRANAP's presets generate has its MECHA cgroup (anatomy_writer.CGROUP_MAP, plan §62 Q-T2): none falls
+Every cell type GRANAP's presets generate has its MECHA cgroup (anatomy_writer.CGROUP_MAP): none falls
 back to 4 (cortex) unlisted, and the shoots' phloem is MECHA's (sieve elements 11, companion cells 12).
 """
 import pytest

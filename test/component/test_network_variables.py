@@ -1,5 +1,5 @@
 """
-C1 (devplan_metafspm.md, §42): the section's hydraulic network as numeric variables. A component declares them at
+C1: the section's hydraulic network as numeric variables. A component declares them at
 the Compartment and Connection scales; the DataStructure reads them from the MPG, on every node and edge, and they hold
 the exporter's values (those of GRANAP's graph, by MECHA index).
 """

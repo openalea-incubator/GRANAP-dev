@@ -1,5 +1,5 @@
 """
-GRANAP's anatomy component coupled the metafspm way (devplan_metafspm.md, §54–58), as MECHA will be: a component
+GRANAP's anatomy component coupled the metafspm way, as MECHA will be: a component
 declares GRANAP's outputs as inputs (by="GranapAnatomy") and reads them on every node and edge of a root system, the
 axial junctions between sections included (their geometry, Q-C1a). The 3D quantities follow the segments' lengths.
 """

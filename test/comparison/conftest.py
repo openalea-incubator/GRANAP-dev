@@ -23,7 +23,7 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True)
 def _reviewed_cgroups():
-    """Plan §62, Q-T2: the main package's added cgroups, replayed on the legacy's map (its only difference there)."""
+    """The main package's added cgroups, replayed on the legacy's map (its only difference there)."""
     from openalea.granap.anatomy_writer import CGROUPS_ADDED
     from openalea.granap.legacy import anatomy_writer as legacy
     saved = dict(legacy.CGROUP_MAP)

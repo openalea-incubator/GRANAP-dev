@@ -1,5 +1,5 @@
 """
-Capability tests of the MPG port (devplan_metafspm.md, P3): GRANAP anatomies populating a plant's root segments
+Capability tests of the MPG port: GRANAP anatomies populating a plant's root segments
 through the structural component, the library per class, vessel ids, junctions between sections and the hydraulic
 graph. Run from test/: pytest mpg_capabilities
 """

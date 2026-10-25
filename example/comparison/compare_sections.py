@@ -1,7 +1,7 @@
 """
-GRANAP against its legacy source, side by side (devplan_metafspm.md): for each organ, the legacy cross-section
+GRANAP against its legacy source, side by side: for each organ, the legacy cross-section
 (openalea.granap.legacy, the original, frozen), GRANAP's read from its MPG, and their differences, to compare visually
-as well as by the tests (in particular where a later step is allowed to move away from exactness, Q-P5c).
+as well as by the tests (in particular where a later step is allowed to move away from exactness).
 
     left     the legacy cells (organ.generate_cells(), openalea.granap.legacy)
     middle   the MPG's Cell vertices (their polygons and tissue properties, read from organ.mpg), the stored hydraulic
@@ -19,9 +19,7 @@ GRANAP/example/comparison:
 
 Organs: every kind GRANAP builds (roots: monocot, monocot with arch xylem, monocot with aerenchyma, dicot primary,
 secondary and woody; stems: dicot, continuous dicot, monocot; leaves: monocot, dicot; the needle; a section read from
-a CellSet file; one read from ImageJ ROIs), and the tissue branch's features (plan §62: size distributions of the
-vessels and sieve elements, a root apex with no metaxylem, the dicot ring following the outline, and its examples'
-buttercup stem, maize stem and holly leaf).
+a CellSet file; one read from ImageJ ROIs), and the tissue branch's features.
 """
 import os
 import sys
@@ -103,7 +101,7 @@ ORGANS = {          # name: (build GRANAP's organ, build the MPG-backed organ)
     "monocot_leaf": _input_organ(LegacyLeaf, LeafAnatomy, "for_monocot_leaf"),
     "dicot_leaf": _input_organ(LegacyLeaf, LeafAnatomy, "for_dicot_leaf"),
     "needle": _input_organ(LegacyNeedle, NeedleAnatomy, "for_needle"),
-    # the tissue branch's features (plan §62)
+    # the tissue branch's features
     "monocot_root_distributions": _input_organ(LegacyRoot, RootAnatomy, "for_root", {
         ("xylem", "vessel_diameter_distribution"): {"family": "lognormal"},
         ("phloem", "sieve_diameter_distribution"): {"family": "gamma"}}),

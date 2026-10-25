@@ -118,7 +118,7 @@ class Organ(AbstractNetwork, ABC):
     #: wall_air network nodes.  False for root/stem; leaves override this True.
     PROTECT_AIR_TOPOLOGY: bool = False
 
-    #: Cell types that are air whatever their protect flags: the stomatal pores (plan §60). Their membranes are
+    #: Cell types that are air whatever their protect flags: the stomatal pores. Their membranes are
     #: wall_air edges, they carry no plasmodesmata, and each is air-linked to its sub-stomatal chamber.
     PORE_TYPES: Tuple[str, ...] = ("pore",)
 

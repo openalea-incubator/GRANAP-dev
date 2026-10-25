@@ -1,5 +1,5 @@
 """
-Benchmark of a seedling-sized root system populated with GRANAP anatomies (devplan_metafspm.md, Q13): a main root
+Benchmark of a seedling-sized root system populated with GRANAP anatomies: a main root
 and laterals in three diameter classes, 48 segments; the time of each phase and the sizes.
 
     python test/mpg_capabilities/bench_seedling.py [n_laterals]      (from GRANAP/, default 8: 48 segments)

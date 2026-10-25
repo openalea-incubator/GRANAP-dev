@@ -1,5 +1,5 @@
 """
-GRANAP against its legacy source (openalea.granap.legacy), entity by entity (devplan_metafspm.md, Q7), at seed=0 on the pinned geometry
+GRANAP against its legacy source (openalea.granap.legacy), entity by entity, at seed=0 on the pinned geometry
 stack: the same cells (every attribute, the polygons equal), the same cell GeoDataFrame, the same network (nodes,
 edges and every attribute, counts, wall map), and the MPG holding them at the Compartment and Connection scales.
 """
@@ -44,7 +44,7 @@ def _needle_features():
 
 
 def _monocot_distributions():
-    """The tissue branch's size distributions (plan §62): lognormal vessels, gamma sieve elements."""
+    """The tissue branch's size distributions: lognormal vessels, gamma sieve elements."""
     data = OrganInputData.for_root()
     data.set_value("xylem", "vessel_diameter_distribution", {"family": "lognormal"})
     data.set_value("phloem", "sieve_diameter_distribution", {"family": "gamma"})
@@ -105,9 +105,9 @@ def _check_cells(old, new):
     assert all(_same(a, b) for a, b in zip(og.geometry, ng.geometry))
 
 
-def _apply_plan60(old):
+def _apply_air_rules(old):
     """
-    The legacy's network with plan §60's rules applied (the reviewed differences of the main package): the stomatal
+    The legacy's network with the main package's air rules applied (its reviewed differences): the stomatal
     pores are air (their membranes wall_air, their plasmodesmata gone) and every membrane of a protected air space is
     wall_air; each pore is air-linked to its nearest protected air space (its chamber). In place; returns old.
     """
@@ -178,6 +178,6 @@ def test_the_mpg_backed_organ_gives_the_same_section(name, tmp_path):
         assert getattr(new, "mpg_topology_reads", 0) >= 1
         old.export_to_adjencymatrix()
         new.export_to_adjencymatrix()
-        _check_network(_apply_plan60(old), new)            # the legacy's, with plan §60's reviewed differences
+        _check_network(_apply_air_rules(old), new)            # the legacy's, with the reviewed air rules
         _check_cells(old, new)                  # the bridge cells too, after the export
     _check_mpg(new)

@@ -1,5 +1,5 @@
 """
-The anatomy library (devplan_metafspm.md, P3): one template per anatomy class, generated once, instantiated on every
+The anatomy library: one template per anatomy class, generated once, instantiated on every
 segment of the class.
 
     key = class_key(class_inputs, g, segment)                   a class: its class inputs' binned values
@@ -10,7 +10,7 @@ segment of the class.
 
 A template keeps the section as tables (one row per vertex, its properties); a segment's copy holds its own vertices
 and properties (its state), but not the geometry: its Cells point to the template's polygons and rings
-(template, template_row; Q-P3d), stored once per class.
+(template, template_row), stored once per class.
 """
 import copy
 import itertools

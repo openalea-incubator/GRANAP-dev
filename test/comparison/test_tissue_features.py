@@ -1,5 +1,5 @@
 """
-The tissue branch's features that are not single sections (devplan_metafspm.md §62), GRANAP against its legacy
+The tissue branch's features that are not single sections, GRANAP against its legacy
 source: the monocot root series (apex → collar sections with tracked, fusing metaxylem vessels) section by section and
 its track table, and the 3D extrusion of a section (every prism's type, vertices and faces) in each aerenchyma mode,
 the organ's own 2D section left as it was.

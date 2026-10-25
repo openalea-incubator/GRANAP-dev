@@ -1,5 +1,5 @@
 """
-GRANAP's objects rebuilt from the MPG (devplan_metafspm.md, P1 and Q6): the cells (Cell objects with every attribute
+GRANAP's objects rebuilt from the MPG: the cells (Cell objects with every attribute
 they had), the cell GeoDataFrame and the MECHA network (networkx graph, counts and wall-to-cells map), so that code
 written against GRANAP's organ classes reads the MPG.
 """

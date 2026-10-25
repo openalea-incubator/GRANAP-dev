@@ -73,7 +73,7 @@ class TwoElementLeaf(StructuralComponent):
 
 def test_leaf_surface_and_stomatal_connections():
     """
-    Plan §60: each leaf organ gets one surface Compartment (kind 3), owned by its basal element, joined to every
+    Each leaf organ gets one surface Compartment (kind 3), owned by its basal element, joined to every
     stomatal pore of its sections (network_path 6); the pores are air (wall_air walls, no plasmodesmata, one air link
     to their chamber) with their aperture's width and depth; rebuilding the surface leaves nothing dangling.
     """

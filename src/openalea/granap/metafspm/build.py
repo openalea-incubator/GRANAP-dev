@@ -1,5 +1,5 @@
 """
-A GRANAP cross-section written into a metafspm MPG (devplan_metafspm.md, P1).
+A GRANAP cross-section written into a metafspm MPG.
 
     g, segment = single_plant_mpg()                 one vertex per scale down to one SubOrgan
     write_cells(g, segment, organ)                  Layers (one per connected region of one tissue type), Cells (every
@@ -10,7 +10,7 @@ A GRANAP cross-section written into a metafspm MPG (devplan_metafspm.md, P1).
 
 The section is stored at SubOrgan -> Layer -> Cell -> Compartment, the protoplasts under their Cell, the walls and
 junctions under the segment's Compartment anchor; every MECHA node is a Compartment and every MECHA edge a
-Connection (metafspm devplan_anatomy_scales.md). The MECHA node index of each Compartment is kept (mecha_index), so
+Connection. The MECHA node index of each Compartment is kept (mecha_index), so
 that the network rebuilt from the MPG (views.py) is the exporter's, node for node.
 """
 import numpy as np
@@ -77,7 +77,7 @@ def tissue_regions(cells) -> np.ndarray:
     return labels
 
 
-UID = "cell_uid"                              # the stable id a cell carries through the stages (Q-P2c)
+UID = "cell_uid"                              # the stable id a cell carries through the stages
 
 
 def _is_view(cell) -> bool:

@@ -1,5 +1,5 @@
 """
-The instructions an architecture model and a scenario give GRANAP's anatomy component (devplan_metafspm.md, §57):
+The instructions an architecture model and a scenario give GRANAP's anatomy component:
 a plant's scenario parametrizes its anatomies (root_anatomy, leaf_anatomy: {"preset": ..., section: {field: value}}),
 and a class input bins a SubOrgan variable into the class and sets a GRANAP field from it. One component instance
 serves both plants.
