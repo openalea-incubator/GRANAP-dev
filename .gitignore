@@ -11,5 +11,6 @@ example/**/outputs/
 
 /dev*.md
 
-# documentation builds
+# documentation builds, and the tutorials they copy
 doc/_build/
+doc/notebooks/

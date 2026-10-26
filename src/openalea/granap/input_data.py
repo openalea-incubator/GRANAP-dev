@@ -102,7 +102,8 @@ def _ground_region_params(clsname: str, name: str, *, thickness: float,
     """
     fields: Dict[str, Any] = {
         "name": (str, name),
-        "thickness": (float, Field(default=thickness, ge=0.00001, title="Thickness")),
+        "thickness": (float, Field(default=thickness, ge=0.00001, title="Thickness",
+            description="Diameter (mm) of the central region: a root's stele, a stem's pith")),
     }
     if cavity_radius is not None:
         fields["cavity_radius"] = (float, Field(default=cavity_radius, ge=0.0,
@@ -147,8 +148,9 @@ class LayerDefaultParams(BaseParams):
 
 class PlantTypeParams(BaseParams):
     name  : str = "planttype"
-    value : int = 1
-    organ : str = "root"
+    value : int = Field(default=1, title="Plant Type",
+                        description="1 monocotyledon, 2 dicotyledon, 3 conifer needle")
+    organ : str = Field(default="root", title="Organ", description="The organ: root, stem, leaf or needle")
 
 class BaseShapeParams(BaseParams):
     name         : str = "base_shape"

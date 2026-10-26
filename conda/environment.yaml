@@ -26,6 +26,7 @@ dependencies:
   - pydantic >=2.7
   - roifile
   - ipykernel             # notebooks
+  - pandoc                # the docs' notebooks (nbsphinx)
   # metafspm (the MPG every section is generated into, src/openalea/granap/metafspm)
   - openalea.mtg
   - numba
