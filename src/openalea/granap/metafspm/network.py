@@ -282,7 +282,7 @@ def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dic
     dx, dy = mid_x[mem_w] - cx[mem_r], mid_y[mem_w] - cy[mem_r]
     dist = np.hypot(dx, dy)
     blocks.append((mem_w * slots + (np.arange(mem_w.size) - np.repeat(starts, counts)), node_of_row[mem_r], mem_w,
-                   dict(path=np.where(is_air[mem_r], "wall_air", "membrane").tolist(),      # every air wall (§60)
+                   dict(path=np.where(is_air[mem_r], "wall_air", "membrane").tolist(),      # every air wall
                         length=lengths[mem_w], dist=dist, d_vec=list(np.column_stack((dx, dy))),
                         wall_thickness=thickness[mem_w].tolist())))
     mean_dist = _means(dist, counts)

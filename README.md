@@ -24,7 +24,7 @@ too, clone it alongside and use its environment instead, which covers the three
 ### metafspm (MPG data structure)
 
 This version generates every cross-section into metafspm's multiscale plant graph (MPG): its cells, walls, junctions
-and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`, see `devplan_metafspm.md`). metafspm is
+and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`; the documentation in `doc/`: its components, equations, the legacy compared, performance). metafspm is
 therefore required, on its `data_structure_api` branch (the anatomy scales), until it is merged.
 
 The original source is kept, frozen, as `openalea.granap.legacy` (the reference the port is compared with:

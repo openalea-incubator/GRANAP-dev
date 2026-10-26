@@ -485,7 +485,7 @@ class GranapAnatomy(StructuralComponent):
             template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
             written = template.instantiate(g, segment)
             _write_3d(g, written, float(g.property("length").get(segment, 0.)) * cls.mm_per_unit)
-            nodes = list(written["protoplasts"]) + list(written["apoplast"])        # the pores' (leaf surfaces, §60)
+            nodes = list(written["protoplasts"]) + list(written["apoplast"])        # the pores' (leaf surfaces)
             g.set_values("pore_width", nodes, [np.nan] * len(nodes))
             g.set_values("pore_depth", nodes, [np.nan] * len(nodes))
             anatomy_class[segment] = key
