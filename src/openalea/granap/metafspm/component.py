@@ -591,6 +591,43 @@ class GranapAnatomy(StructuralComponent):
         self._replaced = set(done["replaced"])
         self.last_update = done
 
+    def display_triangles(self, where=None):
+        """
+        The sections drawn for display (fspm-TF frames, viewers), not for light models (triangles() stays the
+        architecture's): each segment's section, flat, across the middle of the segment, perpendicular to it; each
+        protoplast its cell's polygon, triangulated (coupling.geometry.Triangles, each triangle its node index). A
+        segment is placed by its ends (x1 ... z2) when the architecture gives them, else along a straight axis from its
+        plant's position (roots down, the shoot up), at its distance from the axis' base. *where*: a node mask.
+        Computed when asked (a frame written): each template's polygons are triangulated once.
+        """
+        from openalea.metafspm.coupling.geometry import Triangles
+        ds = self.data_structure
+        g = ds.structure
+        template_of, template_row = g.property("anatomy_template"), g.property("template_row")
+        node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
+        kept = np.ones(node_ids.size, dtype=bool) if where is None else np.asarray(where, dtype=bool)
+        wanted = set(node_ids[kept].tolist())
+        vertices, owners = [], []
+        for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
+            index = template_of.get(segment, -1.)
+            if index is None or index < 0:
+                continue
+            local, rows = _template_triangles(template_by_index(index))
+            row_of = {int(template_row[c]): int(c) for c in compartments
+                      if int(c) in wanted and c in template_row and g.scale(int(c)) == g.scales.Compartment
+                      and g.complex(int(c)) is not None and g.scale(g.complex(int(c))) == g.scales.Cell}
+            drawn = np.array([row in row_of for row in rows], dtype=bool)
+            if not drawn.any():
+                continue
+            centre, axis = _segment_frame(g, segment)
+            u, v = _perpendiculars(axis)
+            xy = local[drawn] / self.mm_per_unit                                   # (T, 3, 2), in m
+            vertices.append(centre + xy[..., :1] * u + xy[..., 1:] * v)
+            owners.append(ds.index_of([row_of[row] for row in rows[drawn]], "node"))
+        if not vertices:
+            return Triangles(np.zeros((0, 3, 3)), np.zeros(0, dtype=np.int64))
+        return Triangles(np.concatenate(vertices), np.concatenate(owners))
+
     @state
     def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
             -> dict:
@@ -607,6 +644,55 @@ class GranapAnatomy(StructuralComponent):
         return {"wall_surface": wall_length * length_mm, "cell_volume": cell_area * length_mm,
                 "membrane_surface": np.where(membranes, edge_length * edge_mm, 0.),
                 "edge_length": np.where(path == columns.JUNCTION_PATH, edge_mm, edge_length)}
+
+
+_TEMPLATE_TRIANGLES = {}                  # {template index: (triangles (T, 3, 2) in mm, the cell row of each)}
+
+
+def _template_triangles(template) -> tuple:
+    """A template's cells' polygons as triangles in the section's plane (mm), and each triangle's cell row; once per
+    template, its polygons being shared by every segment of its class."""
+    if template.index not in _TEMPLATE_TRIANGLES:
+        import shapely
+        triangles, rows = [], []
+        for row, polygon in enumerate(template.polygons):
+            if polygon is None or polygon.is_empty:
+                continue
+            for piece in shapely.constrained_delaunay_triangles(polygon).geoms:
+                triangles.append(np.asarray(piece.exterior.coords)[:3, :2])
+                rows.append(row)
+        _TEMPLATE_TRIANGLES[template.index] = (np.asarray(triangles, dtype=float).reshape(-1, 3, 2),
+                                               np.asarray(rows, dtype=np.int64))
+    return _TEMPLATE_TRIANGLES[template.index]
+
+
+def _segment_frame(g, segment) -> tuple:
+    """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when it has them, else along a straight axis from
+    its plant's position, roots down and the shoot up, at its distance from the axis' base."""
+    ends = [g.property(name).get(segment) for name in ("x1", "y1", "z1", "x2", "y2", "z2")]
+    if all(value is not None for value in ends):
+        start, end = np.asarray(ends[:3], dtype=float), np.asarray(ends[3:], dtype=float)
+        length = np.linalg.norm(end - start)
+        if length > 0:
+            return (start + end) / 2., (end - start) / length
+    lengths = g.property("length")
+    below, parent = 0., g.parent(segment)
+    while parent is not None and g.scale(parent) == g.scales.SubOrgan:
+        below += float(lengths.get(parent, 0.))
+        parent = g.parent(parent)
+    plant = g.complex_at_scale(segment, g.scales.Plant)
+    base = np.array([float(g.property(name).get(plant, 0.) or 0.) for name in ("x", "y", "z")])
+    direction = -1. if g.property("label").get(segment) == g.labels.SubOrgan.RootSegment else 1.
+    middle = below + float(lengths.get(segment, 0.)) / 2.
+    return base + np.array([0., 0., direction * middle]), np.array([0., 0., direction])
+
+
+def _perpendiculars(axis) -> tuple:
+    """Two unit vectors spanning the plane perpendicular to *axis* (the section's x and y)."""
+    helper = np.array([1., 0., 0.]) if abs(axis[0]) < 0.9 else np.array([0., 1., 0.])
+    u = np.cross(axis, helper)
+    u /= np.linalg.norm(u)
+    return u, np.cross(axis, u)
 
 
 def _vessels(g, compartments, family):
