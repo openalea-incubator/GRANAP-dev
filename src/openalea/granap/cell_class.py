@@ -24,9 +24,6 @@ class Cell:
         # ``type`` at export time.  Explicit non-zero values (e.g. the
         # Phase-9 transfusion bridge cells) always win.
         self.cgroup = cgroup
-        # Persistent developmental-series id (see ROOT_SERIES_PLAN): a tracked xylem
-        # vessel keeps the same track_id across the apex->collet series; None for
-        # everything untracked.  Must survive Voronoi grouping and reach the gdf.
         self.track_id = track_id
         self.angle = angle if angle != None else np.arctan2(y, x)
         self.radius = radius if radius != None else np.sqrt(x**2 + y**2)
@@ -76,7 +73,7 @@ class Cell:
             self.radius = np.sqrt(self.x**2 + self.y**2)
 
     def cell_to_dict(self):
-        return {"type": self.type, "x": self.x, "y": self.y, 
+        return {"type": self.type, "x": self.x, "y": self.y,
                 "cell_diameter": self.diameter,
                 "cell_width": self.width,
                 "cell_height": self.height,

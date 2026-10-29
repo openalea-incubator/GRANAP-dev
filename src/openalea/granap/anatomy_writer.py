@@ -101,6 +101,23 @@ CGROUP_MAP: Dict[str, int] = {
     "protophloem": 23,
 }
 
+# The tags GRANAP generates that had no entry, so they fell back to 4: the shoots' sieve elements
+# and companion cells (MECHA found no phloem in stems and leaves), the leaves' spongy mesophyll, the needle's
+# transfusion tissue, the fibres, the periderm and the medullary rays (explicitly 4 until MECHA gives them a role).
+# A reviewed difference with the legacy, which the comparisons replay on it.
+CGROUPS_ADDED: Dict[str, int] = {
+    "sieve element": 11,
+    "companion cell": 12,
+    "spongy": 4,
+    "transfusion": 17,
+    "sclerenchyma": 4,
+    "phellem": 4,
+    "phelloderm": 4,
+    "phellogen": 4,
+    "medullar_ray": 4,
+}
+CGROUP_MAP.update(CGROUPS_ADDED)
+
 class AnatomyWriter:
     """
     Class to export Organ anatomy to various formats (XML, OBJ, GEO).
@@ -149,7 +166,7 @@ class AnatomyWriter:
             if "protect_topology" in valid_gdf.columns else None
         )
 
-        cell_vkeys, _, _, junction_set, protected_shape_set = CellGenerator._build_topology(
+        cell_vkeys, _, _, junction_set, protected_shape_set = self.organ.section_topology(               # the topology stored in the organ's MPG
             polys, cell_ids, protect_ids=protect_ids
         )
 
@@ -694,9 +711,27 @@ class AnatomyWriter:
             f.write("\n".join(geo_lines))
         print(f"GEO saved to {path}")
 
+class _Rows:
+    """The rows of a cell frame as plain dicts, read by label: the values pandas' row access would give."""
+
+    def __init__(self, frame):
+        columns = {name: frame[name].to_numpy() for name in frame.columns}
+        position = {label: i for i, label in enumerate(frame.index)}
+        self._columns, self._position = columns, position
+
+    def __getitem__(self, label):
+        i = self._position[label]
+        return {name: values[i] for name, values in self._columns.items()}
+
+    def items(self):
+        for label in self._position:
+            yield label, self[label]
+
 class NetworkExporter:
     """
-    Class to export Organ anatomy to an AbstractNetwork topological graph.
+    Class to export Organ anatomy to an AbstractNetwork topological graph. The topology comes from the organ
+    (Organ.section_topology: the rings stored in its MPG); the cells' rows are read once from the GeoDataFrame's
+    columns (_Rows) instead of one pandas row access per use.
     """
 
     def __init__(self, organ: Organ):
@@ -751,6 +786,9 @@ class NetworkExporter:
                            & (cells_gdf["type"] == "air space")
                            ]
         )
+        # The stomatal pores are air too, by their type: wall_air
+        # edges, no plasmodesmata, an air link to their chamber.
+        pore_cells = set(cells_gdf.index[cells_gdf["type"].isin(getattr(self.organ, "PORE_TYPES", ()))])
 
         # Cells whose type must NEVER carry a symplastic (plasmodesmata) edge
         apoplastic_cells = set(
@@ -778,7 +816,7 @@ class NetworkExporter:
             return float(cell_wall_thickness)
 
         cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
-            CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
+            getattr(self.organ, "section_topology", CellGenerator._build_topology)(polys, cell_ids, protect_ids=protect_ids)
         )
 
         if not cell_vkeys:
@@ -1128,17 +1166,19 @@ class NetworkExporter:
                     "n_paths": n_bridge_paths,
                 }
 
+        rows = _Rows(cells_gdf)                 # P5.2: the cells' rows, once (was a pandas row access per use)
+
         # Compute true wall_thickness based on adjacent cells
         for wd in wall_registry.values():
             w_thick = 0.0
             for r in wd["cells"]:
-                row = cells_gdf.loc[r]
+                row = rows[r]
                 c_type = row.get("type", "")
                 w_thick += get_thickness(c_type)
-            
+
             if len(wd["cells"]) == 1:
                 w_thick += get_thickness("outerwall")
-                
+
             wd["wall_thickness"] = w_thick
 
         # Phase 4 — assign MECHA-compatible node indices
@@ -1184,7 +1224,7 @@ class NetworkExporter:
             )
 
         # Cell nodes
-        for row_idx, row in cells_gdf.iterrows():
+        for row_idx, row in rows.items():
             node_id = cell_row_to_node[row_idx]
             centroid = row["geometry"].centroid if row["geometry"] is not None else None
             # A virtual (bridge) cell carries no polygon at all 
@@ -1208,6 +1248,7 @@ class NetworkExporter:
             )
 
         air_nodes = { cell_row_to_node[row_idx] for row_idx in protected_air_cells}   
+        wall_air_nodes = air_nodes | {cell_row_to_node[row_idx] for row_idx in pore_cells}
 
         # Phase 6 — add edges
         network._wall_to_cells = {
@@ -1249,10 +1290,8 @@ class NetworkExporter:
 
                 # Identify edges connecting to protected air spaces.
 
-                if (
-                    cn in air_nodes
-                    and bool(wd.get("shape_signature"))
-                ):
+                # every wall of an air node evaporates into it
+                if cn in wall_air_nodes:
 
                     network.graph.add_edge(
                         cn,
@@ -1306,8 +1345,8 @@ class NetworkExporter:
 
                 cid_a, cid_b = wd["cells"]
 
-                a_special = cid_a in protected_air_cells
-                b_special = cid_b in protected_air_cells
+                a_special = cid_a in protected_air_cells or cid_a in pore_cells
+                b_special = cid_b in protected_air_cells or cid_b in pore_cells
 
                 if a_special != b_special:
                     continue
@@ -1544,8 +1583,9 @@ class NetworkExporter:
         # polygons lie within ``air_link_radius`` of each other (true
         # boundary-to-boundary gap, not centroid distance — elongated rhombi
         # can have a centroid well outside the radius while their nearest tip
-        # is right next to the other air space). Defaults to 3x the median
-        # wall length so the radius scales with the organ's own cell size.
+        # is right next to the other air space). Defaults to the median wall
+        # length (1x, kept as the code has it; the comment said 3x), so the
+        # radius scales with the organ's own cell size.
         # ------------------------------------------------------------------
 
         radius = air_link_radius
@@ -1578,6 +1618,30 @@ class NetworkExporter:
                     dist=dist,
                     d_vec=d_vec,
                 )
+
+        # ------------------------------------------------------------------
+        # Step 5 — each stomatal pore air-linked to its sub-stomatal chamber,
+        # the protected air space nearest to it (they share no wall: the guard
+        # cells meet between them)
+        # ------------------------------------------------------------------
+        chamber_rows = sorted(protected_air_cells)
+        for row_p in sorted(pore_cells):
+            if not chamber_rows:
+                break
+            geom_p = cells_gdf.loc[row_p, "geometry"]
+            distances = [geom_p.distance(cells_gdf.loc[r, "geometry"]) for r in chamber_rows]
+            row_c = chamber_rows[int(np.argmin(distances))]
+            pore, chamber = cell_row_to_node[row_p], cell_row_to_node[row_c]
+            pos_p = network.graph.nodes[pore]["position"]
+            pos_c = network.graph.nodes[chamber]["position"]
+            dist = np.hypot(pos_c[0] - pos_p[0], pos_c[1] - pos_p[1])
+            network.graph.add_edge(
+                pore, chamber,
+                path="air_link",
+                length=dist,
+                dist=dist,
+                d_vec=np.array([pos_c[0] - pos_p[0], pos_c[1] - pos_p[1]]),
+            )
 
         # ------------------------------------------------------------------
         # Keep ``organ.all_cells`` / ``organ._cells_gdf`` aligned with the

@@ -5,3 +5,12 @@
 IMPLEMENTATION_GUIDE.md
 LEAF_PLAN.md
 ROOT_SERIES_PLAN.md
+
+# figures written by the examples
+example/**/outputs/
+
+/dev*.md
+
+# documentation builds, and the tutorials they copy
+doc/_build/
+doc/notebooks/

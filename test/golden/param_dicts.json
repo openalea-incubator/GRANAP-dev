@@ -13,13 +13,15 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
    "vessel_diameter": 0.06,
    "vessel_diameter_min": 0.01,
    "vessel_diameter_sd": 0.005,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.7,
    "gradient_steepness": 5.0,
@@ -39,13 +41,14 @@
    "protoxylem_diameter": 0.01,
    "protoxylem_diameter_sd": 0.001,
    "protoxylem_diameter_min": 0.0,
+   "protoxylem_diameter_distribution": null,
    "protoxylem_cluster_width": 0.015,
    "protoxylem_cluster_height": 0.01,
    "protoxylem_band_depth": 0.0,
    "protoxylem_pole_width_inner": 0.0,
    "protoxylem_pole_width_outer": 0.0,
    "n_vascular_bundles": 5,
-   "ratio_proto_meta": 2.2,
+   "n_protoxylem": 10,
    "xylem_shape": "default",
    "n_metaxylem": 0,
    "outer_radius": 0.15
@@ -54,6 +57,7 @@
    "name": "phloem",
    "sieve_diameter": 0.025,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.025,
    "cluster_height": 0.025,
    "relative_distance": 0.5
@@ -85,7 +89,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -95,7 +100,8 @@
    "shift": 0.0,
    "order": 5,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -105,7 +111,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -115,7 +122,8 @@
    "shift": 0.0,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -125,7 +133,8 @@
    "shift": 0.0,
    "order": 2,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_dicot_root": [
@@ -142,7 +151,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -154,6 +164,7 @@
    "vessel_diameter": 0.08,
    "vessel_diameter_min": 0.02,
    "vessel_diameter_sd": 0.002,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.7,
    "gradient_steepness": 1.0,
@@ -170,6 +181,7 @@
    "name": "phloem",
    "sieve_diameter": 0.012,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.1,
    "cluster_height": 0.05,
    "relative_distance": 0.8
@@ -198,6 +210,7 @@
    "vessel_diameter": 0.1,
    "vessel_diameter_sd": 0.005,
    "vessel_diameter_min": 0.03,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 8.0,
@@ -239,6 +252,7 @@
    "sieve_diameter": 0.022,
    "sieve_diameter_sd": 0.001,
    "sieve_diameter_min": 0.02,
+   "sieve_diameter_distribution": null,
    "prop_sieve": 0.3,
    "companion_diameter": 0.01,
    "companion_width": 0.002,
@@ -272,7 +286,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -282,7 +297,8 @@
    "shift": 0.0,
    "order": 5,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -292,7 +308,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -302,7 +319,8 @@
    "shift": 0.0,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -312,7 +330,8 @@
    "shift": 0.0,
    "order": 2,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_woody_dicot": [
@@ -329,7 +348,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -341,6 +361,7 @@
    "vessel_diameter": 0.08,
    "vessel_diameter_min": 0.02,
    "vessel_diameter_sd": 0.002,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.7,
    "gradient_steepness": 1.0,
@@ -357,6 +378,7 @@
    "name": "phloem",
    "sieve_diameter": 0.012,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.1,
    "cluster_height": 0.05,
    "relative_distance": 0.8
@@ -385,6 +407,7 @@
    "vessel_diameter": 0.1,
    "vessel_diameter_sd": 0.005,
    "vessel_diameter_min": 0.03,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 8.0,
@@ -426,6 +449,7 @@
    "sieve_diameter": 0.022,
    "sieve_diameter_sd": 0.001,
    "sieve_diameter_min": 0.02,
+   "sieve_diameter_distribution": null,
    "prop_sieve": 0.3,
    "companion_diameter": 0.01,
    "companion_width": 0.002,
@@ -440,7 +464,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "phellogen",
@@ -450,7 +475,8 @@
    "shift": 0.0,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "phelloderm",
@@ -460,7 +486,8 @@
    "shift": 0.0,
    "order": 2,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "medullar_rays",
@@ -488,7 +515,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.2,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -500,6 +528,7 @@
    "vessel_diameter": 0.08,
    "vessel_diameter_min": 0.02,
    "vessel_diameter_sd": 0.002,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.7,
    "gradient_steepness": 1.0,
@@ -516,6 +545,7 @@
    "name": "phloem",
    "sieve_diameter": 0.012,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.1,
    "cluster_height": 0.05,
    "relative_distance": 0.8
@@ -544,6 +574,7 @@
    "vessel_diameter": 0.1,
    "vessel_diameter_sd": 0.005,
    "vessel_diameter_min": 0.03,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 8.0,
@@ -585,6 +616,7 @@
    "sieve_diameter": 0.022,
    "sieve_diameter_sd": 0.001,
    "sieve_diameter_min": 0.02,
+   "sieve_diameter_distribution": null,
    "prop_sieve": 0.3,
    "companion_diameter": 0.01,
    "companion_width": 0.002,
@@ -618,7 +650,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "exodermis",
@@ -628,7 +661,8 @@
    "shift": 0.0,
    "order": 5,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -638,7 +672,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "endodermis",
@@ -648,7 +683,8 @@
    "shift": 0.0,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "pericycle",
@@ -658,7 +694,8 @@
    "shift": 0.0,
    "order": 2,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_monocot_stem": [
@@ -676,13 +713,15 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
    "vessel_diameter": 0.06,
    "vessel_diameter_min": 0.01,
    "vessel_diameter_sd": 0.005,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.7,
    "gradient_steepness": 5.0,
@@ -702,13 +741,14 @@
    "protoxylem_diameter": 0.01,
    "protoxylem_diameter_sd": 0.001,
    "protoxylem_diameter_min": 0.0,
+   "protoxylem_diameter_distribution": null,
    "protoxylem_cluster_width": 0.015,
    "protoxylem_cluster_height": 0.01,
    "protoxylem_band_depth": 0.0,
    "protoxylem_pole_width_inner": 0.0,
    "protoxylem_pole_width_outer": 0.0,
    "n_vascular_bundles": 5,
-   "ratio_proto_meta": 2.2,
+   "n_protoxylem": 10,
    "xylem_shape": "default",
    "n_metaxylem": 0,
    "outer_radius": 0.15
@@ -717,6 +757,7 @@
    "name": "phloem",
    "sieve_diameter": 0.008,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.025,
    "cluster_height": 0.025,
    "relative_distance": 0.5
@@ -748,11 +789,13 @@
    "metaxylem_diameter": 0.04,
    "metaxylem_diameter_sd": 0.003,
    "metaxylem_diameter_min": 0.02,
+   "metaxylem_diameter_distribution": null,
    "metaxylem_gap": 0.04,
    "n_protoxylem": 1,
    "protoxylem_diameter": 0.03,
    "protoxylem_diameter_sd": 1e-05,
    "protoxylem_diameter_min": 0.025,
+   "protoxylem_diameter_distribution": null,
    "protoxylem_width": 0.032,
    "protoxylem_height": 0.032,
    "protoxylem_relative_distance": 0.6,
@@ -762,6 +805,7 @@
    "sheath": "both",
    "sheath_thickness": 0.0055,
    "n_caps_layers_outward": 0,
+   "n_caps_layers_outward_flank": null,
    "n_caps_layers_inward": 0,
    "sclerenchyma_cell_diameter": 0.005,
    "sclerenchyma_cell_width": 0.005,
@@ -800,7 +844,8 @@
    "shift": 0.0,
    "order": 5,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "inter_cellular_spaces",
@@ -825,7 +870,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -835,7 +881,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_dicot_stem": [
@@ -853,7 +900,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -865,6 +913,7 @@
    "vessel_diameter": 0.045,
    "vessel_diameter_min": 0.012,
    "vessel_diameter_sd": 0.004,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 1.0,
@@ -881,6 +930,7 @@
    "name": "phloem",
    "sieve_diameter": 0.012,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.1,
    "cluster_height": 0.05,
    "relative_distance": 0.8
@@ -924,6 +974,7 @@
    "vessel_diameter": 0.04,
    "vessel_diameter_sd": 0.004,
    "vessel_diameter_min": 0.012,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 8.0,
@@ -961,6 +1012,7 @@
    "sieve_diameter": 0.014,
    "sieve_diameter_sd": 0.001,
    "sieve_diameter_min": 0.008,
+   "sieve_diameter_distribution": null,
    "prop_sieve": 0.3,
    "companion_diameter": 0.006,
    "companion_width": 0.006,
@@ -994,11 +1046,13 @@
    "metaxylem_diameter": 0.04,
    "metaxylem_diameter_sd": 0.003,
    "metaxylem_diameter_min": 0.02,
+   "metaxylem_diameter_distribution": null,
    "metaxylem_gap": 0.04,
    "n_protoxylem": 1,
    "protoxylem_diameter": 0.03,
    "protoxylem_diameter_sd": 1e-05,
    "protoxylem_diameter_min": 0.025,
+   "protoxylem_diameter_distribution": null,
    "protoxylem_width": 0.032,
    "protoxylem_height": 0.032,
    "protoxylem_relative_distance": 0.6,
@@ -1008,6 +1062,7 @@
    "sheath": "none",
    "sheath_thickness": 0.0055,
    "n_caps_layers_outward": 0,
+   "n_caps_layers_outward_flank": null,
    "n_caps_layers_inward": 0,
    "sclerenchyma_cell_diameter": 0.005,
    "sclerenchyma_cell_width": 0.005,
@@ -1061,7 +1116,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -1071,7 +1127,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_dicot_stem_continuous": [
@@ -1089,7 +1146,8 @@
    "size_gradient_function": "five_pl",
    "size_gradient_inflection": 0.3,
    "size_gradient_steepness": 3.0,
-   "size_gradient_asymmetry": 1.0
+   "size_gradient_asymmetry": 1.0,
+   "axial_height": null
   },
   {
    "name": "xylem",
@@ -1101,6 +1159,7 @@
    "vessel_diameter": 0.045,
    "vessel_diameter_min": 0.012,
    "vessel_diameter_sd": 0.004,
+   "vessel_diameter_distribution": null,
    "gradient_function": "five_pl",
    "gradient_inflection": 0.5,
    "gradient_steepness": 1.0,
@@ -1117,6 +1176,7 @@
    "name": "phloem",
    "sieve_diameter": 0.012,
    "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null,
    "cluster_width": 0.1,
    "cluster_height": 0.05,
    "relative_distance": 0.8
@@ -1163,11 +1223,13 @@
    "metaxylem_diameter": 0.04,
    "metaxylem_diameter_sd": 0.003,
    "metaxylem_diameter_min": 0.02,
+   "metaxylem_diameter_distribution": null,
    "metaxylem_gap": 0.04,
    "n_protoxylem": 1,
    "protoxylem_diameter": 0.03,
    "protoxylem_diameter_sd": 1e-05,
    "protoxylem_diameter_min": 0.025,
+   "protoxylem_diameter_distribution": null,
    "protoxylem_width": 0.032,
    "protoxylem_height": 0.032,
    "protoxylem_relative_distance": 0.6,
@@ -1177,6 +1239,7 @@
    "sheath": "none",
    "sheath_thickness": 0.0055,
    "n_caps_layers_outward": 0,
+   "n_caps_layers_outward_flank": null,
    "n_caps_layers_inward": 0,
    "sclerenchyma_cell_diameter": 0.005,
    "sclerenchyma_cell_width": 0.005,
@@ -1252,7 +1315,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "cortex",
@@ -1262,7 +1326,8 @@
    "shift": 0.0,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_needle": [
@@ -1375,7 +1440,8 @@
    "shift": 0.5,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "mesophyll",
@@ -1385,7 +1451,8 @@
    "shift": 0.5,
    "order": 4,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "hypodermis",
@@ -1394,7 +1461,8 @@
    "shift": 0.5,
    "order": 5,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "epidermis",
@@ -1403,7 +1471,8 @@
    "shift": 0.5,
    "order": 6,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   }
  ],
  "for_monocot_leaf": [
@@ -1428,7 +1497,8 @@
    "shift": 0.3,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "mesophyll",
@@ -1475,7 +1545,14 @@
    "arc_xylem_thickness": 0.05,
    "arc_phloem_thickness": 0.035,
    "arc_cambium_thickness": 0.015,
+   "arc_xylem_large_side": "cambium",
+   "arc_sclerenchyma_thickness": 0.0,
+   "arc_sclerenchyma_cell_diameter": 0.01,
+   "arc_sclerenchyma_cell_width": 0.01,
    "n_xylem_files": 0,
+   "arc_ray_width": 0.0,
+   "arc_ray_cell_width": 0.005,
+   "arc_ray_cell_length": 0.012,
    "mesophyll_region_width": 0.0,
    "mesophyll_cell_diameter": 0.03,
    "mesophyll_cell_width": 0.03
@@ -1484,12 +1561,14 @@
    "name": "xylem",
    "vessel_diameter": 0.045,
    "vessel_diameter_min": 0.012,
-   "vessel_diameter_sd": 0.003
+   "vessel_diameter_sd": 0.003,
+   "vessel_diameter_distribution": null
   },
   {
    "name": "phloem",
    "sieve_diameter": 0.008,
-   "sieve_diameter_sd": 0.001
+   "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null
   },
   {
    "name": "cambium",
@@ -1536,7 +1615,8 @@
    "shift": 0.3,
    "order": 3,
    "n_points": null,
-   "protect_shape": false
+   "protect_shape": false,
+   "axial_height": null
   },
   {
    "name": "palisade",
@@ -1589,7 +1669,14 @@
    "arc_xylem_thickness": 0.05,
    "arc_phloem_thickness": 0.035,
    "arc_cambium_thickness": 0.015,
+   "arc_xylem_large_side": "cambium",
+   "arc_sclerenchyma_thickness": 0.0,
+   "arc_sclerenchyma_cell_diameter": 0.01,
+   "arc_sclerenchyma_cell_width": 0.01,
    "n_xylem_files": 0,
+   "arc_ray_width": 0.0,
+   "arc_ray_cell_width": 0.005,
+   "arc_ray_cell_length": 0.012,
    "mesophyll_region_width": 0.0,
    "mesophyll_cell_diameter": 0.03,
    "mesophyll_cell_width": 0.03
@@ -1634,7 +1721,14 @@
    "arc_xylem_thickness": 0.05,
    "arc_phloem_thickness": 0.035,
    "arc_cambium_thickness": 0.015,
+   "arc_xylem_large_side": "cambium",
+   "arc_sclerenchyma_thickness": 0.0,
+   "arc_sclerenchyma_cell_diameter": 0.01,
+   "arc_sclerenchyma_cell_width": 0.01,
    "n_xylem_files": 0,
+   "arc_ray_width": 0.0,
+   "arc_ray_cell_width": 0.005,
+   "arc_ray_cell_length": 0.012,
    "mesophyll_region_width": 0.0,
    "mesophyll_cell_diameter": 0.03,
    "mesophyll_cell_width": 0.03
@@ -1643,12 +1737,14 @@
    "name": "xylem",
    "vessel_diameter": 0.045,
    "vessel_diameter_min": 0.012,
-   "vessel_diameter_sd": 0.003
+   "vessel_diameter_sd": 0.003,
+   "vessel_diameter_distribution": null
   },
   {
    "name": "phloem",
    "sieve_diameter": 0.008,
-   "sieve_diameter_sd": 0.001
+   "sieve_diameter_sd": 0.001,
+   "sieve_diameter_distribution": null
   },
   {
    "name": "cambium",
@@ -1679,7 +1775,8 @@
    "cell_width_default": 0.01,
    "shift_default": 0.0,
    "n_layers_default": 1,
-   "order_default": 0
+   "order_default": 0,
+   "axial_height_default": null
   }
  ]
 }

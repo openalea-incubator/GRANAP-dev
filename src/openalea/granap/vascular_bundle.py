@@ -38,6 +38,7 @@ from shapely.prepared import prep
 
 from openalea.granap.cell_class import Cell
 from openalea.granap.cell_manager import CellManager
+from openalea.granap.distribution import draw
 from openalea.granap.geometry_collection import GeometryProcessor
 from shapely.ops import unary_union
 
@@ -508,6 +509,7 @@ def _fill_xylem_packed(cells, rng, zone, cx, cy, xylem, bp, result) -> None:
         diameter_max=xylem.get("vessel_diameter", 0.06),
         diameter_min=xylem.get("vessel_diameter_min", 0.02),
         diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+        distribution=xylem.get("vessel_diameter_distribution"),
         gradient_function=xylem.get("gradient_function", "five_pl"),
         gradient_inflection=xylem.get("gradient_inflection", 0.5),
         gradient_steepness=xylem.get("gradient_steepness", 3.0),
@@ -609,6 +611,7 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
             diameter_max=xylem.get("vessel_diameter", 0.045),
             diameter_min=xylem.get("vessel_diameter_min", 0.012),
             diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+            distribution=xylem.get("vessel_diameter_distribution"),
             gradient_function=xylem.get("gradient_function", "five_pl"),
             gradient_inflection=xylem.get("gradient_inflection", 0.5),
             gradient_steepness=xylem.get("gradient_steepness", 3.0),
@@ -672,7 +675,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
     n_meta = int(bp.get("n_metaxylem", 2))
     m_gap = float(bp.get("metaxylem_gap", 0.04))
     for k in range(n_meta):
-        d = float(np.clip(rng.normal(dm, dm_sd), dm_min, np.inf))
+        d = draw(rng, dm, dm_sd, dm_min, None, bp.get("metaxylem_diameter_distribution"))
         poly = _largest(Point(*at(0.0, (k - (n_meta - 1) / 2.0) * (dm + m_gap)))
                         .buffer(d / 2, resolution=32).intersection(zone))
         if poly is None:
@@ -713,6 +716,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
                 diameter_max=float(bp.get("protoxylem_diameter", 0.012)),
                 diameter_min=float(bp.get("protoxylem_diameter_min", 0.006)),
                 diameter_sd=float(bp.get("protoxylem_diameter_sd", 0.0015)),
+                distribution=bp.get("protoxylem_diameter_distribution"),
                 gradient_function="normal",
             )
             if not vessels:
@@ -791,6 +795,7 @@ def _place_phloem_cells(cells, rng, sieve_zone, cx, cy, phloem, bp):
         proportion=proportion, direction=None,
         diameter_max=sieve_d, diameter_min=sieve_min,
         diameter_sd=phloem.get("sieve_diameter_sd", 0.001), gradient_function="normal",
+        distribution=phloem.get("sieve_diameter_distribution"),
     )
     comps = _place_companions(cells, rng, sieve_zone, centers, comp_d, comp_w, voronoi_grow, cx, cy)
     return unary_union(sieves + comps) if (sieves or comps) else None
@@ -886,6 +891,30 @@ def _sheath_zones(working, bp):
     return working, zones
 
 
+def _cap_layer_threshold(i: int, n_pole: int, n_flank: int) -> float:
+    """Angle (radians, 0 = flank .. pi/2 = pole) above which cap layer ``i`` exists.
+
+    The layer count is interpolated linearly with the angle around the envelope
+    centre, ``n(a) = n_flank + (n_pole - n_flank) * a / (pi/2)``, and layer ``i``
+    (0-based, innermost first) is kept where ``n(a)`` rounds to more than ``i``,
+    i.e. ``n(a) > i + 0.5``.  Rounding (rather than flooring) makes the flank carry
+    exactly ``n_flank`` layers and the pole exactly ``n_pole``, each intermediate
+    layer covering the angles nearest its own count.  Layers below ``n_flank`` run
+    the whole hemisphere (threshold 0).
+    """
+    if i < n_flank or n_pole <= n_flank:
+        return 0.0
+    return 0.5 * np.pi * (i + 0.5 - n_flank) / (n_pole - n_flank)
+
+
+def _outward_sector(a_min: float, reach: float) -> Polygon:
+    """The part of the ``+y`` half-plane seen from the origin at an angle of at least
+    ``a_min`` above the tangential (x) axis on either side: a circular sector of
+    radius ``reach`` spanning polar angles ``[a_min, pi - a_min]``."""
+    angles = np.linspace(a_min, np.pi - a_min, 65)
+    return Polygon([(0.0, 0.0)] + [(reach * np.cos(a), reach * np.sin(a)) for a in angles])
+
+
 def _outward_caps(env_local: Polygon, bp: dict):
     """Asymmetric sclerenchyma fibre caps at the radial pole(s), outside the envelope.
 
@@ -900,35 +929,62 @@ def _outward_caps(env_local: Polygon, bp: dict):
     gaps open — and a single-layer cap still renders one clean file.
 
     ``n_caps_layers_outward`` / ``n_caps_layers_inward`` set the per-pole layer count;
-    independent counts give the asymmetry.  Both default 0 → no caps.  Returns
-    ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter, cell_width)``
-    (innermost first) that the fibres are seeded along, and ``region`` the clean
-    contour-following cap polygon(s) — envelope buffered outward by ``n × scl`` at
-    each pole — so the caller can unify it with the envelope for the bundle-sheath
-    wrap / removal mask.  ``region`` is ``None`` when there are no caps.
+    independent counts give the asymmetry.  Both default 0 → no caps.
+
+    ``n_caps_layers_outward_flank`` tapers the outward cap: the layer count falls
+    linearly with the angle around the envelope centre, from
+    ``n_caps_layers_outward`` over the pole (90°) to this many at the flanks (0°).
+    Each file beyond the flank count is clipped to the sector where it is still
+    present (:func:`_cap_layer_threshold`), so the outer files shorten one by one
+    toward the sides.  Unset (``None``), the cap is uniform — exactly the untapered
+    geometry.  The inward cap is always uniform.
+
+    Returns ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter,
+    cell_width)`` (innermost first) that the fibres are seeded along, and ``region``
+    the clean contour-following cap polygon(s) — the envelope grown outward by each
+    layer over the angles that layer covers — so the caller can unify it with the
+    envelope for the bundle-sheath wrap / removal mask.  ``region`` is ``None`` when
+    there are no caps.
     """
     scl = bp.get("sclerenchyma_cell_diameter", 0.008)
     scl_w = bp.get("sclerenchyma_cell_width", scl)
     minx, miny, maxx, maxy = env_local.bounds
     n_out = int(bp.get("n_caps_layers_outward", 0))
     n_in = int(bp.get("n_caps_layers_inward", 0))
+    flank = bp.get("n_caps_layers_outward_flank")
+    n_out_flank = n_out if flank is None else min(int(flank), n_out)
     span = max(maxx - minx, maxy - miny) + (max(n_out, n_in) + 1) * scl + 1.0
 
     files, regions = [], []
-    # (layer count, hemisphere the pole occupies) — +y outward, −y inward.
+    # (pole layer count, flank layer count, hemisphere the pole occupies) — +y
+    # outward (optionally tapered), −y inward (uniform).
     poles = []
     if n_out > 0:
-        poles.append((n_out, box(minx - span, 0.0, maxx + span, maxy + span)))
+        poles.append((n_out, n_out_flank, box(minx - span, 0.0, maxx + span, maxy + span)))
     if n_in > 0:
-        poles.append((n_in, box(minx - span, miny - span, maxx + span, 0.0)))
-    for n, hemisphere in poles:
-        # clean cap region: the pole-side band of the envelope grown out by n cells.
-        band = _largest(env_local.buffer(n * scl).difference(env_local).intersection(hemisphere))
+        poles.append((n_in, n_in, box(minx - span, miny - span, maxx + span, 0.0)))
+    for n, n_flank, hemisphere in poles:
+        # Where each layer runs: the whole hemisphere for the first n_flank layers,
+        # a sector around the pole (narrowing with i) for the tapered outer ones.
+        # Only the outward hemisphere is ever tapered, so the sectors are +y.
+        def layer_zone(i):
+            a = _cap_layer_threshold(i, n, n_flank)
+            return hemisphere if a <= 0.0 else hemisphere.intersection(_outward_sector(a, span))
+
+        # clean cap region: the full-width band of the first n_flank layers, plus
+        # each tapered layer's one-cell band over its own sector.
+        parts = []
+        if n_flank > 0:
+            parts.append(env_local.buffer(n_flank * scl).difference(env_local).intersection(hemisphere))
+        for i in range(n_flank, n):
+            ring = env_local.buffer((i + 1) * scl).difference(env_local.buffer(i * scl))
+            parts.append(ring.intersection(layer_zone(i)))
+        band = _largest(parts[0] if len(parts) == 1 else unary_union(parts))
         if band is not None and not band.is_empty:
             regions.append(band)
         # one fibre file per layer: concentric pole arcs, file 0 on the envelope edge.
         for i in range(n):
-            arc = env_local.buffer(i * scl).exterior.intersection(hemisphere)
+            arc = env_local.buffer(i * scl).exterior.intersection(layer_zone(i))
             if arc is not None and not arc.is_empty:
                 files.append((arc, scl, scl_w))
     region = unary_union(regions) if regions else None
@@ -1146,6 +1202,14 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     toward the cambium) and, with ``xylem_layout == "files"``, cut into
     ``n_xylem_files`` radial files by thin parenchyma strips (the cambium and phloem
     stay continuous), exactly like :class:`ContinuousDicotStemAnatomy`.
+    ``arc_xylem_large_side='inner'`` reverses that gradient (large vessels on the
+    inner face, small against the cambium).
+
+    An optional fourth arc, ``arc_sclerenchyma_thickness`` thick, is laid just
+    outside the phloem over the same span and ring-filled with ``sclerenchyma``
+    fibres (``arc_sclerenchyma_cell_diameter`` / ``_width``) — the fibre sheath
+    capping the phloem of a major vein.  It is part of the vein for centring and
+    for the envelope, so the surrounding mesophyll is cleared for it.
 
     Returns a :class:`BundleResult` (envelope for the removal mask, vessel + zone
     polygons) so the caller registers it like any other bundle.
@@ -1158,16 +1222,18 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     half_cam = float(bp.get("arc_cambium_thickness", 0.015)) / 2.0
     xt = float(bp.get("arc_xylem_thickness", 0.05))
     pt = float(bp.get("arc_phloem_thickness", 0.035))
+    st = float(bp.get("arc_sclerenchyma_thickness", 0.0))
     if not bp.get("phloem_outward", True):
         theta = theta + np.pi        # phloem faces the adaxial side instead
 
     # Curvature centre on the adaxial side; the outward (+radial) direction is abaxial.
     u = np.array([np.cos(theta), np.sin(theta)])         # outward = abaxial
-    r_far = (r0 + half_cam + max(xt, pt)) * 2.0
+    r_far = (r0 + half_cam + max(xt, pt + st)) * 2.0
 
     def _build(anchor_x, anchor_y):
-        """The three concentric arcs + wedge for an anchor point on the cambium
-        contour.  Returns (ox, oy, a0, a1, xylem, phloem, cambium)."""
+        """The concentric arcs + wedge for an anchor point on the cambium contour.
+        Returns (ox, oy, a0, a1, xylem, phloem, cambium, sclerenchyma); the
+        sclerenchyma arc is empty when ``arc_sclerenchyma_thickness`` is 0."""
         ox = float(anchor_x - r0 * u[0])
         oy = float(anchor_y - r0 * u[1])
         cang = float(np.arctan2(anchor_y - oy, anchor_x - ox))   # O -> bundle direction
@@ -1175,10 +1241,13 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
         xa = cont.buffer(-half_cam).difference(cont.buffer(-half_cam - xt))
         pa = cont.buffer(half_cam + pt).difference(cont.buffer(half_cam))
         ca = cont.buffer(half_cam).difference(cont.buffer(-half_cam))
+        sa = (cont.buffer(half_cam + pt + st).difference(cont.buffer(half_cam + pt))
+              if st > 0.0 else Polygon())
         b0, b1 = cang - span / 2.0, cang + span / 2.0
         wdg = Polygon([(ox, oy)] + [(ox + r_far * np.cos(a), oy + r_far * np.sin(a))
                                     for a in np.linspace(b0, b1, 32)])
-        return ox, oy, b0, b1, xa.intersection(wdg), pa.intersection(wdg), ca.intersection(wdg)
+        return (ox, oy, b0, b1, xa.intersection(wdg), pa.intersection(wdg),
+                ca.intersection(wdg), sa.intersection(wdg))
 
     # Anchoring the arc by its abaxial (cambium-bottom) edge puts the whole bundle —
     # its thick xylem especially — above the placement point, pushing the vein into the
@@ -1186,15 +1255,16 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     # slide it along the radial axis so its centre of mass lands on (cx, cy): the vein
     # is then vertically centred on its placement point regardless of the arc span or
     # the xylem/phloem thickness ratio.
-    _, _, _, _, xa0, pa0, ca0 = _build(cx, cy)
-    env0 = unary_union([g for g in (xa0, pa0, ca0) if not g.is_empty])
+    _, _, _, _, xa0, pa0, ca0, sa0 = _build(cx, cy)
+    env0 = unary_union([g for g in (xa0, pa0, ca0, sa0) if not g.is_empty])
     if not env0.is_empty:
         d = np.array([cx - env0.centroid.x, cy - env0.centroid.y])
         s = float(np.dot(d, u))                              # component along the radial axis
         anchor_x, anchor_y = cx + s * u[0], cy + s * u[1]
     else:
         anchor_x, anchor_y = cx, cy
-    ox, oy, a0, a1, xylem_annulus, phloem_annulus, cambium_band = _build(anchor_x, anchor_y)
+    (ox, oy, a0, a1, xylem_annulus, phloem_annulus, cambium_band,
+     scl_band) = _build(anchor_x, anchor_y)
 
     # The zones are already the pie slice (wedge-clipped in _build); clip to the outline.
     def clip(zone):
@@ -1204,6 +1274,7 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     xylem_zone = clip(xylem_annulus)
     phloem_zone = clip(phloem_annulus)
     cambium_zone = clip(cambium_band)
+    scl_zone = clip(scl_band) if not scl_band.is_empty else None
 
     p_diam = float(bp.get("parenchyma_diameter", 0.012))
     p_w = float(bp.get("parenchyma_width", 0.012))
@@ -1213,17 +1284,33 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     if xylem_zone is not None and not xylem_zone.is_empty:
         grr = _radius_range(xylem_zone, ox, oy)
         pieces = [xylem_zone]
+        rays = []                    # (corridor polygon, centre angle) per xylem ray
         n_files = int(bp.get("n_xylem_files", 0))
         if bp.get("xylem_layout", "packed") == "files" and n_files >= 2:
             # Split the arc into n_files angular sub-wedges (radial files); the
             # parenchyma pass over the whole annulus fills the seams between them.
+            # With arc_ray_width > 0, each seam becomes a constant-width corridor
+            # (a ray) kept free of vessels and filled with thin radial cells.
+            ray_w = float(bp.get("arc_ray_width", 0.0))
+            if ray_w > 0.0:
+                for k in range(1, n_files):
+                    bk = a0 + (a1 - a0) * k / n_files
+                    spoke = LineString([(ox, oy), (ox + r_far * np.cos(bk), oy + r_far * np.sin(bk))])
+                    corridor = _largest(xylem_zone.intersection(
+                        spoke.buffer(ray_w / 2.0, cap_style=2)))
+                    if corridor is not None and not corridor.is_empty:
+                        rays.append((corridor, bk))
+            ray_union = unary_union([c for c, _ in rays]) if rays else None
             pieces = []
             for k in range(n_files):
                 b0 = a0 + (a1 - a0) * k / n_files
                 b1 = a0 + (a1 - a0) * (k + 1) / n_files
                 sub = Polygon([(ox, oy)] + [(ox + r_far * np.cos(a), oy + r_far * np.sin(a))
                                             for a in np.linspace(b0, b1, 6)])
-                pieces.extend(p for p in [_largest(xylem_zone.intersection(sub))]
+                piece = xylem_zone.intersection(sub)
+                if ray_union is not None:
+                    piece = piece.difference(ray_union)
+                pieces.extend(p for p in [_largest(piece)]
                               if p is not None and not p.is_empty)
         vessels = []
         for piece in pieces:
@@ -1231,11 +1318,14 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
                 cells, rng, piece, "xylem", cx, cy,
                 voronoi_grow=vgrow, r_floor=p_diam * 0.4, n_border=25,
                 proportion=float(bp.get("prop_vessel", 0.55)),
-                direction="edge",                    # endarch: large toward the cambium
+                # large toward the cambium (endarch) unless asked for the inner face
+                direction=("center" if bp.get("arc_xylem_large_side", "cambium") == "inner"
+                           else "edge"),
                 gradient_center=(ox, oy), gradient_radial_range=grr,
                 diameter_max=xylem.get("vessel_diameter", 0.045),
                 diameter_min=xylem.get("vessel_diameter_min", 0.012),
                 diameter_sd=xylem.get("vessel_diameter_sd", 0.003),
+                distribution=xylem.get("vessel_diameter_distribution"),
                 gradient_function=xylem.get("gradient_function", "five_pl"),
                 gradient_inflection=xylem.get("gradient_inflection", 0.5),
                 gradient_steepness=xylem.get("gradient_steepness", 3.0),
@@ -1243,7 +1333,16 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
             )
             vessels.extend(vs)
         result.vessel_polygons.extend(vessels)
-        _fill_parenchyma(cells, xylem_zone, unary_union(vessels) if vessels else None,
+        if rays:
+            from openalea.granap.secondary_growth import fill_medullar_rays
+            mr = dict(base_width=float(bp.get("arc_ray_width", 0.0)),
+                      cell_width=float(bp.get("arc_ray_cell_width", 0.005)),
+                      cell_diameter=float(bp.get("arc_ray_cell_length", 0.012)))
+            next_id = cells.next_group_id()
+            for corridor, bk in rays:
+                next_id = fill_medullar_rays(cells, corridor, bk, ox, oy, mr, next_id)
+        occupied = [*vessels, *(c for c, _ in rays)]
+        _fill_parenchyma(cells, xylem_zone, unary_union(occupied) if occupied else None,
                          "parenchyma", cx, cy, p_diam, p_w)
         result.zone_polygons.append(("xylem", xylem_zone))
 
@@ -1277,7 +1376,14 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
         _fill_cambium(cells, rng, cambium_zone, cx, cy, cambium)
         result.zone_polygons.append(("cambium", cambium_zone))
 
-    envelope = unary_union([z for z in (xylem_zone, cambium_zone, phloem_zone)
+    # --- sclerenchyma arc outside the phloem ----------------------------------
+    if scl_zone is not None and not scl_zone.is_empty:
+        _fill_parenchyma(cells, scl_zone, None, "sclerenchyma", cx, cy,
+                         float(bp.get("arc_sclerenchyma_cell_diameter", 0.01)),
+                         float(bp.get("arc_sclerenchyma_cell_width", 0.01)))
+        result.zone_polygons.append(("sclerenchyma", scl_zone))
+
+    envelope = unary_union([z for z in (xylem_zone, cambium_zone, phloem_zone, scl_zone)
                             if z is not None and not z.is_empty])
     result.envelope = _largest(envelope) or envelope
 

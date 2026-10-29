@@ -41,7 +41,13 @@ HALF = LENGTH / 2.0
 
 # The midrib is a 165-degree arc; its tangential extent (~chord) is reused as the
 # vein ``width`` so the placement rule drops the minor veins that fall under it.
-ARC_RADIUS = 0.30
+# Re-measured on the full-resolution section photo
+# (data/IMG_cross_section/leaf/dicot/nerium.png, 2026-10-05), calibrated by the
+# 0.47 mm lamina: the xylem band runs 0.192 -> 0.275 mm from the arc's curvature
+# centre, so the cambium (ARC_RADIUS, the xylem's outer edge) sits at ~0.28 mm
+# (was 0.30). Midrib (2.11 x lamina) and keel extent (back to the lamina
+# 1.6-1.9 x lamina from the vein) agree with the values below.
+ARC_RADIUS = 0.28                 # was 0.30
 ARC_DEGREES = 165.0
 MIDRIB_WIDTH = 2.0 * ARC_RADIUS * sin(radians(ARC_DEGREES / 2.0))
 
@@ -52,8 +58,13 @@ def build_nerium():
         width=MIDRIB_WIDTH,
         # continuous-cylinder (arc) midrib
         arc_degrees=ARC_DEGREES, arc_radius=ARC_RADIUS,
-        arc_xylem_thickness=0.11, arc_phloem_thickness=0.05, arc_cambium_thickness=0.012,
+        # xylem band 83 um thick on the full-resolution photo (was 0.11), with the
+        # large vessels on the inner (adaxial, curvature-centre) face
+        arc_xylem_thickness=0.085, arc_xylem_large_side="inner",
+        arc_phloem_thickness=0.05, arc_cambium_thickness=0.012,
         xylem_layout="files", n_xylem_files=34, xylem_file_jitter=0.0,
+        # thin xylem rays between the files: one lane of thin cells on the photo
+        arc_ray_width=0.003, arc_ray_cell_width=0.003, arc_ray_cell_length=0.012,
         # Lower vessel proportion so the vessels sit further apart (more xylem
         # parenchyma between them) — the packed look was too dense.
         prop_vessel=0.42,
@@ -103,7 +114,9 @@ def build_nerium():
         {"name": "spongy", "cell_diameter": 0.015, "cell_width": 0.015},
         major, minor,
         # arc-vein vessels: 0.018 grading to 0.012 mm
-        {"name": "xylem", "vessel_diameter": 0.018, "vessel_diameter_min": 0.012,
+        # vessel pitch on the photo: median 14 um (p25-p75 12-17); 0.018 did not
+        # fit 34 files + rays on the arc's inner face
+        {"name": "xylem", "vessel_diameter": 0.014, "vessel_diameter_min": 0.010,
          "vessel_diameter_sd": 0.0015},
         {"name": "phloem", "sieve_diameter": 0.0096, "sieve_diameter_sd": 0.0008},
         {"name": "cambium", "cell_diameter": 0.008},

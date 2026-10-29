@@ -10,7 +10,7 @@ depending on the ``planttype`` value in the input.  Both subclasses are
 import warnings
 import numpy as np
 import shapely as sp
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
 from shapely.geometry import Point, Polygon, LineString, MultiPoint, box
@@ -148,6 +148,9 @@ class RootAnatomy(Organ):
             "size_gradient_inflection": stele.get("size_gradient_inflection", 0.5),
             "size_gradient_steepness":  stele.get("size_gradient_steepness",  3.0),
             "size_gradient_asymmetry":  stele.get("size_gradient_asymmetry",  1.0),
+            # Out-of-plane (longitudinal) stele-cell extent used by the 3D
+            # extrusion pipeline (see generate_cell_3d). None = unset.
+            "axial_height":             stele.get("axial_height"),
         }
 
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
@@ -235,6 +238,7 @@ class RootAnatomy(Organ):
                 polygon=current_polygon,
                 cell_diameter=cell_diameter,
                 id_layer=i_layer + 1,
+                axial_height=self.vascular_params.get("axial_height"),
             ))
             i_layer += 1
 
@@ -323,6 +327,7 @@ class RootAnatomy(Organ):
             diameter_max=p["xylem_diameter_max"],
             diameter_min=p["xylem_diameter_min"],
             diameter_sd=p["xylem_diameter_sd"],
+            distribution=p.get("xylem_diameter_distribution"),
             gradient_function=p["xylem_gradient_function"],
             gradient_inflection=p["xylem_gradient_inflection"],
             gradient_steepness=p["xylem_gradient_steepness"],
@@ -353,7 +358,7 @@ class RootAnatomy(Organ):
     # See ROOT_SERIES_PLAN.  When ``self._prescribed_vessels`` is set (a list of
     # (x, y, r, track_id)), the vascular recipe places exactly these xylem vessels
     # at the given positions/radii carrying their persistent track_id, instead of
-    # packing random ones — so a vessel keeps its identity across the apex->collet
+    # packing random ones — so a vessel keeps its identity across the apex->collar
     # series.  The surrounding tissue still generates around them (the "refit").
     def prescribe_vessels(self, vessels) -> "RootAnatomy":
         """Prescribe the exact xylem vessel set for this section: an iterable of
@@ -361,9 +366,13 @@ class RootAnatomy(Organ):
         self._prescribed_vessels = [tuple(v) for v in vessels]
         return self
 
-    def _place_prescribed_xylem(self, stele_polygon: Polygon) -> None:
+    def _place_prescribed_xylem(self, stele_polygon: Polygon,
+                                seed_gap: Optional[float] = None) -> None:
         """Place the prescribed xylem vessels as tracked cells + feed the vascular
-        mask, so downstream tissue clears around them."""
+        mask, so downstream tissue clears around them.
+
+        ``seed_gap`` is the offset of the sheath ring laid around each vessel
+        afterwards, when there is one (see ``tissue_class.seed_ring_inset``)."""
         vessels = getattr(self, "_prescribed_vessels", None)
         if not vessels:
             return
@@ -373,6 +382,7 @@ class RootAnatomy(Organ):
         placed = place_packed_group(
             self.vascular_cells, circles, "metaxylem",
             id_base=0, angle_center=(cx, cy), track_ids=track_ids,
+            seed_gap=seed_gap,
         )
         for placed_poly, _rtype, _gid in placed:
             self.vascular_polygons.append(placed_poly)
