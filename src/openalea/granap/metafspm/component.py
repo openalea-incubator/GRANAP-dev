@@ -603,7 +603,8 @@ class GranapAnatomy(StructuralComponent):
         from openalea.metafspm.coupling.geometry import Triangles
         ds = self.data_structure
         g = ds.structure
-        template_of, template_row = g.property("anatomy_template"), g.property("template_row")
+        properties = g.properties()                   # read only: g.property() would create a missing property
+        template_of, template_row = properties.get("anatomy_template", {}), properties.get("template_row", {})
         node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
         kept = np.ones(node_ids.size, dtype=bool) if where is None else np.asarray(where, dtype=bool)
         wanted = set(node_ids[kept].tolist())
@@ -669,20 +670,21 @@ def _template_triangles(template) -> tuple:
 def _segment_frame(g, segment) -> tuple:
     """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when it has them, else along a straight axis from
     its plant's position, roots down and the shoot up, at its distance from the axis' base."""
-    ends = [g.property(name).get(segment) for name in ("x1", "y1", "z1", "x2", "y2", "z2")]
+    properties = g.properties()                       # read only: g.property() would create a missing property
+    ends = [properties.get(name, {}).get(segment) for name in ("x1", "y1", "z1", "x2", "y2", "z2")]
     if all(value is not None for value in ends):
         start, end = np.asarray(ends[:3], dtype=float), np.asarray(ends[3:], dtype=float)
         length = np.linalg.norm(end - start)
         if length > 0:
             return (start + end) / 2., (end - start) / length
-    lengths = g.property("length")
+    lengths = properties.get("length", {})
     below, parent = 0., g.parent(segment)
     while parent is not None and g.scale(parent) == g.scales.SubOrgan:
         below += float(lengths.get(parent, 0.))
         parent = g.parent(parent)
     plant = g.complex_at_scale(segment, g.scales.Plant)
-    base = np.array([float(g.property(name).get(plant, 0.) or 0.) for name in ("x", "y", "z")])
-    direction = -1. if g.property("label").get(segment) == g.labels.SubOrgan.RootSegment else 1.
+    base = np.array([float(properties.get(name, {}).get(plant, 0.) or 0.) for name in ("x", "y", "z")])
+    direction = -1. if properties.get("label", {}).get(segment) == g.labels.SubOrgan.RootSegment else 1.
     middle = below + float(lengths.get(segment, 0.)) / 2.
     return base + np.array([0., 0., direction * middle]), np.array([0., 0., direction])
 

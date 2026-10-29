@@ -51,6 +51,13 @@ def test_the_section_lies_across_its_segment(section):
             g.property(name).pop(segment, None)
 
 
+def test_drawing_leaves_the_mpg_as_it_was(section):
+    ds, anatomy = section
+    before = {name: len(prop) for name, prop in ds.structure.properties().items()}
+    anatomy.display_triangles()
+    assert {name: len(prop) for name, prop in ds.structure.properties().items()} == before
+
+
 def test_a_mask_and_the_light_geometry(section):
     ds, anatomy = section
     where = np.zeros(ds.n_nodes(), dtype=bool)
