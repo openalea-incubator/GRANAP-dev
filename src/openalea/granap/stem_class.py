@@ -33,6 +33,7 @@ from typing import List, Dict, Any, Tuple
 
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
+from shapely.prepared import prep
 
 from openalea.granap.organ_class import Organ
 from openalea.granap.layer_class import Layer, LayerPolygon
@@ -525,18 +526,51 @@ class StemAnatomy(Organ):
             if layer is not None and layer.cell_diameter > 0:
                 sizes.append((r_out, float(layer.cell_diameter), l["name"]))
         self._vascular_layer_sizes = sorted(sizes)
+        # The same layers as polygons, outside -> in, so the tissue at a point is
+        # found by containment: right for any base_shape, where a radius from the
+        # origin is not (a corner of a triangle stem lies farther out than the pith
+        # radius yet still in the pith).
+        self._vascular_layer_polys = []
+        for l in layers_polygons:
+            if l["name"] == "outside" or l["polygon"] is None or l["polygon"].is_empty:
+                continue
+            layer = self.get_layer(l["name"])
+            if layer is not None and layer.cell_diameter > 0:
+                self._vascular_layer_polys.append(
+                    (prep(l["polygon"]), float(layer.cell_diameter), l["name"]))
         idx = names.index("parenchyma") if "parenchyma" in names else len(layers_polygons) - 1
+        self._vascular_pith_polygon = prep(layers_polygons[idx]["polygon"])
         return layers_polygons[idx]["polygon"]
+
+    def _layer_at(self, x: float, y: float):
+        """``(cell_diameter, name)`` of the layer whose ring holds ``(x, y)``, or
+        ``None`` inside the pith (or when the layers are not known yet).  A point
+        past the organ outline gets the outermost layer."""
+        pith = getattr(self, "_vascular_pith_polygon", None)
+        layers = getattr(self, "_vascular_layer_polys", None)
+        if pith is None or not layers:
+            return None
+        p = Point(x, y)
+        if pith.contains(p):
+            return None
+        hit = layers[0][1:]
+        for poly, cd, name in layers:                  # outside -> in: keep the innermost
+            if poly.contains(p):
+                hit = (cd, name)
+        return hit
 
     def _local_ground_cell_size(self, x: float, y: float, r_pith: float) -> float:
         """Cell diameter of the tissue at ``(x, y)`` — the ground a bundle sits in.
 
-        Inside the pith (r <= ``r_pith``) this follows the pith gradient (as before);
-        past the pith it is the cell size of the layer (cortex, hypodermis, ...) whose
-        ring contains the point, so a peripheral bundle's sheath is sized against the
+        Inside the pith this follows the pith gradient (as before); past the pith it
+        is the cell size of the layer (cortex, hypodermis, ...) whose ring contains
+        the point (found by containment, so any base_shape works), so a peripheral bundle's sheath is sized against the
         rind cells around it rather than the much larger pith cells.
         """
         r = float(np.hypot(x, y))
+        if getattr(self, "_vascular_layer_polys", None):
+            hit = self._layer_at(x, y)
+            return self._pith_cell_diameter_at(r, r_pith) if hit is None else hit[0]
         if r <= r_pith or not getattr(self, "_vascular_layer_sizes", None):
             return self._pith_cell_diameter_at(r, r_pith)
         for r_out, cd, _name in self._vascular_layer_sizes:
@@ -554,6 +588,9 @@ class StemAnatomy(Organ):
         after the tissue it is fitted into instead of a generic ``bundle sheath``.
         """
         r = float(np.hypot(x, y))
+        if getattr(self, "_vascular_layer_polys", None):
+            hit = self._layer_at(x, y)
+            return "parenchyma" if hit is None else hit[1]
         if r <= r_pith or not getattr(self, "_vascular_layer_sizes", None):
             return "parenchyma"
         for r_out, _cd, name in self._vascular_layer_sizes:

@@ -19,14 +19,18 @@ spec is laid out one of two ways (its ``placement`` field):
   no overlap);
 * ``even`` — bundles equally spaced on a ring at the band midpoint radius
   (circumference / ``n_bundles`` apart), rotated by the spec's ``angle`` phase so
-  two close-radius bands can interleave.
+  two close-radius bands can interleave; with ``ring_shape='outline'`` the ring
+  follows the pith edge — or, out in the cortex/rind, the organ outline —
+  instead of a circle (any ``base_shape``).
 """
 
 import logging
 from typing import List, Tuple
 
 import numpy as np
-from shapely.geometry import Polygon, Point
+import shapely
+from shapely.geometry import LineString, Polygon, Point
+from shapely.geometry.polygon import orient
 from shapely.prepared import prep
 
 from openalea.granap.tissue_class import TissueRecipe
@@ -103,7 +107,8 @@ class MonocotStemAnatomy(StemAnatomy):
         for bp in specs:
             mode = bp.get("placement", "random")
             if mode == "even":
-                self._place_even_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes)
+                self._place_even_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes,
+                                         polygon=polygon, section=section)
             elif mode == "spaced":
                 self._place_spaced_bundles(bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes)
             else:
@@ -248,7 +253,8 @@ class MonocotStemAnatomy(StemAnatomy):
                      "[%.3g, %.3g] mm (ground tissue too tight for the rest).",
                      n_here, n, r_lo, r_hi)
 
-    def _place_even_bundles(self, bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes) -> None:
+    def _place_even_bundles(self, bp, cx0, cy0, r_pith, r_sec, prepared, placed, envelopes,
+                            polygon: Polygon = None, section: Polygon = None) -> None:
         """Place one band's bundles equally spaced on a ring at a single radius.
 
         The ring holds ``n_bundles`` slots a full turn apart (circumference /
@@ -258,6 +264,12 @@ class MonocotStemAnatomy(StemAnatomy):
         to interleave them.  A slot is skipped (with a log) if it falls outside the
         section or its envelope would overlap a bundle already placed, so ``even``
         never produces overlap either.
+
+        With ``ring_shape='outline'`` the ring follows an outline instead of a
+        circle — the pith edge (``polygon``), or the organ outline (``section``) for a
+        ring out in the cortex/rind — so the bundles follow any ``base_shape``: see
+        :meth:`_outline_ring`.  Slots are then equally spaced by arc length and each
+        bundle faces the ring's outward normal.
         """
         n = int(bp.get("n_bundles", 0))
         R = r_pith
@@ -266,10 +278,19 @@ class MonocotStemAnatomy(StemAnatomy):
         gap = self._bundle_clearance(bp)
         angle0 = np.radians(float(bp.get("angle", 0.0)))
 
+        if bp.get("ring_shape", "circle") == "outline" and polygon is not None:
+            ring = self._outline_ring(bp, polygon, r_pith, gap, section)
+            slots = self._outline_slots(ring, cx0, cy0, n, float(bp.get("angle", 0.0)))
+            where = "outline"
+        else:
+            slots = []
+            for k in range(n):
+                theta = angle0 + 2.0 * np.pi * k / n
+                slots.append((cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta), theta))
+            where = f"r={r_ring:.3g} mm"
+
         n_here = 0
-        for k in range(n):
-            theta = angle0 + 2.0 * np.pi * k / n
-            x, y = cx0 + r_ring * np.cos(theta), cy0 + r_ring * np.sin(theta)
+        for x, y, theta in slots:
             if not prepared.contains(Point(x, y)):
                 continue
             ground = self._neighbour_ground_cell_size(x, y, bp, R)
@@ -282,8 +303,72 @@ class MonocotStemAnatomy(StemAnatomy):
 
         if n_here < n:
             log.info("MonocotStemAnatomy: placed %d/%d even bundles on the "
-                     "r=%.3g mm ring (some slots fell outside the ground tissue "
-                     "or overlapped another band).", n_here, n, r_ring)
+                     "%s ring (some slots fell outside the ground tissue "
+                     "or overlapped another band).", n_here, n, where)
+
+    @staticmethod
+    def _outline_ring(bp, polygon: Polygon, r_pith: float, gap: float,
+                      section: Polygon = None) -> Polygon:
+        """The ``ring_shape='outline'`` ring: the nearer outline, offset.
+
+        ``radius`` is the ring's equivalent radius, as for the dicot outline ring.
+        Up to the pith radius the ring is the pith edge pulled inward by (pith radius
+        - ``radius``); beyond it the ring is out in the cortex/rind and follows the
+        organ outline (``section``, out to the epidermis) pulled inward by (its
+        equivalent radius - ``radius``) — so peripheral bundles line the organ's
+        surface whatever its shape.  On a round stem both are the same circle.
+        ``radius`` = 0 puts the ring just inside the pith edge: half a bundle height
+        plus the clearance in, so the bundles line it without crossing it.  Of a
+        ring that splits (a narrow pith or organ), the largest piece is kept."""
+        r = float(bp.get("radius", 0.0))
+        edge = polygon
+        if r <= 0.0:
+            inset = 0.5 * float(bp.get("height", 0.13)) + gap
+        elif r > r_pith and section is not None and not section.is_empty:
+            edge = section
+            inset = float(np.sqrt(section.area / np.pi)) - r
+        else:
+            inset = r_pith - r
+        ring = edge.buffer(-inset) if abs(inset) > 1e-9 else edge
+        pieces = [g for g in shapely.get_parts(ring) if g.geom_type == "Polygon" and g.area > 0]
+        if not pieces:
+            log.info("MonocotStemAnatomy: the outline offset by %.3g mm is empty; "
+                     "no 'outline' even bundles placed.", inset)
+            return None
+        if len(pieces) > 1:
+            log.info("MonocotStemAnatomy: the outline offset by %.3g mm splits in %d; "
+                     "the 'outline' even bundles follow the largest piece.", inset, len(pieces))
+        return max(pieces, key=lambda g: g.area)
+
+    @staticmethod
+    def _outline_slots(ring: Polygon, cx0: float, cy0: float, n: int,
+                       angle_deg: float) -> List[Tuple[float, float, float]]:
+        """``n`` slots ``(x, y, theta)`` equally spaced by arc length along ``ring``.
+
+        The first slot sits where the ray from the centre at 0 deg meets the ring,
+        moved along it by ``angle_deg``/360 of its length (so 180/n interleaves two
+        bands, as for the circle).  ``theta`` is the outward normal of the
+        (counter-clockwise) ring, so a bundle on a concave stretch still faces out."""
+        if ring is None or n <= 0:
+            return []
+        line = orient(ring, 1.0).exterior                  # counter-clockwise
+        length = line.length
+        x0, y0, x1, y1 = ring.bounds
+        far = 4.0 * max(x1 - x0, y1 - y0, 1e-9)
+        hits = shapely.get_parts(line.intersection(LineString([(cx0, cy0), (cx0 + far, cy0)])))
+        hits = [h for h in hits if h.geom_type == "Point"]
+        start = (min(hits, key=lambda h: h.distance(Point(cx0, cy0))) if hits
+                 else Point(cx0 + far, cy0))
+        s0 = line.project(start) + angle_deg / 360.0 * length
+        eps = 1e-3 * length
+        slots = []
+        for k in range(n):
+            s = (s0 + k * length / n) % length
+            p = line.interpolate(s)
+            a, b = line.interpolate((s - eps) % length), line.interpolate((s + eps) % length)
+            tx, ty = b.x - a.x, b.y - a.y                  # local tangent
+            slots.append((p.x, p.y, float(np.arctan2(-tx, ty))))   # CCW ring: (ty, -tx) is outward
+        return slots
 
     def _build_scattered_bundles(self, polygon: Polygon) -> None:
         """Build the atactostele: one collateral 'face' bundle per sampled centre.

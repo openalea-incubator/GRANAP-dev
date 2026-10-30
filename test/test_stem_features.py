@@ -3,6 +3,7 @@
 * mixed-kind ``bundle_pattern`` placement (equal spacing and ``grouped`` clusters),
 * the bicollateral inner cambium (a cambium band on *both* faces of the xylem),
 * the monocot ``spaced`` (best-candidate) bundle placement,
+* the monocot ``even`` ring following the pith outline (``ring_shape='outline'``),
 * the ``CellManager.remove_cells`` identity fix (the epidermis-gap bug),
 * the unified absolute peak/valley ``star`` contour.
 
@@ -122,6 +123,64 @@ def test_bundle_band_can_be_placed_past_the_pith():
     assert bundles, "the peripheral band must place bundles"
     assert all(np.hypot(b.centroid.x, b.centroid.y) > pith_r for b in bundles), \
         "an 'even' ring with radius past the pith must place bundles outside the pith"
+
+
+def test_outline_slots_follow_the_ring():
+    """'outline' even slots are equally spaced by arc length on the ring itself, and
+    each faces the ring's outward normal (here a square: one of the four axes)."""
+    from shapely.geometry import Point, box
+    from openalea.granap.stem_monocot_class import MonocotStemAnatomy
+    sq = box(-1, -1, 1, 1)
+    slots = MonocotStemAnatomy._outline_slots(sq, 0.0, 0.0, 8, 0.0)
+    assert len(slots) == 8
+    line = sq.exterior
+    s = np.sort([line.project(Point(x, y)) for x, y, _ in slots])
+    assert np.allclose(np.diff(s), 1.0, atol=1e-6), "slots must be one perimeter/n apart"
+    for x, y, theta in slots:
+        assert line.distance(Point(x, y)) < 1e-9
+        nx, ny = np.cos(theta), np.sin(theta)
+        assert not sq.contains(Point(x + 0.01 * nx, y + 0.01 * ny)), "theta must point outward"
+
+
+def test_monocot_even_outline_ring():
+    """An 'even' band with ring_shape='outline' on a round stem places every bundle,
+    non-overlapping, all at about the same depth inside the pith edge."""
+    d = OrganInputData.for_monocot_stem()
+    d.params = [p for p in d.params if getattr(p, "name", None) != "vascular_bundle"]
+    d.params.append(VascularBundleParams(placement="even", ring_shape="outline",
+                                         n_bundles=8, width=0.06, height=0.08))
+    stem = StemAnatomy(d, seed=SEED)
+    stem.generate_cells()
+    bundles = _bundles(stem)
+    assert len(bundles) == 8
+    assert unary_union(bundles).area > 0.99 * sum(b.area for b in bundles)
+    r = np.array([np.hypot(b.centroid.x, b.centroid.y) for b in bundles])
+    assert r.std() < 0.05 * r.mean(), "outline ring bundles must sit at one depth"
+
+
+def test_monocot_even_outline_ring_past_the_pith_follows_the_organ():
+    """Past the pith, an 'outline' even ring follows the organ outline (a triangle
+    here), not a circle: every bundle sits at the same depth under the surface."""
+    from shapely.geometry import Point
+    from openalea.granap.input_data import BaseShapeParams
+
+    def stem(bands):
+        d = OrganInputData.for_monocot_stem()
+        d.params = [p for p in d.params if getattr(p, "name", None) != "vascular_bundle"]
+        d.params += [BaseShapeParams(shape="triangle")] + bands
+        s = StemAnatomy(d, seed=SEED)
+        s.generate_cells()
+        return s
+
+    section = stem([])._vascular_section_polygon
+    depth = 0.15
+    radius = np.sqrt(section.area / np.pi) - depth
+    s = stem([VascularBundleParams(placement="even", ring_shape="outline", n_bundles=12,
+                                   radius=radius, width=0.05, height=0.07)])
+    bundles = _bundles(s)
+    assert len(bundles) >= 9, "most outline slots must fit"
+    d = np.array([section.exterior.distance(Point(b.centroid.x, b.centroid.y)) for b in bundles])
+    assert np.allclose(d, depth, atol=0.02), f"bundles must sit {depth} mm under the surface: {d}"
 
 
 # -- CellManager.remove_cells identity (epidermis-gap fix) ------------------
