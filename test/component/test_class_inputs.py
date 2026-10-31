@@ -4,12 +4,11 @@ a plant's scenario parametrizes its anatomies (root_anatomy, leaf_anatomy: {"pre
 and a class input bins a SubOrgan variable into the class and sets a GRANAP field from it. One component instance
 serves both plants.
 """
-import pandas as pd
 import pytest
 
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.data_structure.configs import PropsConfig
-from openalea.metafspm.scene.population import build_population
+from openalea.metafspm.scene.population import Planting, build_population, planting
 
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, default_class_inputs
 from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput
@@ -28,9 +27,8 @@ class TwoRoots(StructuralComponent):
 
 
 def _planting(*overrides, key="root_anatomy"):
-    return pd.DataFrame([dict(plant=f"p{i}", model=None, x=float(i), y=0., z=0., rotation=0.,
-                              scenario={"parameters": {key: o} if o is not None else {}})
-                         for i, o in enumerate(overrides)])
+    return planting([Planting(x=float(i)) for i in range(len(overrides))], None,
+                    plant_scenarios=[{key: o} if o is not None else {} for o in overrides])
 
 
 class OneLeafElement(StructuralComponent):

@@ -12,10 +12,10 @@ traversal of the plant graph): along the main axis, its predecessor; the lateral
 import os
 
 import matplotlib.pyplot as plt
-import pandas as pd
 
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
 from openalea.metafspm.coupling.translator import Translator
+from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
 from openalea.granap.metafspm.architectures import RootAxis
@@ -63,8 +63,7 @@ def layout(g, segments):
 def main():
     scenario = {"root_segments": [[MAIN, SEGMENT, (3 - i) * SEGMENT] for i in range(4)],
                 "root_laterals": [[1, [[LATERAL, SEGMENT, (1 - i) * SEGMENT] for i in range(2)]]]}
-    scene = Scene(pd.DataFrame([dict(plant="root system", model=RootSystem, x=0., y=0., z=0., rotation=0.,
-                                     scenario={"parameters": scenario})]))
+    scene = Scene(planting([Planting()], RootSystem, scenario))
     ds = scene.populations[0].data_structure
     g = ds.mtg
     segments = [int(s) for s in ds.entity_ids("SubOrgan")]

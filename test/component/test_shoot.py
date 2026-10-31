@@ -5,10 +5,8 @@ vessel junctions across the stem-leaf and stem-root links.
 import os
 import sys
 
-import pandas as pd
-
 from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import build_population
+from openalea.metafspm.scene.population import Planting, build_population, planting
 
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.leaf_class import LeafAnatomy
@@ -39,7 +37,7 @@ class ShootAnatomy(GranapAnatomy):
 
 
 def test_stems_leaves_and_roots_get_their_kinds_anatomy_and_are_joined():
-    table = pd.DataFrame([dict(plant="p0", model=None, x=0., y=0., z=0., rotation=0., scenario={"parameters": {}})])
+    table = planting([Planting()], None)
     g, _ = build_population(table, initiators=(SmallShoot, ShootAnatomy))
     g.convert_properties_to_arraydict()
     ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
@@ -77,7 +75,7 @@ def test_leaf_surface_and_stomatal_connections():
     stomatal pore of its sections (network_path 6); the pores are air (wall_air walls, no plasmodesmata, one air link
     to their chamber) with their aperture's width and depth; rebuilding the surface leaves nothing dangling.
     """
-    table = pd.DataFrame([dict(plant="p0", model=None, x=0., y=0., z=0., rotation=0., scenario={"parameters": {}})])
+    table = planting([Planting()], None)
     g, _ = build_population(table, initiators=(TwoElementLeaf, ShootAnatomy))
     g.convert_properties_to_arraydict()
     ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))

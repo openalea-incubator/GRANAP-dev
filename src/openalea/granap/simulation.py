@@ -11,6 +11,8 @@ GRANAP for users: a cross-section generated in a few lines, its tissues as table
     parameters()                                          the parameters: section, field, value, unit, description
     simulate({"cortex": {"n_layers": 3}})                 three cortex layers instead of five
     simulate(preset="for_dicot_root", seed=2)             another preset, other random draws
+    simulate(outputs="outputs")                           the section saved in ./outputs: run.json, scenario.json,
+                                                          Plant/<model>/summaries.csv, frames/ (fspm-TF)
 
 GRANAP's parameters are grouped by section of the anatomy (cortex, stele, xylem, ...): a change is written
 {section: {field: value}}. Lengths are in mm, as GRANAP's; the summary gives cell sizes in µm.
@@ -147,14 +149,21 @@ class Section:
         return ax
 
 
-def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0) -> Section:
+def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, outputs: str = None) -> Section:
     """Generate one root section from *preset*'s parameters (an OrganInputData preset of a root: for_root, the
     monocot root, or for_dicot_root) changed by *parameters* ({section: {field: value}}, lengths in mm), with the
-    random draws of *seed* (the same seed gives the same section)."""
+    random draws of *seed* (the same seed gives the same section). *outputs*: a folder the section is saved in
+    (run.json, the run's status and versions; scenario.json, what it was built with; Plant/<model>/summaries.csv;
+    frames/, the section as an fspm-TF frame), None for none."""
+    from openalea.metafspm.scene.population import Planting, planting
+    from openalea.metafspm.scene.recorder import SceneRecorder
     from openalea.metafspm.scene.scene import Scene
 
     anatomy = {"preset": preset, "seed": int(seed), **{section: dict(fields) for section, fields in
                                                        (parameters or {}).items()}}
-    table = pd.DataFrame([dict(plant="section", model=_plant_model(), x=0., y=0., z=0., rotation=0.,
-                               scenario={"parameters": {"root_anatomy": anatomy}})])
-    return Section(scene=Scene(table), parameters=dict(parameters or {}), preset=preset, seed=int(seed))
+    table = planting([Planting()], _plant_model(), {"root_anatomy": anatomy})
+    recorder = SceneRecorder(outputs, frame_period=1) if outputs is not None else None
+    scene = Scene(table, recorder=recorder)
+    if outputs is not None:
+        scene.simulate(0)                                 # the section's built state, recorded
+    return Section(scene=scene, parameters=dict(parameters or {}), preset=preset, seed=int(seed))

@@ -290,8 +290,8 @@ class GranapAnatomy(StructuralComponent):
 
     Parametrized by each plant's scenario, one dict per kind of segment, on top of GRANAP's preset:
 
-        scenario = {"parameters": {"root_anatomy": {"cortex": {"n_layers": 3}},
-                                   "leaf_anatomy": {"preset": "for_needle", "seed": 42}}}
+        scenario = {"root_anatomy": {"cortex": {"n_layers": 3}},
+                    "leaf_anatomy": {"preset": "for_needle", "seed": 42}}
 
       root_anatomy   root segments (default preset for_root; always generated)
       stem_anatomy   stem elements (default for_monocot_stem; generated when the key is given)

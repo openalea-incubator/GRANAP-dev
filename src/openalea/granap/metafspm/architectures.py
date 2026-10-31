@@ -9,8 +9,7 @@ scenario (the keys below; lengths in m):
     Needle        one leaf organ (a needle) of leaf elements, base to tip
                     leaf_elements: n (1), leaf_element_length (2e-4), leaf_radius (0.6e-3)
 
-    table = pd.DataFrame([dict(plant="p0", model=MyModel, x=0., y=0., z=0., rotation=0.,
-                               scenario={"parameters": {"root_segments": [[0.55e-3, 2e-4, 0.]]}})])
+    table = planting([Planting()], MyModel, {"root_segments": [[0.55e-3, 2e-4, 0.]]})
 """
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.data_structure.configs import PropsConfig

@@ -7,10 +7,9 @@ drawn from the plant graph, coloured by tissue.
 """
 import os
 
-import pandas as pd
-
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
 from openalea.metafspm.coupling.translator import Translator
+from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
 from openalea.granap.metafspm.architectures import RootAxis
@@ -36,8 +35,7 @@ class RootAnatomies(CompositeModel):
 def main():
     # one plant, its scenario: three segments, base to tip (radius, length, distance from the tip), the root preset
     scenario = {"root_segments": [[RADIUS, SEGMENT, (2 - i) * SEGMENT] for i in range(3)]}
-    scene = Scene(pd.DataFrame([dict(plant="root", model=RootAnatomies, x=0., y=0., z=0., rotation=0.,
-                                     scenario={"parameters": scenario})]))
+    scene = Scene(planting([Planting()], RootAnatomies, scenario))
     ds = scene.populations[0].data_structure
     g = ds.mtg
 

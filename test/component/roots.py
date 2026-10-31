@@ -3,10 +3,11 @@ A small root system for the capability tests: a main root of four segments (radi
 (radius 0.3 mm) on its second segment, lengths in m as in metafspm's plant models; distances from the tips set.
 """
 import numpy as np
-import pandas as pd
 
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.data_structure.configs import PropsConfig
+from openalea.metafspm.scene import population
+from openalea.metafspm.scene.population import Planting
 
 SEGMENT = 5e-3                      # m
 MAIN_RADIUS, LATERAL_RADIUS = 0.55e-3, 0.3e-3
@@ -42,5 +43,4 @@ class SmallRootSystem(StructuralComponent):
 
 
 def planting():
-    table = pd.DataFrame([dict(plant="p0", model=None, x=0., y=0., z=0., rotation=0., scenario={"parameters": {}})])
-    return table
+    return population.planting([Planting()], None)

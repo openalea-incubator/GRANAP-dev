@@ -14,12 +14,12 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
 from openalea.metafspm.coupling.translator import Translator
 from openalea.metafspm.data_structure.configs import PropsConfig
+from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
@@ -115,8 +115,7 @@ def layout(g, segments):
 
 
 def main():
-    scene = Scene(pd.DataFrame([dict(plant="seedling", model=Seedling, x=0., y=0., z=0., rotation=0.,
-                                     scenario={"parameters": {"stem_anatomy": {}, "leaf_anatomy": {}}})]))
+    scene = Scene(planting([Planting()], Seedling, {"stem_anatomy": {}, "leaf_anatomy": {}}))
     ds = scene.populations[0].data_structure
     g = ds.mtg
     segments = [int(s) for s in ds.entity_ids("SubOrgan")]
