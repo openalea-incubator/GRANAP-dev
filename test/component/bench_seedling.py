@@ -13,13 +13,11 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from openalea.metafspm.coupling.component import StructuralComponent
-from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import build_population
 
-from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary
 
-from roots import _axis, planting
+from roots import _axis, initiated, planting
 
 N_LATERALS = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 
@@ -45,13 +43,13 @@ def main():
         Anatomy.library.template(key)
     timings["templates (3 classes)"] = time.perf_counter() - start
     start = time.perf_counter()
-    g, _ = build_population(planting(), initiators=(Seedling, Anatomy))
+    population = initiated(planting(), Seedling, Anatomy)
+    g = population.data_structure.structure
     timings["architecture + instantiation"] = time.perf_counter() - start
     start = time.perf_counter()
-    g.convert_properties_to_arraydict()
     timings["arraydict"] = time.perf_counter() - start
     start = time.perf_counter()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    ds = population.data_structure
     timings["DataStructure + junctions"] = time.perf_counter() - start
     start = time.perf_counter()
     view = ds.to_graph_view()

@@ -8,15 +8,13 @@ import numpy as np
 import pytest
 
 from openalea.metafspm.coupling.component import FunctionalComponent, state_variable
-from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import build_population
 from openalea.metafspm.solve.decorator import boundary_set, edge_law, graph_system, node_balance
 
-from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary
 from openalea.granap.metafspm.vessels import CONDUCTING
 
-from roots import SmallRootSystem, planting
+from roots import SmallRootSystem, initiated, planting
 
 DOC = dict(unit="", unit_comment="", description="", min_value=-1e9, max_value=1e9, value_comment="",
            references="", DOI=[])
@@ -32,9 +30,9 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture(scope="module")
 def plant():
-    g, plants = build_population(planting(), initiators=(SmallRootSystem, Anatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    population = initiated(planting(), SmallRootSystem, Anatomy)
+    g, plants = population.data_structure.structure, population.plants
+    ds = population.data_structure
     return g, plants[0], ds
 
 
@@ -109,8 +107,8 @@ def test_the_hydraulic_graph_holds_every_compartment_and_connection(plant):
 @dataclass
 class Hydraulics(FunctionalComponent):
     """A steady potential over the root system: the collar's xylem held at -1, the epidermis exchanging with -0.2."""
-    psi: float = state_variable(**DOC, initialize=-0.5, location="node")
-    flux: float = state_variable(**DOC, initialize=0., location="edge")
+    psi: float = state_variable(**DOC, default=-0.5, location="node")
+    flux: float = state_variable(**DOC, default=0., location="edge")
 
     @graph_system(node_unknowns=["psi"], edge_unknowns=["flux"], solver="newton")
     class _flow:
@@ -129,7 +127,7 @@ class Hydraulics(FunctionalComponent):
 def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
     from openalea.metafspm.coupling.choregrapher import Choregrapher
     g, _, ds = plant
-    Choregrapher().add_simulation_time_step(3600.)
+    Choregrapher()._set_simulation_time_step(3600.)
     tissue = g.property("tissue")
     nodes = ds.entity_ids("node")
     first = _segments(g)[0]
@@ -141,7 +139,7 @@ def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
                          ("soil_psi", np.full(nodes.size, -0.2)), ("collar_psi", np.full(nodes.size, -1.))):
         ds.register(name, values, location="node")
     Hydraulics(data_structure=ds)()
-    B = ds.incidence_matrix()
+    B = ds.to_graph_view().incidence
     import scipy.sparse as sp
     from scipy.sparse.linalg import spsolve
     A = (B @ B.T + sp.diags(0.5 * epidermis)).tolil()

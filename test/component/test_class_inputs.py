@@ -8,12 +8,12 @@ import pytest
 
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.data_structure.configs import PropsConfig
-from openalea.metafspm.scene.population import Planting, build_population, planting
+from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, default_class_inputs
 from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput
 
-from roots import _axis
+from roots import _axis, initiated
 
 
 class TwoRoots(StructuralComponent):
@@ -46,8 +46,9 @@ class OneLeafElement(StructuralComponent):
 def test_plants_parametrized_differently_get_their_own_templates_and_alike_share():
     class Anatomy(GranapAnatomy):
         library = AnatomyLibrary()
-    g, plants = build_population(_planting({"cortex": {"n_layers": 3}}, {"cortex": {"n_layers": 3}}, None),
-                                 initiators=(TwoRoots, Anatomy))
+    population = initiated(_planting({"cortex": {"n_layers": 3}}, {"cortex": {"n_layers": 3}}, None), TwoRoots,
+                           Anatomy)
+    g, plants = population.data_structure.structure, population.plants
     template = g.property("anatomy_template")
     per_plant = [{template[s] for s in g.components_at_scale(p, scale=g.scales.SubOrgan)} for p in plants]
     assert per_plant[0] == per_plant[1] != per_plant[2]          # alike share, the default plant has its own
@@ -61,7 +62,8 @@ def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
         library = AnatomyLibrary()
         root = OrganAnatomy(library, "radius", class_inputs=default_class_inputs("radius") + (layers,))
 
-    g, plants = build_population(_planting(None), initiators=(TwoRoots, Anatomy))
+    population = initiated(_planting(None), TwoRoots, Anatomy)
+    g, plants = population.data_structure.structure, population.plants
     segments = sorted(int(s) for s in g.property("anatomy_class"))
     assert [g.property("anatomy_class")[s][-1] for s in segments] == [4., 2.]
     assert len(Anatomy.library.templates) == 2
@@ -75,8 +77,9 @@ def test_a_scenario_gives_a_kind_of_segment_its_preset():
     without the key, leaf elements get no anatomy."""
     from openalea.granap.metafspm.library import template_by_index
     from openalea.granap.needle_class import NeedleAnatomy
-    g, plants = build_population(_planting({"preset": "for_needle", "seed": 42}, None, key="leaf_anatomy"),
-                                 initiators=(OneLeafElement, GranapAnatomy))
+    population = initiated(_planting({"preset": "for_needle", "seed": 42}, None, key="leaf_anatomy"), OneLeafElement,
+                           GranapAnatomy)
+    g, plants = population.data_structure.structure, population.plants
     template = g.property("anatomy_template")
     with_needle, without = [[template.get(s, -1.) for s in g.components_at_scale(p, scale=g.scales.SubOrgan)]
                             for p in plants]
@@ -87,4 +90,4 @@ def test_a_preset_on_an_explicit_organ_raises():
     class Anatomy(GranapAnatomy):
         root = OrganAnatomy(AnatomyLibrary(), "radius")
     with pytest.raises(ValueError, match="explicit"):
-        build_population(_planting({"preset": "for_dicot_root"}), initiators=(TwoRoots, Anatomy))
+        initiated(_planting({"preset": "for_dicot_root"}), TwoRoots, Anatomy)

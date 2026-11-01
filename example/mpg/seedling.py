@@ -17,7 +17,6 @@ import numpy as np
 
 from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.coupling.translator import Translator
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
@@ -80,7 +79,7 @@ class Seedling(CompositeModel):
 
     def __init__(self, data_structure, time_step):
         self.anatomy = SeedlingAnatomy(data_structure=data_structure, time_step=time_step)
-        self.declare_data_and_couple_components(translator_path=Translator(), components=(self.anatomy,))
+        self.couple(self.anatomy)
 
     def run(self):
         self.anatomy()

@@ -25,12 +25,12 @@ S = ScalesConfig()
 @dataclass
 class Network(FunctionalComponent):
     """Declares GRANAP's network columns, as a hydraulic model would."""
-    section_x: float = state_variable(**DOC, initialize=0., scale=S.Compartment, location="node")
-    wall_length: float = state_variable(**DOC, initialize=0., scale=S.Compartment, location="node")
-    cell_area: float = state_variable(**DOC, initialize=0., scale=S.Compartment, location="node")
-    edge_length: float = state_variable(**DOC, initialize=0., scale=S.Connection, location="edge")
-    edge_dx: float = state_variable(**DOC, initialize=0., scale=S.Connection, location="edge")
-    network_path: float = state_variable(**DOC, initialize=0., scale=S.Connection, location="edge")
+    section_x: float = state_variable(**DOC, default=0., scale=S.Compartment, location="node")
+    wall_length: float = state_variable(**DOC, default=0., scale=S.Compartment, location="node")
+    cell_area: float = state_variable(**DOC, default=0., scale=S.Compartment, location="node")
+    edge_length: float = state_variable(**DOC, default=0., scale=S.Connection, location="edge")
+    edge_dx: float = state_variable(**DOC, default=0., scale=S.Connection, location="edge")
+    network_path: float = state_variable(**DOC, default=0., scale=S.Connection, location="edge")
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +41,7 @@ def section():
     organ.export_to_adjencymatrix()
     graph = organ.graph                                       # GRANAP's view, built before the conversion
     g.convert_properties_to_arraydict()
-    Choregrapher().add_simulation_time_step(3600.)
+    Choregrapher()._set_simulation_time_step(3600.)
     ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment")
     Network(data_structure=ds)
     return organ, g, ds, graph

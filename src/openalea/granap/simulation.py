@@ -74,7 +74,7 @@ def _plant_model():
 
         def __init__(self, data_structure, time_step):
             self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-            self.declare_data_and_couple_components(translator_path=Translator(), components=(self.anatomy,))
+            self.couple(self.anatomy)
 
         def run(self):
             self.anatomy()

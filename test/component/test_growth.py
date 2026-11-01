@@ -8,13 +8,11 @@ import pytest
 
 from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.data_structure.configs import PropsConfig
-from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import build_population
 
-from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary
 
-from roots import MAIN_RADIUS, SEGMENT, SmallRootSystem, planting
+from roots import MAIN_RADIUS, SEGMENT, SmallRootSystem, initiated, planting
 
 LATERAL = (0.6, 0., 0.)
 
@@ -25,10 +23,10 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture
 def plant():
-    Choregrapher().add_simulation_time_step(3600.)
-    g, plants = build_population(planting(), initiators=(SmallRootSystem, Anatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    Choregrapher()._set_simulation_time_step(3600.)
+    population = initiated(planting(), SmallRootSystem, Anatomy)
+    g, plants = population.data_structure.structure, population.plants
+    ds = population.data_structure
     ds.register("solute", np.arange(ds.n_nodes(), dtype=float), location="node", on_grow="inherit", default=-1.)
     return g, ds, Anatomy(data_structure=ds)
 

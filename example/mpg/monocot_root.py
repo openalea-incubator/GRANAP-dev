@@ -8,7 +8,6 @@ drawn from the plant graph, coloured by tissue.
 import os
 
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.coupling.translator import Translator
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
@@ -26,7 +25,7 @@ class RootAnatomies(CompositeModel):
 
     def __init__(self, data_structure, time_step):
         self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-        self.declare_data_and_couple_components(translator_path=Translator(), components=(self.anatomy,))
+        self.couple(self.anatomy)
 
     def run(self):
         self.anatomy()

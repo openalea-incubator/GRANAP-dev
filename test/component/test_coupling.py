@@ -11,14 +11,12 @@ import pytest
 from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.coupling.component import FunctionalComponent, input_variable
 from openalea.metafspm.data_structure.configs import ScalesConfig
-from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import build_population
 
 from openalea.granap.metafspm.columns import JUNCTION_PATH, PATH_CODES
-from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary
 
-from roots import SEGMENT, SmallRootSystem, planting
+from roots import SEGMENT, SmallRootSystem, initiated, planting
 
 S = ScalesConfig()
 DOC = dict(unit="", unit_comment="", description="", min_value=-1e12, max_value=1e12, value_comment="",
@@ -42,10 +40,10 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture(scope="module")
 def coupled():
-    Choregrapher().add_simulation_time_step(3600.)
-    g, _ = build_population(planting(), initiators=(SmallRootSystem, Anatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    Choregrapher()._set_simulation_time_step(3600.)
+    population = initiated(planting(), SmallRootSystem, Anatomy)
+    g = population.data_structure.structure
+    ds = population.data_structure
     anatomy = Anatomy(data_structure=ds)
     anatomy()                                                    # one step: the 3D quantities computed
     return g, ds, anatomy, HydraulicsInputs(data_structure=ds)

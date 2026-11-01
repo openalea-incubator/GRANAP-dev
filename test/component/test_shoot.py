@@ -5,18 +5,18 @@ vessel junctions across the stem-leaf and stem-root links.
 import os
 import sys
 
-from openalea.metafspm.data_structure.data_api import MPGDataStructure
-from openalea.metafspm.scene.population import Planting, build_population, planting
+from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.leaf_class import LeafAnatomy
-from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
+from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary, preset_parameters
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "example", "mpg"))
 from seedling import _chain, _organ                                                    # noqa: E402
 
 from openalea.metafspm.coupling.component import StructuralComponent                  # noqa: E402
+from roots import initiated                                                            # noqa: E402
 
 
 class SmallShoot(StructuralComponent):
@@ -38,9 +38,9 @@ class ShootAnatomy(GranapAnatomy):
 
 def test_stems_leaves_and_roots_get_their_kinds_anatomy_and_are_joined():
     table = planting([Planting()], None)
-    g, _ = build_population(table, initiators=(SmallShoot, ShootAnatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    population = initiated(table, SmallShoot, ShootAnatomy)
+    g = population.data_structure.structure
+    ds = population.data_structure
     L, labels = g.labels.SubOrgan, g.property("label")
     segments = sorted(int(v) for v in g.property("anatomy_class"))
     kinds = {s: labels[s] for s in segments}
@@ -76,9 +76,9 @@ def test_leaf_surface_and_stomatal_connections():
     to their chamber) with their aperture's width and depth; rebuilding the surface leaves nothing dangling.
     """
     table = planting([Planting()], None)
-    g, _ = build_population(table, initiators=(TwoElementLeaf, ShootAnatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    population = initiated(table, TwoElementLeaf, ShootAnatomy)
+    g = population.data_structure.structure
+    ds = population.data_structure
     L, s = g.labels.SubOrgan, g.scales
     labels = g.property("label")
     leaves = sorted(int(v) for v in g.property("anatomy_class") if labels[int(v)] == L.LeafElement)

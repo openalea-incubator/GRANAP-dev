@@ -26,16 +26,15 @@ def test_a_lateral_is_joined_to_the_segment_it_branches_on():
     """RootAxis's laterals: the first segment's linked parent is its bearer, on another axis, and the DataStructure
     joins their sections' xylem and phloem."""
     import numpy as np
-    from openalea.metafspm.data_structure.data_api import MPGDataStructure
-    from openalea.metafspm.scene.population import Planting, build_population, planting
+    from openalea.metafspm.scene.population import Planting, planting
     from openalea.granap.metafspm.architectures import RootAxis
-    from openalea.granap.metafspm.component import junction_rules
+    from roots import initiated
     scenario = {"root_segments": [[0.55e-3, 2e-4, 0.01], [0.55e-3, 2e-4, 0.]],
                 "root_laterals": [[0, [[0.55e-3, 2e-4, 0.]]]]}
     table = planting([Planting()], None, scenario)
-    g, _ = build_population(table, initiators=(RootAxis, GranapAnatomy))
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment", wiring=junction_rules(g))
+    population = initiated(table, RootAxis, GranapAnatomy)
+    g = population.data_structure.structure
+    ds = population.data_structure
     GranapAnatomy(data_structure=ds)
     main, _, lateral = [int(s) for s in ds.entity_ids("SubOrgan")]
     assert g.linked_parent(lateral, g.scales.SubOrgan) == main

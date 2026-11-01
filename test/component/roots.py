@@ -44,3 +44,17 @@ class SmallRootSystem(StructuralComponent):
 
 def planting():
     return population.planting([Planting()], None)
+
+
+def initiated(table, *initiators, time_step: float = 3600.):
+    """The plants of *table* built by *initiators* (a root system or a shoot, then GRANAP's anatomies), their
+    Compartments wired at the segments' junctions, in one MPGDataStructure: metafspm's population_data_structure with
+    a model of no component (the tests build theirs on population.data_structure)."""
+    from openalea.granap.metafspm.component import junction_rules
+
+    def __init__(self, data_structure, time_step):
+        self.components = []
+
+    model = type("Initiated", (), dict(initiators=tuple(initiators), nodes="Compartment",
+                                       wiring=staticmethod(junction_rules), __init__=__init__, run=lambda self: None))
+    return population.population_data_structure(table, model, time_step=time_step)
