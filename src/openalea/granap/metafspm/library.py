@@ -190,13 +190,17 @@ class Template:
                    rings={r: boundary[int(p)] for r, p in enumerate(protoplasts) if int(p) in boundary},
                    organ=organ)
 
-    def section_template(self, extend=None, name: str = ""):
+    def section_template(self, extend=None, name: str = "", transform=None):
         """
         The template as metafspm's SectionTemplate (data_structure.instances), for instanced anatomies: one copy
         instantiated in a scratch MPG, its pores' aperture unset (NaN, as update_anatomies sets a copy's), then
         *extend*(g, segment, written) (e.g. a root section's soil node, created as on a copy; *name* tells the
-        variants apart), captured. Made once per variant.
+        variants apart), captured, then *transform*(captured) when given (e.g. a condensed section). Made once per
+        variant.
         """
+        if name not in self._sections and transform is not None:
+            base = name.rsplit("+", 1)[0]
+            self._sections[name] = transform(self.section_template(extend, base), ("granap", self.index, name))
         if name not in self._sections:
             from openalea.metafspm.data_structure.instances import SectionTemplate
             from openalea.metafspm.data_structure.mpg import MPG
@@ -214,11 +218,11 @@ class Template:
                                                            key=("granap", self.index, name))
         return self._sections[name]
 
-    def instance(self, g, segment, extend=None, name: str = "") -> dict:
+    def instance(self, g, segment, extend=None, name: str = "", transform=None) -> dict:
         """The segment's instance of the section (g.add_instance; *extend*, *name*: section_template's): the vids a
         copy would get, by kind, without creating its vertices."""
         from openalea.metafspm.data_structure.instances import ANCHOR
-        template = self.section_template(extend, name)
+        template = self.section_template(extend, name, transform)
         vids = np.asarray(g.add_instance(segment, template), dtype=np.int64)
         s = g.scales
         compartment = template.scale == s.Compartment
@@ -227,6 +231,10 @@ class Template:
                "apoplast": vids[compartment & (template.complex == ANCHOR)].tolist(),
                "connections": vids[template.scale == s.Connection].tolist(), "template": self.index}
         return out
+
+    def full_section(self, name: str = "soil"):
+        """The full SectionTemplate a condensed variant was made from (its cells, for reconstructing them)."""
+        return self._sections[name]
 
     def instantiate(self, g, segment) -> dict:
         """The segment's own copy of the section, created in bulk; returns its vids by kind."""

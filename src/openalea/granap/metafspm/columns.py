@@ -29,6 +29,7 @@ PATH_CODES = {"membrane": 0, "wall_air": 1, "wall": 2, "plasmodesmata": 3, "air_
 JUNCTION_PATH = 5                # the axial junctions between successive sections (created by the wiring)
 STOMATAL_PATH = 6                # a stomatal pore to its leaf organ's surface node
 SOIL_PATH = 7                    # a root section's border wall or junction to its soil node
+EQUIVALENT_PATH = 8              # a condensed section's equivalent Connection between two of its kept nodes
 PATHS = {code: path for path, code in PATH_CODES.items()}
 NAN = float("nan")
 
