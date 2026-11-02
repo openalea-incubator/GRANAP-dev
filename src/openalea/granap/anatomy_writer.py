@@ -3,6 +3,7 @@ import io
 import math
 import numpy as np
 import shapely as sp
+from dataclasses import dataclass
 from typing import Dict, Any, Union, List, Optional
 from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.affinity import scale
@@ -627,6 +628,175 @@ class AnatomyWriter:
             f.write("\n".join(geo_lines))
         print(f"GEO saved to {path}")
 
+
+@dataclass
+class WallRegistry:
+    """The walls and junctions of a 2D section (``build_wall_registry``).
+
+    ``walls``: ``{wall_key: {"id", "junc_start", "junc_end", "midpoint",
+    "length", "wall_thickness", "cells", ["shape_signature"]}}`` in id order,
+    ``cells`` being ``cells_gdf`` index labels (one for an outer wall, two for a
+    shared one).  ``junctions``: the junction vertices the walls use, sorted;
+    ``junction_ids`` maps each to its position.  ``cells_gdf``: the section's
+    cells with a valid geometry -- the ones the walls refer to."""
+    cells_gdf: Any
+    walls: Dict[tuple, dict]
+    junctions: List[tuple]
+    junction_ids: Dict[tuple, int]
+
+
+def build_wall_registry(cells_gdf, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS
+                        ) -> Optional[WallRegistry]:
+    """Walls and junctions of a 2D section: phases 0-4 of
+    :meth:`NetworkExporter.export`, shared with the 3D network.
+
+    Snaps the cells' vertices into one topology
+    (:meth:`CellGenerator._build_topology`), walks each cell boundary between
+    consecutive junctions to define the walls (one per cell-pair interface, or
+    per outer stretch) and gives each wall its thickness: the sum over the cells
+    it bounds of ``cell_wall_thickness[type]``, plus ``"outerwall"`` for an outer
+    wall.  ``None`` if no cell has a boundary.
+    """
+    # Filter to cells with valid (non-null, non-empty) geometry — must match
+    # the same filter used in write_to_xml so that both paths call
+    # _build_topology with exactly the same polygon set, guaranteeing
+    # identical KD-tree snapping results and canonical junction coordinates.
+    valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
+        lambda g: g is not None and not g.is_empty
+    )
+    cells_gdf = cells_gdf[valid_mask]
+
+    # Phases 0–2 — snapping, topology maps, junction detection
+    polys    = list(cells_gdf["geometry"])
+    cell_ids = list(cells_gdf.index)
+
+    # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
+    # keep their walls from collapsing into a single node.
+    # (see CellGenerator._build_topology's ``protect_ids``).
+    protect_ids = (
+        set(cells_gdf.index[cells_gdf["protect_topology"]])
+        if "protect_topology" in cells_gdf.columns else None
+    )
+
+    def get_thickness(c_type: str) -> float:
+        if isinstance(cell_wall_thickness, dict):
+            return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
+        return float(cell_wall_thickness)
+
+    cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
+        CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
+    )
+
+    if not cell_vkeys:
+        return None
+
+    # Phase 3 — walk cell boundaries to define walls
+    # A "wall" = the polyline segment between two consecutive
+    # junction vertices along one cell boundary.  Two cells that
+    # share the same (juncA, juncB) segment share a wall.
+    wall_registry: Dict[tuple, dict] = {}  # wall_key -> wall info
+    next_wall_id = 0
+
+    for row_idx, vkeys in cell_vkeys.items():
+        n = len(vkeys)
+        junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
+
+        if len(junc_positions) < 2:
+            # Fewer than 2 junctions -> treat entire boundary as one wall
+            wall_key = tuple(sorted(vkeys))
+            if wall_key not in wall_registry:
+                length = sum(
+                    np.hypot(vkeys[(k+1) % n][0] - vkeys[k][0],
+                             vkeys[(k+1) % n][1] - vkeys[k][1])
+                    for k in range(n)
+                )
+                mid_x = np.mean([v[0] for v in vkeys])
+                mid_y = np.mean([v[1] for v in vkeys])
+                wall_registry[wall_key] = {
+                    "id": next_wall_id,
+                    "junc_start": vkeys[0],
+                    "junc_end": vkeys[0],
+                    "midpoint": (mid_x, mid_y),
+                    "length": length,
+                    "wall_thickness": 0.0,
+                    "cells": [],
+                }
+                next_wall_id += 1
+            if row_idx not in wall_registry[wall_key]["cells"]:
+                wall_registry[wall_key]["cells"].append(row_idx)
+            continue
+
+        for jp in range(len(junc_positions)):
+            start_idx = junc_positions[jp]
+            end_idx = junc_positions[(jp + 1) % len(junc_positions)]
+
+            # Collect vertices along the segment
+            segment: List[tuple] = []
+            i = start_idx
+            while True:
+                segment.append(vkeys[i])
+                if i == end_idx:
+                    break
+                i = (i + 1) % n
+
+            if len(segment) < 2:
+                continue
+
+            junc_start = segment[0]
+            junc_end = segment[-1]
+
+            shape_signature = tuple(vk for vk in segment[1:-1] if vk in protected_shape_set)
+
+            wall_key = (tuple(sorted((junc_start, junc_end))), shape_signature,)
+
+            if wall_key not in wall_registry:
+                length = sum(
+                    np.hypot(segment[k+1][0] - segment[k][0],
+                             segment[k+1][1] - segment[k][1])
+                    for k in range(len(segment) - 1)
+                )
+                mid_x = np.mean([v[0] for v in segment])
+                mid_y = np.mean([v[1] for v in segment])
+                wall_registry[wall_key] = {
+                    "id": next_wall_id,
+                    "junc_start": junc_start,
+                    "junc_end": junc_end,
+                    "midpoint": (mid_x, mid_y),
+                    "length": length,
+                    "wall_thickness": 0.0,
+                    "cells": [],
+                    "shape_signature": shape_signature,
+                }
+                next_wall_id += 1
+
+            if row_idx not in wall_registry[wall_key]["cells"]:
+                wall_registry[wall_key]["cells"].append(row_idx)
+
+    # Compute true wall_thickness based on adjacent cells
+    for wd in wall_registry.values():
+        w_thick = 0.0
+        for r in wd["cells"]:
+            row = cells_gdf.loc[r]
+            c_type = row.get("type", "")
+            w_thick += get_thickness(c_type)
+        
+        if len(wd["cells"]) == 1:
+            w_thick += get_thickness("outerwall")
+            
+        wd["wall_thickness"] = w_thick
+
+    # Only keep junctions actually referenced by walls
+    used_junctions: set = set()
+    for wd in wall_registry.values():
+        used_junctions.add(wd["junc_start"])
+        used_junctions.add(wd["junc_end"])
+    junction_list = sorted(used_junctions)
+    junction_vk_to_id = {vk: i for i, vk in enumerate(junction_list)}
+
+    return WallRegistry(cells_gdf=cells_gdf, walls=wall_registry,
+                        junctions=junction_list, junction_ids=junction_vk_to_id)
+
+
 class NetworkExporter:
     """
     Class to export Organ anatomy to an AbstractNetwork topological graph.
@@ -641,22 +811,19 @@ class NetworkExporter:
 
         Algorithm
         ---------
-        1. Delegate vertex snapping, vertex/edge maps, and junction
-           detection to :meth:`CellGenerator._build_topology`.
-        2. Walk each cell boundary between consecutive junctions to
-           define **walls** (one wall per cell-pair interface).
-        3. Assign MECHA-compatible node indices and build the graph.
+        1. :func:`build_wall_registry`: vertex snapping and junction
+           detection (:meth:`CellGenerator._build_topology`), then a walk of
+           each cell boundary between consecutive junctions to define
+           **walls** (one wall per cell-pair interface), with thickness.
+        2. Assign MECHA-compatible node indices and build the graph.
         """
-        cells_gdf = self.organ.generate_cells()
-
-        # Filter to cells with valid (non-null, non-empty) geometry — must match
-        # the same filter used in write_to_xml so that both paths call
-        # _build_topology with exactly the same polygon set, guaranteeing
-        # identical KD-tree snapping results and canonical junction coordinates.
-        valid_mask = cells_gdf["geometry"].notna() & cells_gdf["geometry"].apply(
-            lambda g: g is not None and not g.is_empty
-        )
-        cells_gdf = cells_gdf[valid_mask]
+        reg = build_wall_registry(self.organ.generate_cells(), cell_wall_thickness)
+        if reg is None:
+            return
+        cells_gdf = reg.cells_gdf
+        wall_registry = reg.walls
+        junction_list = reg.junctions
+        junction_vk_to_id = reg.junction_ids
 
         # Mesophyll air-space nodes requiring special rewiring
         protected_air_cells = set(
@@ -665,137 +832,8 @@ class NetworkExporter:
                            ]  
         )
 
-
-        # Phases 0–2 — snapping, topology maps, junction detection
-        polys    = list(cells_gdf["geometry"])
-        cell_ids = list(cells_gdf.index)
-
-        # Cells flagged ``protect_topology`` (needle mesophyll air-space rhombi)
-        # keep their walls from collapsing into a single node.
-        # (see CellGenerator._build_topology's ``protect_ids``).
-        protect_ids = (
-            set(cells_gdf.index[cells_gdf["protect_topology"]])
-            if "protect_topology" in cells_gdf.columns else None
-        )
-
-        def get_thickness(c_type: str) -> float:
-            if isinstance(cell_wall_thickness, dict):
-                return float(cell_wall_thickness.get(c_type, cell_wall_thickness.get("default", 1)))
-            return float(cell_wall_thickness)
-
-        cell_vkeys, _, edge_to_cells, junction_set, protected_shape_set = (
-            CellGenerator._build_topology(polys, cell_ids, protect_ids=protect_ids)
-        )
-
-        if not cell_vkeys:
-            return
-
-        # Phase 3 — walk cell boundaries to define walls
-        # A "wall" = the polyline segment between two consecutive
-        # junction vertices along one cell boundary.  Two cells that
-        # share the same (juncA, juncB) segment share a wall.
-        wall_registry: Dict[tuple, dict] = {}  # wall_key -> wall info
-        next_wall_id = 0
-
-        for row_idx, vkeys in cell_vkeys.items():
-            n = len(vkeys)
-            junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
-
-            if len(junc_positions) < 2:
-                # Fewer than 2 junctions -> treat entire boundary as one wall
-                wall_key = tuple(sorted(vkeys))
-                if wall_key not in wall_registry:
-                    length = sum(
-                        np.hypot(vkeys[(k+1) % n][0] - vkeys[k][0],
-                                 vkeys[(k+1) % n][1] - vkeys[k][1])
-                        for k in range(n)
-                    )
-                    mid_x = np.mean([v[0] for v in vkeys])
-                    mid_y = np.mean([v[1] for v in vkeys])
-                    wall_registry[wall_key] = {
-                        "id": next_wall_id,
-                        "junc_start": vkeys[0],
-                        "junc_end": vkeys[0],
-                        "midpoint": (mid_x, mid_y),
-                        "length": length,
-                        "wall_thickness": 0.0,
-                        "cells": [],
-                    }
-                    next_wall_id += 1
-                if row_idx not in wall_registry[wall_key]["cells"]:
-                    wall_registry[wall_key]["cells"].append(row_idx)
-                continue
-
-            for jp in range(len(junc_positions)):
-                start_idx = junc_positions[jp]
-                end_idx = junc_positions[(jp + 1) % len(junc_positions)]
-
-                # Collect vertices along the segment
-                segment: List[tuple] = []
-                i = start_idx
-                while True:
-                    segment.append(vkeys[i])
-                    if i == end_idx:
-                        break
-                    i = (i + 1) % n
-
-                if len(segment) < 2:
-                    continue
-
-                junc_start = segment[0]
-                junc_end = segment[-1]
-
-                shape_signature = tuple(vk for vk in segment[1:-1] if vk in protected_shape_set)
-
-                wall_key = (tuple(sorted((junc_start, junc_end))), shape_signature,)
-
-                if wall_key not in wall_registry:
-                    length = sum(
-                        np.hypot(segment[k+1][0] - segment[k][0],
-                                 segment[k+1][1] - segment[k][1])
-                        for k in range(len(segment) - 1)
-                    )
-                    mid_x = np.mean([v[0] for v in segment])
-                    mid_y = np.mean([v[1] for v in segment])
-                    wall_registry[wall_key] = {
-                        "id": next_wall_id,
-                        "junc_start": junc_start,
-                        "junc_end": junc_end,
-                        "midpoint": (mid_x, mid_y),
-                        "length": length,
-                        "wall_thickness": 0.0,
-                        "cells": [],
-                        "shape_signature": shape_signature,
-                    }
-                    next_wall_id += 1
-
-                if row_idx not in wall_registry[wall_key]["cells"]:
-                    wall_registry[wall_key]["cells"].append(row_idx)
-
-        # Compute true wall_thickness based on adjacent cells
-        for wd in wall_registry.values():
-            w_thick = 0.0
-            for r in wd["cells"]:
-                row = cells_gdf.loc[r]
-                c_type = row.get("type", "")
-                w_thick += get_thickness(c_type)
-            
-            if len(wd["cells"]) == 1:
-                w_thick += get_thickness("outerwall")
-                
-            wd["wall_thickness"] = w_thick
-
         # Phase 4 — assign MECHA-compatible node indices
         network.n_walls = len(wall_registry)
-
-        # Only keep junctions actually referenced by walls
-        used_junctions: set = set()
-        for wd in wall_registry.values():
-            used_junctions.add(wd["junc_start"])
-            used_junctions.add(wd["junc_end"])
-        junction_list = sorted(used_junctions)
-        junction_vk_to_id = {vk: i for i, vk in enumerate(junction_list)}
-
         network.n_junctions = len(junction_list)
         network.n_cells = len(cells_gdf)
 

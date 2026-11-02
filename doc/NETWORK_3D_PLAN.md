@@ -1,6 +1,6 @@
 # 3D hydraulic network from the extruded section — plan
 
-Status: **P0 done (2026-11-02)**, P1–P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
+Status: **P0, P1 done (2026-11-02)**, P2–P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
 (generic / monocot / dicot / woody); stems and leaves checked afterwards; needle excluded.
 
 ## Goal
@@ -124,7 +124,12 @@ sees the whole geometry; clipped first/last rows can be very thin (no minimum ye
   index of the cell table the topology is built from (the gdf, after its valid-geometry
   filter).
 
-**P1 — share the 2D wall step (`anatomy_writer.py`)**
+**P1 — share the 2D wall step (`anatomy_writer.py`)** — DONE.
+`build_wall_registry(cells_gdf, cell_wall_thickness) -> WallRegistry(cells_gdf, walls,
+junctions, junction_ids)`, module-level next to `NetworkExporter`; the code was moved
+verbatim. The 2D graph (nodes, edges, attributes, `_wall_to_cells`) is identical
+before/after on monocot root, dicot root, dicot stem, dicot leaf and needle; full suite
+179 passed. Tests in `test/test_network_3d.py`.
 - Move phases 0–4 of `NetworkExporter.export` (topology, junction walk, wall registry,
   thickness) into a reusable `build_wall_registry(cells_gdf, cell_wall_thickness)`.
   The needle-specific parts (protected air spaces, `air_link`) stay in `export`.
