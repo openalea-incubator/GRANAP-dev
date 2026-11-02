@@ -336,7 +336,9 @@ class Organ(AbstractNetwork, ABC):
     def generate_cells_3d(self, n_axial_repeats: float = 8.0,
                           default_axial_height: Optional[float] = None,
                           aerenchyma_mode: str = "before",
-                          seed: Optional[int] = None) -> Cells3DResult:
+                          seed: Optional[int] = None,
+                          axial_heights: Optional[Dict[str, float]] = None,
+                          segment_length: Optional[float] = None) -> Cells3DResult:
         """Build a 3D model of this organ by extruding its 2D cross-section.
 
         Generates a fresh 2D cross-section — *ordinary* intercellular space
@@ -354,10 +356,17 @@ class Organ(AbstractNetwork, ABC):
 
         Args:
             n_axial_repeats: segment length as a multiple of the tallest
-                ordinary tissue's own axial height.
+                ordinary tissue's own axial height (unless ``segment_length``).
             default_axial_height: override for any tissue whose own
                 ``axial_height`` isn't explicitly configured (else each
                 falls back to ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``).
+            axial_heights: row height per cell type, e.g.
+                ``{"cortex": 0.12, "stele": 0.08, "metaxylem": 0.4}``; wins
+                over the layer's ``axial_height``, so cells of one layer can
+                differ. For a vessel type it is the element length (vessel
+                elements in series) instead of one full-span tube.
+            segment_length: length of the segment along Z; overrides
+                ``n_axial_repeats``.
             aerenchyma_mode: when aerenchyma is applied relative to the
                 extrusion. ``"before"`` (default) builds it in 2D and extrudes
                 each lacuna as one full-span prism — continuous axial
@@ -370,7 +379,9 @@ class Organ(AbstractNetwork, ABC):
         """
         return _generate_cells_3d(self, n_axial_repeats=n_axial_repeats,
                                   default_axial_height=default_axial_height,
-                                  aerenchyma_mode=aerenchyma_mode, seed=seed)
+                                  aerenchyma_mode=aerenchyma_mode, seed=seed,
+                                  axial_heights=axial_heights,
+                                  segment_length=segment_length)
 
     def retag_cells(self, old_tag: str, new_tag: str) -> int:
         """Rename every cell tagged ``old_tag`` to ``new_tag``.

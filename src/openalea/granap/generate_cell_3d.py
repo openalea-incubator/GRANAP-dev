@@ -24,17 +24,33 @@ Every cell type goes through the same extrusion loop — the only thing that
 differs per type is its axial "row height":
 
   - Ordinary tissue (epidermis, cortex, endodermis, pericycle, stele, ...):
-    its own axial_height (explicit, or DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter),
-    repeated along Z — each repeat is a distinct output cell, with its OWN
-    random Z-phase so neighbouring cells' row boundaries don't all land on the
-    same plane (the "height shift inside the same tissue" that avoids a
-    barcode-striped look without needing a new 2D tessellation per row).
+    its own axial height, repeated along Z — each repeat is a distinct output
+    cell, with its OWN random Z-phase so neighbouring cells' row boundaries
+    don't all land on the same plane (the "height shift inside the same tissue"
+    that avoids a barcode-striped look without needing a new 2D tessellation
+    per row).
   - Axially continuous structures (vessels, sieve elements, and — in
     ``aerenchyma_mode="before"`` — aerenchyma lacunae): row height = the whole
     segment span, so each gets exactly one extrusion covering the full height,
     using its REAL 2D shape (not a synthetic circle), since the 2D vascular
     recipe already merges each vessel's border points into one true polygon in
     ``Organ.all_cells``.
+
+The height of a cell is resolved per cell TYPE, first hit wins:
+
+  1. ``axial_heights[type]`` — so cells sharing one layer can differ (the stele
+     layer holds stele parenchyma, protoxylem, metaxylem and phloem). Given for
+     an axially continuous type, it cuts that type into elements in series
+     (vessel elements joined by end walls) instead of one full-span prism.
+  2. an axially continuous type: the whole segment (it does NOT take the height
+     of the layer it sits in — a vessel is not cut at the stele's cell height);
+  3. the layer's own ``axial_height`` parameter;
+  4. ``default_axial_height``;
+  5. ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``.
+
+Every extruded cell keeps the index of its 2D cell (``cell_2d``, its position in
+``Result.section``), its row along Z and its z-interval, so the 3D cells can be
+linked back to the 2D walls and junctions (the 3D network).
 
 "No tissue above/behind a vessel" falls out for free: every extruded row
 reuses the SAME 2D cross-section, which already excludes vascular footprints
@@ -77,19 +93,24 @@ chambers are extruded full-span along with the aerenchyma; use ``"after"``
 (or ``"none"``) on leaf/needle if that is not what you want.
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from shapely.geometry import Polygon
 
 from openalea.granap.mesh_utils_3d import write_obj, Mesh
 
-# Vessel/sieve-element type tags across the recipes (root/stem/leaf, monocot +
-# dicot): one extrusion spanning the whole segment, not repeated rows.
+log = logging.getLogger(__name__)
+
+# Axially continuous type tags across the recipes (root/stem/leaf, monocot +
+# dicot): one extrusion spanning the whole segment, not repeated rows, unless
+# axial_heights gives them an element length.  Fibres (sclerenchyma) and ducts
+# run the length of a segment too.
 VESSEL_TYPES = {
     "xylem", "metaxylem", "protoxylem", "phloem", "sieve element", "sieve tube",
-    "companion cell",
+    "companion cell", "companion_cell", "sclerenchyma", "duct", "resin duct",
 }
 
 # The tag Organ.add_aerenchyma / the stomatal recipes give to air.
@@ -107,9 +128,19 @@ DEFAULT_AXIAL_HEIGHT_RATIO = 5.0
 
 @dataclass
 class Cells3DResult:
-    cells: List[dict]   # [{"type", "vertices", "faces", "volume"}]
+    # [{"type", "vertices", "faces", "volume", "cell_2d", "row", "z0", "z1"}]
+    # cell_2d: index of the 2D cell in ``section``; row: 0, 1, ... from z_min
+    # along that 2D cell's file (one row for a full-span cell).
+    cells: List[dict]
     z_min: float
     z_max: float
+    # The 2D section the cells were extruded from (the organ's cell table at
+    # build time, without intercellular space): the source of the walls and
+    # junctions of the 3D network.  None for results built without it.
+    section: Any = None
+    # How each type's height was resolved: {type: "axial_heights" | "layer" |
+    # "default_axial_height" | "full span" | "diameter ratio"}.
+    height_sources: Dict[str, str] = field(default_factory=dict)
 
     def export_obj(self, path: str) -> None:
         by_type: Dict[str, List[Mesh]] = {}
@@ -150,16 +181,26 @@ def extrude_polygon(polygon: Polygon, z0: float, z1: float) -> Mesh:
     return vertices, faces
 
 
-def _resolve_axial_height(cell_diameter: float, layer_axial_height: Optional[float],
-                          default_axial_height: Optional[float]) -> float:
-    """First configured height wins: the layer's own, then the caller's
-    default, then a multiple of this cell's diameter. Explicit ``is not None``
-    checks — a configured height of 0 must not silently fall through."""
+def _resolve_axial_height(cell_type: str, cell_diameter: float,
+                          layer_axial_height: Optional[float],
+                          default_axial_height: Optional[float],
+                          axial_heights: Optional[Dict[str, float]] = None,
+                          full_span_types: frozenset = frozenset()) -> Tuple[Optional[float], str]:
+    """``(height, source)`` of a cell's rows; height ``None`` = one full-span prism.
+
+    First configured height wins: ``axial_heights[cell_type]``, the layer's own,
+    the caller's default; then a full-span type spans the segment and any other
+    type takes a multiple of its diameter.  Explicit ``is not None`` checks — a
+    configured height of 0 must not silently fall through."""
+    if axial_heights and axial_heights.get(cell_type) is not None:
+        return float(axial_heights[cell_type]), "axial_heights"
+    if cell_type in full_span_types:
+        return None, "full span"
     if layer_axial_height is not None:
-        return layer_axial_height
+        return layer_axial_height, "layer"
     if default_axial_height is not None:
-        return default_axial_height
-    return cell_diameter * DEFAULT_AXIAL_HEIGHT_RATIO
+        return default_axial_height, "default_axial_height"
+    return cell_diameter * DEFAULT_AXIAL_HEIGHT_RATIO, "diameter ratio"
 
 
 def _aerenchyma_tissues(organ) -> List[str]:
@@ -216,7 +257,9 @@ def _apply_aerenchyma_after(cells: List[dict], organ, requested: float, rng) -> 
 def generate_cells_3d(organ, n_axial_repeats: float = 8.0,
                       default_axial_height: Optional[float] = None,
                       aerenchyma_mode: str = "before",
-                      seed: Optional[int] = None) -> Cells3DResult:
+                      seed: Optional[int] = None,
+                      axial_heights: Optional[Dict[str, float]] = None,
+                      segment_length: Optional[float] = None) -> Cells3DResult:
     """Build a 3D segment of ``organ`` by stacking literal copies of each 2D
     cell's polygon along Z at its own tissue-type height.
 
@@ -234,8 +277,13 @@ def generate_cells_3d(organ, n_axial_repeats: float = 8.0,
         raise ValueError(
             f"aerenchyma_mode must be one of {AERENCHYMA_MODES}, got {aerenchyma_mode!r}"
         )
+    bad = {t: h for t, h in (axial_heights or {}).items() if h is not None and h <= 0}
+    if bad:
+        raise ValueError(f"axial_heights must be > 0, got {bad}")
+    if segment_length is not None and segment_length <= 0:
+        raise ValueError(f"segment_length must be > 0, got {segment_length}")
 
-    rng = np.random.default_rng(seed) if seed is not None else organ.rng
+    rng =np.random.default_rng(seed) if seed is not None else organ.rng
 
     aerenchyma_params = organ.aerenchyma_params or {}
     saved_ics = organ.intercellular_spaces_params
@@ -256,7 +304,10 @@ def generate_cells_3d(organ, n_axial_repeats: float = 8.0,
             aerenchyma_params["aerenchyma_proportion"] = 0.0
 
         organ._invalidate_geometry()
-        organ.generate_cells()
+        # Kept for the result: _invalidate_geometry() in the finally below only
+        # drops the organ's reference, this table stays as built.  Its rows are
+        # organ.all_cells.cells in order, so a cell's position there is its index.
+        section = organ.generate_cells()
 
         layers_polygons = organ.generate_layer_polygons()
         layer_axial_height = {i: lp.get("axial_height") for i, lp in enumerate(layers_polygons)}
@@ -267,43 +318,63 @@ def generate_cells_3d(organ, n_axial_repeats: float = 8.0,
         full_span_types = set(VESSEL_TYPES)
         if aerenchyma_mode == "before":
             full_span_types.add(AIR_SPACE_TYPE)
+        full_span_types = frozenset(full_span_types)
+
+        def resolve(c):
+            return _resolve_axial_height(c.type, c.diameter, layer_axial_height.get(c.id_layer),
+                                         default_axial_height, axial_heights, full_span_types)
+
+        resolved = [resolve(c) for c in organ.all_cells.cells]
+        height_sources: Dict[str, str] = {}
+        for c, (_, source) in zip(organ.all_cells.cells, resolved):
+            height_sources.setdefault(c.type, source)
+        fallback = sorted(t for t, s in height_sources.items()
+                          if s in ("diameter ratio", "default_axial_height"))
+        if fallback:
+            log.info("generate_cells_3d: no axial height set for %s; using %s.",
+                     ", ".join(fallback),
+                     "default_axial_height" if default_axial_height is not None
+                     else f"{DEFAULT_AXIAL_HEIGHT_RATIO:g} x cell diameter")
 
         # Segment height: sized off the tallest ordinary tissue's own
         # axial_height (full-span types don't count -- their "height" is the
         # whole span by definition, so including them would be circular).
-        heights = [
-            _resolve_axial_height(c.diameter, layer_axial_height.get(c.id_layer), default_axial_height)
-            for c in organ.all_cells.cells
-            if c.type not in full_span_types
-        ]
-        base_height = max(heights) if heights else 0.02
-        z_span = n_axial_repeats * base_height
+        if segment_length is not None:
+            z_span = float(segment_length)
+        else:
+            heights = [h for c, (h, _) in zip(organ.all_cells.cells, resolved)
+                       if h is not None and c.type not in full_span_types]
+            base_height = max(heights) if heights else 0.02
+            z_span = n_axial_repeats * base_height
         z_min, z_max = -z_span / 2, z_span / 2
 
         cells: List[dict] = []
-        for cell in organ.all_cells.cells:
+        for i, (cell, (height, _)) in enumerate(zip(organ.all_cells.cells, resolved)):
             if cell.polygon is None or cell.polygon.is_empty:
                 continue
             polygon = cell.polygon
             if polygon.geom_type != "Polygon":
                 polygon = max(polygon.geoms, key=lambda g: g.area)  # MultiPolygon -> largest piece
 
-            if cell.type in full_span_types:
-                # One extrusion covering the whole segment -- no phase, no repeats.
-                vertices, faces = extrude_polygon(polygon, z_min, z_max)
+            def add(row, z0, z1):
+                vertices, faces = extrude_polygon(polygon, z0, z1)
                 cells.append({"type": cell.type, "vertices": vertices, "faces": faces,
-                              "volume": polygon.area * (z_max - z_min)})
+                              "volume": polygon.area * (z1 - z0),
+                              "cell_2d": i, "row": row, "z0": z0, "z1": z1})
+
+            if height is None:
+                # One extrusion covering the whole segment -- no phase, no repeats.
+                add(0, z_min, z_max)
                 continue
 
-            height = _resolve_axial_height(cell.diameter, layer_axial_height.get(cell.id_layer), default_axial_height)
             phase = rng.uniform(0, height)  # per-cell Z-shift -- the "height shift inside the same tissue"
             z = z_min + phase - height
+            row = 0
             while z < z_max:
                 row_z0, row_z1 = max(z, z_min), min(z + height, z_max)
                 if row_z1 > row_z0:
-                    vertices, faces = extrude_polygon(polygon, row_z0, row_z1)
-                    cells.append({"type": cell.type, "vertices": vertices, "faces": faces,
-                                  "volume": polygon.area * (row_z1 - row_z0)})
+                    add(row, row_z0, row_z1)
+                    row += 1
                 z += height
 
         if aerenchyma_mode == "after":
@@ -311,7 +382,8 @@ def generate_cells_3d(organ, n_axial_repeats: float = 8.0,
             # to suppress the 2D pass.
             _apply_aerenchyma_after(cells, organ, float(saved_proportion or 0.0), rng)
 
-        return Cells3DResult(cells=cells, z_min=z_min, z_max=z_max)
+        return Cells3DResult(cells=cells, z_min=z_min, z_max=z_max,
+                             section=section, height_sources=height_sources)
 
     finally:
         organ.intercellular_spaces_params = saved_ics
