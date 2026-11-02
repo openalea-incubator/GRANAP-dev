@@ -1,6 +1,6 @@
 # 3D hydraulic network from the extruded section — plan
 
-Status: **P0, P1 done (2026-11-02)**, P2–P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
+Status: **P0, P1, P2 done (2026-11-02)**, P3–P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
 (generic / monocot / dicot / woody); stems and leaves checked afterwards; needle excluded.
 
 ## Goal
@@ -136,7 +136,14 @@ before/after on monocot root, dicot root, dicot stem, dicot leaf and needle; ful
 - `export` calls it: **the 2D graph must be identical** before/after (nodes, edges,
   attributes) on root, stem, leaf, needle.
 
-**P2 — `network_3d.py`: `Network3D(AbstractNetwork)`**
+**P2 — `network_3d.py`: `Network3D(AbstractNetwork)`** — DONE, wall thickness included
+(side / end / face rules above, from the 3D cells' own types, so `after`-mode air prisms
+count as air; missing types logged). Nodes carry `kind` (side / end / face / vertical /
+rim) and their 2D ids; `net.nodes_of(kind)`. Breakpoints within 1e-9 x span are merged.
+Two 2D walls between the same pair of rows give one plasmodesmata edge with summed
+area / length. Default roots (8 repeats, 1.6 mm): monocot 23k cells, 425k nodes,
+1.2M edges, 8 s, 1.5 GB; dicot 44k cells, 832k nodes, 2.3M edges, 17 s, 3.8 GB.
+Tests in `test/test_network_3d.py` (incl. one row per cell == the 2D network).
 - Built from the P0 result (rows per cell) + the P1 registry.
 - Per 2D wall: merge the row breakpoints of its two cells → side pieces. Per 2D
   junction: merge the breakpoints of all cells around it → vertical pieces. Per row
@@ -146,7 +153,7 @@ before/after on monocot root, dicot root, dicot stem, dicot leaf and needle; ful
   cell_wall_thickness=..., end_wall_thickness=..., seed=...)` → `Network3D`
   (also exposes the `Cells3DResult`, so `export_obj` still works).
 
-**P3 — thickness, attributes, `fill_matrix(orientation=...)`.**
+**P3 — `fill_matrix(orientation=...)`** (thickness and attributes moved into P2).
 
 **P4 — tests, example, scale check.**
 - `example/root/network_3d.py`: build, print counts per node / edge kind, export OBJ.

@@ -383,6 +383,38 @@ class Organ(AbstractNetwork, ABC):
                                   axial_heights=axial_heights,
                                   segment_length=segment_length)
 
+    def export_3d_network(self, n_axial_repeats: float = 8.0,
+                          default_axial_height: Optional[float] = None,
+                          aerenchyma_mode: str = "before",
+                          seed: Optional[int] = None,
+                          axial_heights: Optional[Dict[str, float]] = None,
+                          segment_length: Optional[float] = None,
+                          cell_wall_thickness: Optional[Union[float, Dict[str, float]]] = None,
+                          end_wall_thickness: Optional[Union[float, Dict[str, float]]] = None):
+        """Build a 3D segment (:meth:`generate_cells_3d`, same arguments) and
+        its hydraulic network -- the 3D counterpart of the 2D wall / junction /
+        cell graph (see :mod:`network_3d`).
+
+        Args (besides those of :meth:`generate_cells_3d`):
+            cell_wall_thickness: per-type thickness of the side walls (default:
+                the 2D ``DEFAULT_CELL_WALL_THICKNESS``), or one value for all.
+            end_wall_thickness: per-type thickness of the end walls between
+                rows / vessel elements and of the segment-end faces; ``None`` =
+                ``cell_wall_thickness``.
+
+        Returns:
+            a :class:`network_3d.Network3D`; its ``result`` is the
+            :class:`Cells3DResult` (``export_obj`` still works on it).
+        """
+        from openalea.granap.network_3d import Network3D
+        result = self.generate_cells_3d(n_axial_repeats=n_axial_repeats,
+                                        default_axial_height=default_axial_height,
+                                        aerenchyma_mode=aerenchyma_mode, seed=seed,
+                                        axial_heights=axial_heights,
+                                        segment_length=segment_length)
+        return Network3D(result, cell_wall_thickness=cell_wall_thickness,
+                         end_wall_thickness=end_wall_thickness)
+
     def retag_cells(self, old_tag: str, new_tag: str) -> int:
         """Rename every cell tagged ``old_tag`` to ``new_tag``.
 
