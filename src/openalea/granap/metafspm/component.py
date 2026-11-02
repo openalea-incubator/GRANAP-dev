@@ -423,9 +423,11 @@ class GranapAnatomy(StructuralComponent):
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
     leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node
     mm_per_unit = MM_PER_M
-    condensed = False                # the default of a plant's scenario key condensed_anatomy: True, each root
-                                     # segment's anatomy condensed onto its conduits and soil node (an instance,
-                                     # with a soil node), its cells held by its template only
+    condensed = False                # the default of a plant's scenario key condensed_anatomy: True, each segment
+                                     # of condensed_labels condensed onto its conduits (and a root segment's soil
+                                     # node), its cells held by its template only
+    condensed_labels = ("RootSegment", "StemElement")   # the sections condensed: no transpiring surface (a leaf
+                                                        # blade's vapour path is nonlinear: kept whole)
     soil_node = False                # the default of a plant's scenario key soil_node: True, each root segment's
                                      # anatomy has one soil node (kind 4), joined to its border walls and junctions
                                      # (network_path 7): the section's one soil boundary
@@ -535,8 +537,10 @@ class GranapAnatomy(StructuralComponent):
 
     @classmethod
     def is_condensed(cls, g, segment) -> bool:
-        """Whether the segment is a root segment whose plant has condensed anatomies (condensed_anatomy)."""
-        if g.property("label").get(segment) != g.labels.SubOrgan.RootSegment:
+        """Whether the segment is of condensed_labels (roots, stems) and its plant has condensed anatomies
+        (condensed_anatomy)."""
+        codes = {getattr(g.labels.SubOrgan, name) for name in cls.condensed_labels}
+        if g.property("label").get(segment) not in codes:
             return False
         plant = g.complex_at_scale(segment, g.scales.Plant)
         return bool(g.properties().get("anatomy_condensed", {}).get(plant, cls.condensed))
@@ -640,7 +644,8 @@ class GranapAnatomy(StructuralComponent):
             g.properties().setdefault("condensed_section", {})[segment] = float(condensed)
             if condensed:
                 instanced = True
-                written = template.instance(g, segment, cls.add_soil_node, "soil+condensed", cls.condense_section)
+                written = (template.instance(g, segment, cls.add_soil_node, "soil+condensed", cls.condense_section)
+                           if soil else template.instance(g, segment, None, "+condensed", cls.condense_section))
             elif instanced:
                 written = template.instance(g, segment, cls.add_soil_node if soil else None, "soil" if soil else "")
             else:
