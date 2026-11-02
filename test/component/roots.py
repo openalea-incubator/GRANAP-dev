@@ -46,7 +46,7 @@ def planting():
     return population.planting([Planting()], None)
 
 
-def initiated(table, *initiators, time_step: float = 3600.):
+def initiated(table, *initiators, time_step: float = 3600., reduction=None):
     """The plants of *table* built by *initiators* (a root system or a shoot, then GRANAP's anatomies), their
     Compartments wired at the segments' junctions, in one MPGDataStructure: metafspm's population_data_structure with
     a model of no component (the tests build theirs on population.data_structure)."""
@@ -56,5 +56,6 @@ def initiated(table, *initiators, time_step: float = 3600.):
         self.components = []
 
     model = type("Initiated", (), dict(initiators=tuple(initiators), nodes="Compartment",
-                                       wiring=staticmethod(junction_rules), __init__=__init__, run=lambda self: None))
+                                       wiring=staticmethod(junction_rules), __init__=__init__, run=lambda self: None,
+                                       reduction=reduction))
     return population.population_data_structure(table, model, time_step=time_step)

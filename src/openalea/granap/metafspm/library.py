@@ -221,8 +221,12 @@ class Template:
     def instance(self, g, segment, extend=None, name: str = "", transform=None) -> dict:
         """The segment's instance of the section (g.add_instance; *extend*, *name*: section_template's): the vids a
         copy would get, by kind, without creating its vertices."""
+        return self.instance_of(g, segment, self.section_template(extend, name, transform))
+
+    def instance_of(self, g, segment, template) -> dict:
+        """The segment's instance of the SectionTemplate *template* (this template's, or one made from it, e.g. a
+        reduction's): its vids by kind."""
         from openalea.metafspm.data_structure.instances import ANCHOR
-        template = self.section_template(extend, name, transform)
         vids = np.asarray(g.add_instance(segment, template), dtype=np.int64)
         s = g.scales
         compartment = template.scale == s.Compartment

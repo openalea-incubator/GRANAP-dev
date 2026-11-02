@@ -340,10 +340,6 @@ class GranapAnatomy(StructuralComponent):
     anatomy_template: float = state_variable(unit="", description="the segment's anatomy template (-1: none)",
                                              references="GRANAP", default=-1., scale=SCALES.SubOrgan,
                                              kind="descriptor")
-    condensed_section: float = state_variable(unit="", description="1: the segment's anatomy is condensed onto its "
-                                                                  "conduits and soil node (condensed_anatomy)",
-                                              references="GRANAP", default=0., scale=SCALES.SubOrgan,
-                                              kind="descriptor")
     tissue: object = state_variable(unit="", description="the protoplast's tissue (None: a wall or a junction)",
                                     references="GRANAP", default=None, scale=SCALES.Compartment, location="node",
                                     dtype=object, kind="descriptor")
@@ -417,17 +413,12 @@ class GranapAnatomy(StructuralComponent):
                                              references="GRANAP", default=0., scale=SCALES.Connection,
                                              location="edge", kind="NonInertialExtensive")
 
-    scenario_keys = tuple(ANATOMY_KEYS.values()) + ("instanced_anatomy", "soil_node", "condensed_anatomy")
+    scenario_keys = tuple(ANATOMY_KEYS.values()) + ("instanced_anatomy", "soil_node")
     library = AnatomyLibrary()
     root = None                      # the roots' OrganAnatomy (None: library, its classes by diameter)
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
     leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node
     mm_per_unit = MM_PER_M
-    condensed = False                # the default of a plant's scenario key condensed_anatomy: True, each segment
-                                     # of condensed_labels condensed onto its conduits (and a root segment's soil
-                                     # node), its cells held by its template only
-    condensed_labels = ("RootSegment", "StemElement")   # the sections condensed: no transpiring surface (a leaf
-                                                        # blade's vapour path is nonlinear: kept whole)
     soil_node = False                # the default of a plant's scenario key soil_node: True, each root segment's
                                      # anatomy has one soil node (kind 4), joined to its border walls and junctions
                                      # (network_path 7): the section's one soil boundary
@@ -535,60 +526,14 @@ class GranapAnatomy(StructuralComponent):
         written["connections"] = list(written["connections"]) + list(links)
         return soil, links
 
-    @classmethod
-    def is_condensed(cls, g, segment) -> bool:
-        """Whether the segment is of condensed_labels (roots, stems) and its plant has condensed anatomies
-        (condensed_anatomy)."""
-        codes = {getattr(g.labels.SubOrgan, name) for name in cls.condensed_labels}
-        if g.property("label").get(segment) not in codes:
-            return False
-        plant = g.complex_at_scale(segment, g.scales.Plant)
-        return bool(g.properties().get("anatomy_condensed", {}).get(plant, cls.condensed))
-
     @staticmethod
-    def condense_section(full, key):
-        """
-        A root section's condensed template, from its full one (*full*: its anatomy with its soil node): its conduits'
-        Cells and Layers, its conduits (the protoplasts of families 0 and 1, which the junctions join) and its soil node,
-        and one equivalent Connection (network_path 8) between each pair of them, from the lower to the higher local
-        index. Their conductances are the hydraulics model's (the Kron reduction of the full section).
-        """
-        from openalea.metafspm.data_structure.configs import ScalesConfig
-        from openalea.metafspm.data_structure.instances import ANCHOR, OWNER
-        scales = ScalesConfig
-        compartment = full.scale == scales.Compartment
-        family = np.full(full.size, -1.)
-        rows, values = full.properties.get("family", (np.zeros(0, dtype=np.int64), np.zeros(0)))
-        family[rows] = np.asarray(values, dtype=float)
-        kind = np.full(full.size, -1.)
-        rows, values = full.properties["kind"]
-        kind[rows] = np.asarray(values, dtype=float)
-        kept = compartment & (np.isin(family, (0., 1.)) | (kind == SOIL_NODE))
-        structure = np.zeros(full.size, dtype=bool)                # the kept protoplasts' Cells and their Layers
-        above = full.complex[kept & (full.complex >= 0)]
-        while above.size:
-            structure[above] = True
-            above = full.complex[above]
-            above = above[above >= 0]
-        small = full.restricted(structure | kept, key + ("restricted",))
-        position = np.cumsum(structure | kept) - 1
-        nodes = np.sort(position[kept])
-        i, j = np.triu_indices(nodes.size, k=1)
-        n = i.size
-        prototype = int(np.flatnonzero(full.scale == scales.Connection)[0])
-        properties = {}
-        for name, (where, values) in full.properties.items():
-            here = np.flatnonzero(where == prototype)
-            if here.size and name not in ("n_id_a", "n_id_b"):
-                value = values[here[0]]
-                properties[name] = np.array([value] * n, dtype=object) if values.dtype == object else \
-                    np.full(n, float(value))
-        for name in columns.EDGE_COLUMNS:
-            properties[name] = np.full(n, np.nan)
-        properties.update(n_id_a=nodes[i].astype(float), n_id_b=nodes[j].astype(float),
-                          network_path=np.full(n, float(columns.EQUIVALENT_PATH)), membrane_surface=np.zeros(n))
-        return small.extended(key, scale=np.full(n, scales.Connection), complex_=np.full(n, ANCHOR),
-                              parent=np.full(n, OWNER), properties=properties)
+    def conduits(template) -> np.ndarray:
+        """The conduits of a SectionTemplate (the protoplasts of families 0 and 1, which the junctions join): a
+        reduction's ports (solve.reduction: the nodes a section keeps for its neighbours)."""
+        out = np.zeros(template.size, dtype=bool)
+        rows, values = template.properties.get("family", (np.zeros(0, dtype=np.int64), np.zeros(0)))
+        out[rows] = np.isin(np.asarray(values, dtype=float), (0., 1.))
+        return out
 
     @classmethod
     def is_instanced(cls, g, segment) -> bool:
@@ -611,8 +556,6 @@ class GranapAnatomy(StructuralComponent):
             (parameters or {}).get("instanced_anatomy", cls.instanced))
         g.properties().setdefault("anatomy_soil_node", {})[plant_vid] = bool(
             (parameters or {}).get("soil_node", cls.soil_node))
-        g.properties().setdefault("anatomy_condensed", {})[plant_vid] = bool(
-            (parameters or {}).get("condensed_anatomy", cls.condensed))
         segments = _segments(g, plant_vid, cls.handled_labels(g, plant_vid))
         cls.update_anatomies(g, segments)
         cls.update_leaf_surfaces(g, segments)
@@ -640,12 +583,11 @@ class GranapAnatomy(StructuralComponent):
             plant = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED} or None
             template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
             instanced, soil = cls.is_instanced(g, segment), cls.has_soil_node(g, segment)
-            condensed = cls.is_condensed(g, segment)
-            g.properties().setdefault("condensed_section", {})[segment] = float(condensed)
-            if condensed:
+            reduction = getattr(g, "reduction", None)            # the plant model's (solve.reduction)
+            if reduction is not None and reduction.reduces(cls._label_name(g, segment)):
                 instanced = True
-                written = (template.instance(g, segment, cls.add_soil_node, "soil+condensed", cls.condense_section)
-                           if soil else template.instance(g, segment, None, "+condensed", cls.condense_section))
+                full = template.section_template(cls.add_soil_node if soil else None, "soil" if soil else "")
+                written = template.instance_of(g, segment, reduction.template_for(full))
             elif instanced:
                 written = template.instance(g, segment, cls.add_soil_node if soil else None, "soil" if soil else "")
             else:

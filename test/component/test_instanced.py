@@ -148,38 +148,43 @@ def test_a_state_changed_in_the_data_structure_survives_the_next_anatomy_step():
     _same(copied, instanced)
 
 
-def test_a_condensed_root_section_holds_its_conduits_and_soil_node_and_their_equivalent_links():
-    """condensed_anatomy: each root section an instance of its condensed template: its conduits (families 0 and 1)
-    and its soil node only, one equivalent Connection (path 8) per pair, the conduits joined to the neighbouring
-    sections' by the junctions as in the full anatomy."""
+def _soil_nodes(template):
+    rows, values = template.properties["kind"]
+    out = np.zeros(template.size, dtype=bool)
+    out[rows] = np.asarray(values, dtype=float) == 4.
+    return out
+
+
+def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
+    """A plant model's Reduction (solve.reduction) on the root segments: each an instance of its reduced template,
+    its conduits (GranapAnatomy.conduits, families 0 and 1) and its soil node only, the conduits joined to the
+    neighbouring sections' by the junctions as in the full anatomy."""
+    from openalea.metafspm.solve.reduction import Reduction
+    from openalea.granap.metafspm.component import GranapAnatomy
     Choregrapher()._set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
-    condensed = initiated(planting([Planting()], None, {"condensed_anatomy": True, "soil_node": True}),
-                          SmallRootSystem, Anatomy).data_structure
-    for ds in (full, condensed):
+    reduction = Reduction(labels=("RootSegment",), ports=GranapAnatomy.conduits, keep=_soil_nodes)
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    for ds in (full, reduced):
         Anatomy(data_structure=ds)
+
     def family(ds):
         values = ds.structure.values_of("family", ds.entity_ids("node"))
         return np.array([values.get(int(v), -1.) for v in ds.entity_ids("node")])
 
-    kind = condensed.get("kind")
-    assert ((kind == 4) | np.isin(family(condensed), (0., 1.))).all()
-    segments = condensed.entity_ids("SubOrgan")
-    owner, path = condensed.owner("SubOrgan"), condensed.get("network_path")
-    view = condensed.to_graph_view()
-    for i in range(segments.size):
-        n = int((owner == i).sum())
-        equivalent = (path == 8) & (owner[view.tail] == i)
-        assert equivalent.sum() == n * (n - 1) // 2
+    kind = reduced.get("kind")
+    assert ((kind == 4) | np.isin(family(reduced), (0., 1.))).all()
     full_kept = (full.get("kind") == 4) | np.isin(family(full), (0., 1.))
-    assert condensed.n_nodes() == int(full_kept.sum())
+    assert reduced.n_nodes() == int(full_kept.sum())
+
     def junctions(ds):
-        """Each junction's two ends as (section, template node): the vids differ (a condensed block is smaller)."""
+        """Each junction's two ends as (section, template node): the vids differ (a reduced block is smaller)."""
         view, nodes, owner = ds.to_graph_view(), ds.entity_ids("node"), ds.owner("SubOrgan")
         node = ds.structure.values_of("template_node", nodes)
         place = [(int(owner[i]), int(node[int(v)])) for i, v in enumerate(nodes.tolist())]
         edges = np.flatnonzero(np.asarray(ds.get("network_path")) == 5)
         return sorted((place[a], place[b]) for a, b in zip(view.tail[edges].tolist(), view.head[edges].tolist()))
 
-    assert junctions(full) == junctions(condensed) and len(junctions(full)) > 0
+    assert junctions(full) == junctions(reduced) and len(junctions(full)) > 0
