@@ -121,3 +121,28 @@ def test_a_root_section_has_one_soil_node_joined_to_its_outer_walls():
     walls = ends[kind[ends] == 1]
     assert walls.size > 0 and (counts[walls] == 1).all()                     # outer walls: one membrane each
     assert ((kind[ends] == 1) | (kind[ends] == 2)).all()
+
+
+def test_a_state_changed_in_the_data_structure_survives_the_next_anatomy_step():
+    """An instanced vertex's value is held by the DataStructure (not written back to the MPG): the anatomy step's
+    read-back keeps it, as a copy's (written back, read back), also when a new segment grows."""
+    results = []
+    for ds in _both(SmallRootSystem, Anatomy):
+        g = ds.structure
+        anatomy = Anatomy(data_structure=ds)
+        x = ds.get("section_x").copy()
+        x[7] = 123.
+        ds.set("section_x", x)
+        anatomy()
+        assert ds.get("section_x")[7] == 123.
+        segments = sorted(int(v) for v in g.property("anatomy_class"))
+        tip = max(segments)
+        new = g.add_child(tip, **PropsConfig(scale=g.scales.SubOrgan, edge_type='<',
+                                             label=g.labels.SubOrgan.RootSegment))
+        for name, value in (("radius", g.property("radius")[tip]), ("length", SEGMENT), ("distance_from_tip", 0.)):
+            g.property(name)[new] = value
+        anatomy()
+        results.append(ds)
+    copied, instanced = results
+    assert copied.get("section_x")[7] == instanced.get("section_x")[7] == 123.
+    _same(copied, instanced)
