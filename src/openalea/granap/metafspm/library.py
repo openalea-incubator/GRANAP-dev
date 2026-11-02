@@ -159,6 +159,7 @@ class Template:
     polygons: list                     # the cells' polygons, shared by every instance
     rings: dict                        # {cell row: snapped ring}, shared
     organ: object = field(repr=False, default=None)
+    _sections: dict = field(repr=False, default_factory=dict, compare=False)
 
     @classmethod
     def from_organ(cls, organ, key, index) -> "Template":
@@ -188,6 +189,44 @@ class Template:
                    polygons=[g.property("cell__polygon").get(int(c)) for c in cells],
                    rings={r: boundary[int(p)] for r, p in enumerate(protoplasts) if int(p) in boundary},
                    organ=organ)
+
+    def section_template(self, extend=None, name: str = ""):
+        """
+        The template as metafspm's SectionTemplate (data_structure.instances), for instanced anatomies: one copy
+        instantiated in a scratch MPG, its pores' aperture unset (NaN, as update_anatomies sets a copy's), then
+        *extend*(g, segment, written) (e.g. a root section's soil node, created as on a copy; *name* tells the
+        variants apart), captured. Made once per variant.
+        """
+        if name not in self._sections:
+            from openalea.metafspm.data_structure.instances import SectionTemplate
+            from openalea.metafspm.data_structure.mpg import MPG
+            scratch = MPG()
+            segment = scratch._add_system_root_at_scale(scratch.scales.SubOrgan)
+            first = scratch._id + 1
+            written = self.instantiate(scratch, segment)
+            nodes = list(written["protoplasts"]) + list(written["apoplast"])
+            scratch.set_values("pore_width", nodes, [np.nan] * len(nodes))
+            scratch.set_values("pore_depth", nodes, [np.nan] * len(nodes))
+            if extend is not None:
+                extend(scratch, segment, written)
+            scratch.convert_properties_to_arraydict()
+            self._sections[name] = SectionTemplate.capture(scratch, segment, range(first, scratch._id + 1),
+                                                           key=("granap", self.index, name))
+        return self._sections[name]
+
+    def instance(self, g, segment, extend=None, name: str = "") -> dict:
+        """The segment's instance of the section (g.add_instance; *extend*, *name*: section_template's): the vids a
+        copy would get, by kind, without creating its vertices."""
+        from openalea.metafspm.data_structure.instances import ANCHOR
+        template = self.section_template(extend, name)
+        vids = np.asarray(g.add_instance(segment, template), dtype=np.int64)
+        s = g.scales
+        compartment = template.scale == s.Compartment
+        out = {"layers": vids[template.scale == s.Layer].tolist(), "cells": vids[template.scale == s.Cell].tolist(),
+               "protoplasts": vids[compartment & (template.complex >= 0)].tolist(),
+               "apoplast": vids[compartment & (template.complex == ANCHOR)].tolist(),
+               "connections": vids[template.scale == s.Connection].tolist(), "template": self.index}
+        return out
 
     def instantiate(self, g, segment) -> dict:
         """The segment's own copy of the section, created in bulk; returns its vids by kind."""

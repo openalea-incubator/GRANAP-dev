@@ -31,7 +31,7 @@ def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=
     owners = np.asarray(ds.entity_ids("SubOrgan"))[ds.owner("SubOrgan")]
     nodes = np.flatnonzero((owners == int(segment)) & (np.asarray(ds.get("kind")) == 0))
     vids = ds.entity_ids("node")[nodes]
-    row, tissue = g.property("template_row"), np.asarray(ds.get("tissue"), dtype=object)
+    row, tissue = g.view("template_row"), np.asarray(ds.get("tissue"), dtype=object)
     patches, keep = [], []
     for i, v in zip(nodes, vids):
         polygon = template.polygons[int(row[int(v)])]
