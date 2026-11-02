@@ -16,7 +16,7 @@ from test_shoot import ShootAnatomy, SmallShoot, TwoElementLeaf
 
 
 def _both(architecture, anatomy, **scenario):
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     out = []
     for instanced in (False, True):
         population = initiated(planting([Planting()], None, dict(scenario, instanced_anatomy=instanced)), architecture,
@@ -42,13 +42,15 @@ def _same(copied, instanced):
     assert {k: sorted(v) for k, v in left.items()} == {k: sorted(v) for k, v in right.items()}
     for location, store in left.items():
         for name, values in store.items():
+            if name == "instanced_anatomy":                          # the plants' switch itself
+                continue
             other = right[location][name]
             if values.dtype == object:
                 assert values.tolist() == other.tolist(), name
             else:
                 np.testing.assert_array_equal(values, other, err_msg=name)
     assert len(h) < len(g)
-    assert h._instanced() and not g._instanced()
+    assert h.has_instances() and not g.has_instances()
 
 
 def test_a_shoot_with_instanced_anatomies_is_its_copy():
@@ -161,7 +163,7 @@ def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
     neighbouring sections' by the junctions as in the full anatomy."""
     from openalea.metafspm.solve.reduction import Reduction
     from openalea.granap.metafspm.component import GranapAnatomy
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
     reduction = Reduction(labels=("RootSegment",), ports=GranapAnatomy.conduits, keep=_soil_nodes)

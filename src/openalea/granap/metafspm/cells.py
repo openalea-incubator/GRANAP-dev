@@ -94,7 +94,7 @@ class CellStore:
 
     def _provisional_layer(self):
         layer = self.written.get("provisional_layer")
-        if layer is None or layer not in self.g._scale:
+        if layer is None or not self.g.has_vertex(layer):
             s = self.g.scales
             layer = self.g.add_components_bulk(self.segment, 1, **_props(s.Layer, tissue="provisional"))[0]
             self.written["provisional_layer"] = layer

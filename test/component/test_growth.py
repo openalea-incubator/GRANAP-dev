@@ -23,7 +23,7 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture
 def plant():
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     population = initiated(planting(), SmallRootSystem, Anatomy)
     g, plants = population.data_structure.structure, population.plants
     ds = population.data_structure
@@ -75,7 +75,7 @@ def test_a_segment_changing_class_is_replaced_and_starts_from_the_defaults(plant
     anatomy()
     assert anatomy.last_update == {"emerged": [], "replaced": [lateral]}
     new = g.compartments_by_owner(g.scales.SubOrgan)[lateral]
-    assert not set(old) & set(new) and not any(v in g._scale for v in old)       # the old anatomy is gone
+    assert not set(old) & set(new) and not any(g.has_vertex(v) for v in old)       # the old anatomy is gone
     assert len(new) == len(Anatomy.library.template((1.1, 0., 0.)).cell_layer) + \
         len(Anatomy.library.template((1.1, 0., 0.)).apoplast["kind"][0])
     np.testing.assert_array_equal(ds.get("solute")[_index(ds, new)], -1.)        # defaults, nothing carried (Q-G2)
@@ -90,5 +90,5 @@ def test_a_pruned_segment_takes_its_anatomy_with_it(plant):
     g.remove_vertex(tip)
     ds.update_topology()               # as the architecture's own (MPG-style) pruning step would, by the framework
     anatomy()
-    assert not any(v in g._scale for v in gone) and tip not in g.property("anatomy_class")
+    assert not any(g.has_vertex(v) for v in gone) and tip not in g.property("anatomy_class")
     assert ds.n_nodes() == n_nodes - len(gone)

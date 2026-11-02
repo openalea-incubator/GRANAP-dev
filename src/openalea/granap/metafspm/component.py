@@ -16,7 +16,7 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 
-from openalea.metafspm.coupling.component import StructuralComponent, input_variable, state_variable
+from openalea.metafspm.coupling.component import StructuralComponent, input_variable, parameter, state_variable
 from openalea.metafspm.data_structure.configs import ScalesConfig
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
@@ -44,6 +44,33 @@ ORGAN_KINDS = {"Sheath": "StemElement"}
 # mid-line sagging 2 mm below its 4 mm chord: a U)
 DEFAULT_OVERRIDES = {"sheath_anatomy": {"planttype": {"fold_sag": 2.0}}}
 RESERVED = ("preset", "seed")
+_VESSEL_PAIRS = {}
+_SECTION_FIELDS = {}                               # {scenario key: its default preset's numeric fields}
+_UNITS = {"mm", "µm", "um", "mm2", "mm3", "°", "deg", "degrees", "rad", "%", "MPa", "s", "mm-1", "1/mm"}
+
+
+def section_fields(key: str) -> dict:
+    """The numeric fields of an anatomy kind's default preset (*key*: root_anatomy, stem_anatomy...), for its
+    sectioned parameter: {"section.field": {default, unit, description, min_value, max_value}}, the defaults the
+    preset's, the bounds its fields' (ge, le), the unit the first parenthesised unit of their description."""
+    if key not in _SECTION_FIELDS:
+        import re
+        from openalea.granap.input_data import OrganInputData
+        fields_of = {}
+        for section in getattr(OrganInputData, DEFAULT_PRESETS[key])().params:
+            for name, info in type(section).model_fields.items():
+                value = getattr(section, name)
+                if name == "name" or isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                bounds = {type(m).__name__: m for m in info.metadata}
+                low = getattr(bounds.get("Ge"), "ge", getattr(bounds.get("Gt"), "gt", None))
+                high = getattr(bounds.get("Le"), "le", getattr(bounds.get("Lt"), "lt", None))
+                description = info.description or info.title or ""
+                unit = next((u for u in re.findall(r"\(([^()]{1,8})\)", description) if u.strip() in _UNITS), "")
+                fields_of[f"{section.name}.{name}"] = dict(default=value, unit=unit.strip(),
+                                                           description=description, min_value=low, max_value=high)
+        _SECTION_FIELDS[key] = fields_of
+    return _SECTION_FIELDS[key]                                 # {(parent template, child template, family): template-node pairs}
 _LIBRARIES = {}                                   # {(preset, seed): AnatomyLibrary}, shared by the components
 
 
@@ -125,16 +152,16 @@ def remove_anatomy(g, segment) -> None:
     anatomy Connections), keeping the segment."""
     s = g.scales
     g.remove_instance(segment)                       # an instanced anatomy (none for a copy)
-    anchored = [c for c in list(g._children.get(segment, [])) if g.scale(c) in (s.Compartment, s.Connection)]
+    anchored = g.anchored(segment)
     g.remove_connections([c for c in anchored if g.scale(c) == s.Connection])
     g.remove_connections([c for c in anchored if g.scale(c) == s.Compartment])
-    g.remove_connections([c for c in list(g._components.get(segment, [])) if g.scale(c) == s.Layer])
+    g.remove_connections([c for c in g.components(segment) if g.scale(c) == s.Layer])
 
 
 def _protoplasts(g, segment) -> list:
     """The Compartments decomposing *segment* (its Cells' protoplasts), in g.components_at_scale's order: its Layers',
     then their Cells', then each Cell's protoplasts, in creation order (for an instance, from its template)."""
-    block = g.instances.block(segment) if g._instanced() else None
+    block = g.instances.block(segment) if g.has_instances() else None
     if block is None:
         return g.components_at_scale(segment, scale=g.scales.Compartment)
     arrays = g.topology_arrays()
@@ -152,8 +179,8 @@ def _instance(g, comps):
     if vids.size == 0:
         return None
     order = np.argsort(vids, kind="stable")
-    found, templates = g._property_at("template", vids[order])
-    found_nodes, nodes = g._property_at("template_node", vids[order])
+    found, templates = g.values_at("template", vids[order])
+    found_nodes, nodes = g.values_at("template_node", vids[order])
     if found.size != vids.size or found_nodes.size != vids.size or not (templates == templates[0]).all():
         return None
     out = np.empty(vids.size, dtype=np.int64)
@@ -186,10 +213,10 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     vertex, _inheritance_by_vertex). The same sources.
     """
     g = ds.mtg
-    from_scale = ds._from_scale
+    from_scale = ds.from_scale
     new_vids = np.asarray(new_vids, dtype=np.int64)
     sources = np.full(new_vids.size, -1, dtype=np.int64)
-    sections = ds._sections_of(new_vids)
+    sections = ds.sections_of(new_vids)
     owners = g.compartments_by_owner(from_scale)
     tissue = g.view("tissue")
     upstream_cache, known_sections = {}, {}
@@ -265,10 +292,10 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
 def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     """granap_inheritance, Compartment by Compartment (for sections that are not whole template copies)."""
     g = ds.mtg
-    from_scale = ds._from_scale
+    from_scale = ds.from_scale
     new_vids = np.asarray(new_vids, dtype=np.int64)
     sources = np.full(new_vids.size, -1, dtype=np.int64)
-    sections = ds._sections_of(new_vids)
+    sections = ds.sections_of(new_vids)
     owners = g.compartments_by_owner(from_scale)
     template, node = g.view("template"), g.view("template_node")
     tissue, angle, radius = g.view("tissue"), g.view("angle"), g.view("relative_radius")
@@ -354,6 +381,29 @@ class GranapAnatomy(StructuralComponent):
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, location="node",
                                    kind="intensive")
 
+    # ── Parameters: each plant's anatomies (its scenario's) ──
+    root_anatomy: object = parameter(unit="", description="the plant's root anatomy: {'preset', 'seed', section: "
+                                     "{field: value}} on top of its preset (None: the library's)", default=None,
+                                     dtype="object", scale=SCALES.Plant, references="GRANAP",
+                                     sections=lambda: section_fields("root_anatomy"))
+    stem_anatomy: object = parameter(unit="", description="the plant's stem anatomy, as root_anatomy (None: no stem "
+                                     "anatomy unless shoot gives one)", default=None, dtype="object",
+                                     scale=SCALES.Plant, references="GRANAP",
+                                     sections=lambda: section_fields("stem_anatomy"))
+    leaf_anatomy: object = parameter(unit="", description="the plant's leaf anatomy, as root_anatomy (None: none)",
+                                     default=None, dtype="object", scale=SCALES.Plant, references="GRANAP",
+                                     sections=lambda: section_fields("leaf_anatomy"))
+    sheath_anatomy: object = parameter(unit="", description="the plant's sheath anatomy, as root_anatomy (None: "
+                                       "none; given: by default a monocot leaf bent round the stem)", default=None,
+                                       dtype="object", scale=SCALES.Plant, references="GRANAP",
+                                       sections=lambda: section_fields("sheath_anatomy"))
+    soil_node: bool = parameter(unit="", description="True: each root segment's anatomy has one soil node (kind 4), "
+                                "joined to its border walls and junctions (network_path 7): the section's one soil "
+                                "boundary", default=False, scale=SCALES.Plant, references="GRANAP")
+    instanced_anatomy: bool = parameter(unit="", description="True: each segment's anatomy an instance of its template "
+                                        "(g.add_instance), no vertex of its own; False: a copy (the reference)",
+                                        default=False, scale=SCALES.Plant, references="GRANAP")
+
     # ── State variables: the anatomies ──
     anatomy_template: float = state_variable(unit="", description="the segment's anatomy template (-1: none)",
                                              references="GRANAP", default=-1., scale=SCALES.SubOrgan,
@@ -431,19 +481,12 @@ class GranapAnatomy(StructuralComponent):
                                              references="GRANAP", default=0., scale=SCALES.Connection,
                                              location="edge", kind="NonInertialExtensive")
 
-    scenario_keys = tuple(ANATOMY_KEYS.values()) + ("instanced_anatomy", "soil_node")
     library = AnatomyLibrary()
     root = None                      # the roots' OrganAnatomy (None: library, its classes by diameter)
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
     leaf_labels = ("LeafElement", "Sheath")   # the kinds of leaves (SubOrgan labels, Sheath): their organs get a
                                               # surface node
     mm_per_unit = MM_PER_M
-    soil_node = False                # the default of a plant's scenario key soil_node: True, each root segment's
-                                     # anatomy has one soil node (kind 4), joined to its border walls and junctions
-                                     # (network_path 7): the section's one soil boundary
-    instanced = False                # the default of a plant's scenario key instanced_anatomy: True, each segment's
-                                     # anatomy an instance of its template (g.add_instance), no vertex of its own;
-                                     # False, a copy (the reference)
 
     @classmethod
     def organs(cls) -> dict:
@@ -468,16 +511,21 @@ class GranapAnatomy(StructuralComponent):
     def anatomy_settings(cls, g, segment) -> dict:
         """The segment's plant's scenario dict for the segment's kind (root_anatomy...), {} if not given."""
         plant = g.complex_at_scale(segment, g.scales.Plant)
-        return g.properties().get("anatomy_settings", {}).get(plant, {}).get(ANATOMY_KEYS.get(cls._label_name(g, segment)),
-                                                                            {})
+        key = ANATOMY_KEYS.get(cls._label_name(g, segment))
+        return dict(cls._plant_value(g, plant, key) or {}) if key is not None else {}
+
+    @classmethod
+    def _plant_value(cls, g, plant, name):
+        """The plant's value of the declared Plant parameter *name* (its MPG property), else its declared default."""
+        value = g.properties().get(name, {}).get(plant)
+        return getattr(cls, name) if value is None else value
 
     @classmethod
     def handled_labels(cls, g, plant) -> tuple:
         """The SubOrgan labels the plant's anatomies are generated for: roots, the explicit shoot, the kinds its
         scenario gives."""
-        given = g.properties().get("anatomy_settings", {}).get(plant, {})
         return tuple(name for name, key in ANATOMY_KEYS.items()
-                     if name == "RootSegment" or name in cls.shoot or key in given)
+                     if name == "RootSegment" or name in cls.shoot or cls._plant_value(g, plant, key) is not None)
 
     @classmethod
     def organ_of(cls, g, segment) -> OrganAnatomy:
@@ -502,7 +550,7 @@ class GranapAnatomy(StructuralComponent):
         if g.property("label").get(segment) != g.labels.SubOrgan.RootSegment:
             return False
         plant = g.complex_at_scale(segment, g.scales.Plant)
-        return bool(g.properties().get("anatomy_soil_node", {}).get(plant, cls.soil_node))
+        return bool(cls._plant_value(g, plant, "soil_node"))
 
     @classmethod
     def add_soil_node(cls, g, segment, written) -> tuple:
@@ -567,7 +615,7 @@ class GranapAnatomy(StructuralComponent):
     def is_instanced(cls, g, segment) -> bool:
         """Whether the segment's plant has instanced anatomies (its scenario's instanced_anatomy)."""
         plant = g.complex_at_scale(segment, g.scales.Plant)
-        return bool(g.properties().get("anatomy_instanced", {}).get(plant, cls.instanced))
+        return bool(cls._plant_value(g, plant, "instanced_anatomy"))
 
     @classmethod
     def segment_class(cls, g, segment) -> tuple:
@@ -591,12 +639,11 @@ class GranapAnatomy(StructuralComponent):
     def initiate_plant(cls, g, plant_vid: int, parameters: dict) -> None:
         """Each segment of the plant gets its class's anatomy, parametrized by the plant's scenario (root_anatomy,
         stem_anatomy, leaf_anatomy), kept on the plant for the anatomies generated later."""
-        settings = {key: dict(parameters[key]) for key in ANATOMY_KEYS.values() if key in (parameters or {})}
-        g.properties().setdefault("anatomy_settings", {})[plant_vid] = settings
-        g.properties().setdefault("anatomy_instanced", {})[plant_vid] = bool(
-            (parameters or {}).get("instanced_anatomy", cls.instanced))
-        g.properties().setdefault("anatomy_soil_node", {})[plant_vid] = bool(
-            (parameters or {}).get("soil_node", cls.soil_node))
+        parameters = parameters or {}
+        for key in tuple(ANATOMY_KEYS.values()) + ("soil_node", "instanced_anatomy"):   # its declared Plant parameters
+            if key in parameters:
+                value = parameters[key]
+                g.property(key)[plant_vid] = dict(value) if isinstance(value, dict) else value
         segments = _segments(g, plant_vid, cls.handled_labels(g, plant_vid), cls._label_name)
         cls.update_anatomies(g, segments)
         cls.update_leaf_surfaces(g, segments)
@@ -625,7 +672,7 @@ class GranapAnatomy(StructuralComponent):
             plant = merged(DEFAULT_OVERRIDES.get(ANATOMY_KEYS.get(cls._label_name(g, segment)), {}), own) or None
             template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
             instanced, soil = cls.is_instanced(g, segment), cls.has_soil_node(g, segment)
-            reduction = getattr(g, "reduction", None)            # the plant model's (solve.reduction)
+            reduction = g.reduction                             # the plant model's (solve.reduction)
             if reduction is not None and reduction.reduces(cls._label_name(g, segment)):
                 instanced = True
                 full = template.section_template(cls.add_soil_node if soil else None, "soil" if soil else "")
@@ -667,7 +714,7 @@ class GranapAnatomy(StructuralComponent):
         for organ in organs:
             elements = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan)
                         if cls._label_name(g, v) in cls.leaf_labels]
-            stomatal = [c for e in elements for c in list(g._children.get(e, []))
+            stomatal = [c for e in elements for c in g.anchored(e)
                         if g.scale(c) == s.Connection and path.get(c) == columns.STOMATAL_PATH]
             g.remove_connections(stomatal)
             old = surfaces.pop(organ, None)
@@ -727,11 +774,14 @@ class GranapAnatomy(StructuralComponent):
 
     @postsegmentation
     def _anatomies(self):
-        """MPG-style: every segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
+        """MPG-style: every segment of the emerged plants gets its class's anatomy (emerged, or replaced on a change);
+        the records of the segments pruned in any plant go."""
         g = self.mtg
-        segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant)
-                    for s in _segments(g, plant, self.handled_labels(g, plant), self._label_name)]
-        alive = set(segments)
+        by_plant = {int(plant): _segments(g, plant, self.handled_labels(g, plant), self._label_name)
+                    for plant in g.components_at_scale(g.root, scale=g.scales.Plant)}
+        emerged = set(self.active_ids("Plant").tolist())
+        segments = [s for plant, these in by_plant.items() if plant in emerged for s in these]
+        alive = {s for these in by_plant.values() for s in these}
         anatomy_class = g.properties().get("anatomy_class", {})
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
             del anatomy_class[gone]
@@ -869,13 +919,12 @@ def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     parent, child = _instance(g, parent_compartments), _instance(g, child_compartments)
     if parent is None or child is None:
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
-    cache = g.__dict__.setdefault("_granap_vessel_pairs", {})
-    key = (parent[0], child[0], family)
-    local = cache.get(key)
+    key = (parent[0], child[0], family)                   # template ids: unique across the libraries
+    local = _VESSEL_PAIRS.get(key)
     if local is None:
         node_a, node_b = dict(zip(parent_compartments, parent[1].tolist())), \
             dict(zip(child_compartments, child[1].tolist()))
-        local = cache[key] = [(node_a[a], node_b[b])
+        local = _VESSEL_PAIRS[key] = [(node_a[a], node_b[b])
                               for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
     vid_a, vid_b = np.empty(parent[1].size, dtype=np.int64), np.empty(child[1].size, dtype=np.int64)
     vid_a[parent[1]], vid_b[child[1]] = parent_compartments, child_compartments
@@ -925,7 +974,7 @@ def _values_at(g, name, vids, default) -> np.ndarray:
     """Property *name* at *vids* (ascending), *default* where a vertex has none: in bulk (MPG._property_at, the
     instanced vertices' values included)."""
     out = np.full(vids.size, float(default))
-    found, values = g._property_at(name, vids)
+    found, values = g.values_at(name, vids)
     if found.size:
         out[np.searchsorted(vids, found)] = np.asarray(values, dtype=np.float64)
     return out

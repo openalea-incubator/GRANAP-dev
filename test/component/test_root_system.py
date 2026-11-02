@@ -117,17 +117,17 @@ class Hydraulics(FunctionalComponent):
 
         @node_balance(field="psi")
         def _balance(self, flux):
-            return np.asarray(self._graph_view.incidence @ flux).reshape(-1)
+            return np.asarray(self.graph_view.incidence @ flux).reshape(-1)
 
         @edge_law(field="flux", explicit=True)
         def _flow(self, psi):
-            return np.asarray(self._graph_view.edge_difference @ psi).reshape(-1)
+            return np.asarray(self.graph_view.edge_difference @ psi).reshape(-1)
 
 
 def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
     from openalea.metafspm.coupling.choregrapher import Choregrapher
     g, _, ds = plant
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     tissue = g.property("tissue")
     nodes = ds.entity_ids("node")
     first = _segments(g)[0]

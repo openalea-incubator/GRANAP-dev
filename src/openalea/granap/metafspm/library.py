@@ -205,8 +205,8 @@ class Template:
             from openalea.metafspm.data_structure.instances import SectionTemplate
             from openalea.metafspm.data_structure.mpg import MPG
             scratch = MPG()
-            segment = scratch._add_system_root_at_scale(scratch.scales.SubOrgan)
-            first = scratch._id + 1
+            segment = scratch.add_root_at_scale(scratch.scales.SubOrgan)
+            first = scratch.last_vid + 1
             written = self.instantiate(scratch, segment)
             nodes = list(written["protoplasts"]) + list(written["apoplast"])
             scratch.set_values("pore_width", nodes, [np.nan] * len(nodes))
@@ -214,7 +214,7 @@ class Template:
             if extend is not None:
                 extend(scratch, segment, written)
             scratch.convert_properties_to_arraydict()
-            self._sections[name] = SectionTemplate.capture(scratch, segment, range(first, scratch._id + 1),
+            self._sections[name] = SectionTemplate.capture(scratch, segment, range(first, scratch.last_vid + 1),
                                                            key=("granap", self.index, name))
         return self._sections[name]
 

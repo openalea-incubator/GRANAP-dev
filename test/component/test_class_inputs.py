@@ -181,3 +181,19 @@ def test_a_sheath_is_a_bent_leaf_of_its_own_kind():
     assert not isinstance(template_by_index(template[stem]).organ, LeafAnatomy)
     organ = int(g.complex_at_scale(sheath, g.scales.Organ))
     assert organ in g.property("leaf_surface")
+
+
+def test_a_plants_anatomy_field_given_dotted():
+    """root_anatomy's fields are parameters of their own (parameter_table: defaults and bounds from the preset), and
+    a scenario may give one dotted: "root_anatomy.cortex.n_layers"."""
+    from openalea.metafspm.scene.scenarios import parameter_table
+    table = parameter_table(GranapAnatomy).set_index("name")
+    assert table.at["root_anatomy.cortex.n_layers", "min_value"] == 1
+    population = initiated(planting([Planting(x=0.), Planting(x=1.)], None,
+                                    plant_scenarios=[{"root_anatomy.cortex.n_layers": 2}, {}]), TwoRoots, GranapAnatomy)
+    g, plants = population.data_structure.structure, population.plants
+    template = g.property("anatomy_template")
+    from openalea.granap.metafspm.library import template_by_index
+    cortex = [max(sum(c.type == "cortex" for c in template_by_index(template[s]).organ.all_cells.cells)
+                  for s in g.components_at_scale(p, scale=g.scales.SubOrgan)) for p in plants]
+    assert 0 < cortex[0] < cortex[1]                              # 2 layers, the preset's 5

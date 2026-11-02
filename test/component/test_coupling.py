@@ -40,7 +40,7 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture(scope="module")
 def coupled():
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     population = initiated(planting(), SmallRootSystem, Anatomy)
     g = population.data_structure.structure
     ds = population.data_structure

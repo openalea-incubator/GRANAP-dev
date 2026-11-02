@@ -41,7 +41,7 @@ def section():
     organ.export_to_adjencymatrix()
     graph = organ.graph                                       # GRANAP's view, built before the conversion
     g.convert_properties_to_arraydict()
-    Choregrapher()._set_simulation_time_step(3600.)
+    Choregrapher().set_simulation_time_step(3600.)
     ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment")
     Network(data_structure=ds)
     return organ, g, ds, graph
