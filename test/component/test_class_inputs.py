@@ -4,10 +4,12 @@ a plant's scenario parametrizes its anatomies (root_anatomy, leaf_anatomy: {"pre
 and a class input bins a SubOrgan variable into the class and sets a GRANAP field from it. One component instance
 serves both plants.
 """
+from dataclasses import dataclass
+
 import pytest
 
-from openalea.metafspm.coupling.component import StructuralComponent
-from openalea.metafspm.data_structure.configs import PropsConfig
+from openalea.metafspm.coupling.component import StructuralComponent, input_variable, state_variable
+from openalea.metafspm.data_structure.configs import PropsConfig, ScalesConfig
 from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, default_class_inputs
@@ -58,9 +60,12 @@ def test_plants_parametrized_differently_get_their_own_templates_and_alike_share
 def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
     layers = ClassInput("cortex_layers", width=1., target=("cortex", "n_layers"))
 
+    @dataclass
     class Anatomy(GranapAnatomy):
         library = AnatomyLibrary()
         root = OrganAnatomy(library, "radius", class_inputs=default_class_inputs("radius") + (layers,))
+        cortex_layers: float = input_variable(unit="", description="the cortex' layers, given by the architecture",
+                                              by="Architecture", scale=ScalesConfig.SubOrgan, kind="descriptor")
 
     population = initiated(_planting(None), TwoRoots, Anatomy)
     g, plants = population.data_structure.structure, population.plants
@@ -91,3 +96,88 @@ def test_a_preset_on_an_explicit_organ_raises():
         root = OrganAnatomy(AnatomyLibrary(), "radius")
     with pytest.raises(ValueError, match="explicit"):
         initiated(_planting({"preset": "for_dicot_root"}), TwoRoots, Anatomy)
+
+
+@dataclass
+class TwoStemOrgans(StructuralComponent):
+    """Each plant: two stem organs of two elements each, their diameters given at the Organ scale (as Adel's)."""
+    diameter: float = state_variable(unit="m", description="the stem organ's diameter", default=0.,
+                                     scale=ScalesConfig.Organ, kind="descriptor")
+
+    @classmethod
+    def initiate_plant(cls, g, plant, parameters):
+        s, L = g.scales, g.labels
+        complex_ = plant
+        for scale, label in ((s.Axis, L.Axis.Shoot), (s.GrowthUnit, L.GrowthUnit.Shoot)):
+            complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
+        for diameter in (2e-3, 3e-3):
+            phytomer = g.add_component(complex_, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Shoot))
+            organ = g.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.StemInternode))
+            g.property("diameter")[organ] = diameter
+            for _ in range(2):
+                v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/',
+                                                         label=L.SubOrgan.StemElement))
+                g.property("length")[v], g.property("distance_from_tip")[v] = 1e-2, 0.
+
+
+def test_the_stems_are_classed_by_a_linked_stem_radius():
+    """The stems' class input is GRANAP's declared stem_radius, linked in the plant model's translator from the
+    architecture's organ diameter (Organ -> SubOrgan, broadcast, x 0.5): applied at initiation, before GRANAP builds
+    the anatomies. An organ's elements share its class; without the link GRANAP finds no stem_radius."""
+    from openalea.granap.metafspm.component import preset_library
+    from openalea.metafspm.coupling.translator import Translator
+
+    class Anatomy(GranapAnatomy):
+        shoot = {"StemElement": OrganAnatomy(preset_library("for_monocot_stem", 0), "stem_radius")}
+
+    translator = Translator().link("Anatomy", "stem_radius", "TwoStemOrgans", {"diameter": 0.5},
+                                   source_scale="Organ", scale="SubOrgan", aggregation="broadcast")
+    population = initiated(_planting(None), TwoStemOrgans, Anatomy, translator=translator)
+    g = population.data_structure.structure
+    elements = sorted(int(s) for s in g.property("anatomy_class"))
+    assert [g.property("anatomy_class")[s][0] for s in elements] == [2., 2., 3., 3.]   # diameters in mm
+    with pytest.raises(KeyError, match="class input 'stem_radius'"):
+        initiated(_planting(None), TwoStemOrgans, Anatomy)
+
+
+def test_an_undeclared_class_input_raises():
+    class Anatomy(GranapAnatomy):
+        root = OrganAnatomy(AnatomyLibrary(), "cortex_layers")
+    with pytest.raises(ValueError, match="'cortex_layers' is not a declared input"):
+        initiated(_planting(None), TwoRoots, Anatomy)
+
+
+class InternodeAndSheath(StructuralComponent):
+    """Each plant: an internode and a sheath, one stem element each (as Adel's: a sheath's elements are stem
+    elements)."""
+
+    @classmethod
+    def initiate_plant(cls, g, plant, parameters):
+        s, L = g.scales, g.labels
+        complex_ = plant
+        for scale, label in ((s.Axis, L.Axis.Shoot), (s.GrowthUnit, L.GrowthUnit.Shoot), (s.Phytomer, L.Phytomer.Shoot)):
+            complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
+        for organ_label in (L.Organ.StemInternode, L.Organ.Sheath):
+            organ = g.add_component(complex_, **PropsConfig(scale=s.Organ, edge_type='/', label=organ_label))
+            v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.StemElement))
+            g.property("stem_radius")[v], g.property("length")[v], g.property("distance_from_tip")[v] = 1e-3, 1e-2, 0.
+
+
+def test_a_sheath_is_a_bent_leaf_of_its_own_kind():
+    """sheath_anatomy: a sheath's elements get a monocot leaf bent round the stem (fold_sag 2 mm) and its organ a
+    surface; with stem_anatomy only, the internode's element gets a stem and the sheath's none."""
+    from openalea.granap.leaf_class import LeafAnatomy
+    from openalea.granap.metafspm.library import template_by_index
+    planting_ = planting([Planting(x=0.), Planting(x=1.)], None,
+                         plant_scenarios=[{"sheath_anatomy": {}}, {"stem_anatomy": {}}])
+    population = initiated(planting_, InternodeAndSheath, GranapAnatomy)
+    g, plants = population.data_structure.structure, population.plants
+    template = g.property("anatomy_template")
+    (internode, sheath), (stem, bare) = [sorted(int(v) for v in g.components_at_scale(p, scale=g.scales.SubOrgan))
+                                         for p in plants]
+    assert template.get(internode, -1.) == -1. and template.get(bare, -1.) == -1.
+    leaf = template_by_index(template[sheath]).organ
+    assert isinstance(leaf, LeafAnatomy) and leaf.global_params["fold_sag"] == 2.0
+    assert not isinstance(template_by_index(template[stem]).organ, LeafAnatomy)
+    organ = int(g.complex_at_scale(sheath, g.scales.Organ))
+    assert organ in g.property("leaf_surface")

@@ -12,7 +12,7 @@ segment (its own vertices and state, the template's geometry). junction_rules pa
 successive sections (xylem with xylem, phloem with phloem): by track_id where both have one, else the nearest in
 (angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 
@@ -22,8 +22,8 @@ from openalea.metafspm.solve.decorator import postsegmentation, state
 
 from openalea.granap.metafspm import columns
 from openalea.granap.metafspm.build import JUNCTION, LEAF_SURFACE, SOIL_NODE, WALL, _props as _build_props
-from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_targets, preset_parameters,
-                                              template_by_index)
+from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_targets, merged,
+                                              preset_parameters, template_by_index)
 
 SCALES = ScalesConfig()
 MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's lengths in m
@@ -31,9 +31,18 @@ MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's length
 
 # The scenario keys of the anatomies, by SubOrgan label: each a dict {"preset": ..., "seed": ..., section: {field: value}}
 # on top of its preset (GRANAP's OrganInputData), read from each plant's scenario when the plant is built
-ANATOMY_KEYS = {"RootSegment": "root_anatomy", "StemElement": "stem_anatomy", "LeafElement": "leaf_anatomy"}
-DEFAULT_PRESETS = {"root_anatomy": "for_root", "stem_anatomy": "for_monocot_stem", "leaf_anatomy": "for_monocot_leaf"}
-SIZES = {"root_anatomy": "radius", "stem_anatomy": "radius", "leaf_anatomy": None}    # the class's size input
+ANATOMY_KEYS = {"RootSegment": "root_anatomy", "StemElement": "stem_anatomy", "LeafElement": "leaf_anatomy",
+                "Sheath": "sheath_anatomy"}
+DEFAULT_PRESETS = {"root_anatomy": "for_root", "stem_anatomy": "for_monocot_stem", "leaf_anatomy": "for_monocot_leaf",
+                   "sheath_anatomy": "for_monocot_leaf"}
+SIZES = {"root_anatomy": "radius", "stem_anatomy": "stem_radius", "leaf_anatomy": None,
+         "sheath_anatomy": None}                                                      # the class's size input
+# Kinds named by their organ: {Organ label name: the SubOrgan label of its elements} (a sheath's elements are stem
+# elements, Adel's, with an anatomy of their own)
+ORGAN_KINDS = {"Sheath": "StemElement"}
+# A kind's default overrides, under the plant's: a sheath is, for now, a monocot leaf bent round the stem (its
+# mid-line sagging 2 mm below its 4 mm chord: a U)
+DEFAULT_OVERRIDES = {"sheath_anatomy": {"planttype": {"fold_sag": 2.0}}}
 RESERVED = ("preset", "seed")
 _LIBRARIES = {}                                   # {(preset, seed): AnatomyLibrary}, shared by the components
 
@@ -63,7 +72,7 @@ class OrganAnatomy:
     """
     The anatomy of one kind of segment: its library and its class inputs (default: the diameter from *size*, binned by
     0.05 mm; the distance from the tip and from the root-shoot junction, not binned). *size*: the SubOrgan property
-    giving the section's size (None: one class).
+    giving the section's size, its radius in m (None: one class).
     """
     library: AnatomyLibrary
     size: str = "radius"
@@ -82,11 +91,16 @@ def default_class_inputs(size="radius") -> tuple:
             ClassInput("distance_from_junction", 0., MM_PER_M, compute=lambda g, segment: distance_from_junction(g, segment)))
 
 
-def _segments(g, plant, labels_handled=("RootSegment",)):
-    """The segments of *plant* (SubOrgan vertices) whose label is handled (default: root segments)."""
-    codes = {getattr(g.labels.SubOrgan, name) for name in labels_handled}
+def _segments(g, plant, labels_handled=("RootSegment",), kind=None):
+    """The segments of *plant* (SubOrgan vertices) whose kind is handled (default: root segments); *kind*: a function
+    (g, segment) -> its kind's name (GranapAnatomy._label_name), by default its SubOrgan label's."""
+    codes = {getattr(g.labels.SubOrgan, name, None) for name in labels_handled}
+    codes |= {getattr(g.labels.SubOrgan, ORGAN_KINDS[name]) for name in labels_handled if name in ORGAN_KINDS}
     labels = g.property("label")
-    return [int(v) for v in g.components_at_scale(plant, scale=g.scales.SubOrgan) if labels.get(v) in codes]
+    candidates = [int(v) for v in g.components_at_scale(plant, scale=g.scales.SubOrgan) if labels.get(v) in codes]
+    if kind is None:
+        return candidates
+    return [v for v in candidates if kind(g, v) in labels_handled]
 
 
 def distance_from_junction(g, segment, length="length") -> float:
@@ -329,6 +343,10 @@ class GranapAnatomy(StructuralComponent):
     radius: float = input_variable(unit="m", description="the segment's radius (the diameter class input)",
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
                                    kind="intensive")
+    stem_radius: float = input_variable(unit="m", description="a stem element's radius (the stems' diameter class "
+                                        "input; e.g. linked from an architecture's organ diameter)",
+                                        references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
+                                        kind="descriptor")
     distance_from_tip: float = input_variable(unit="m", description="the segment's distance from its axis' tip",
                                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
                                               kind="intensive")
@@ -417,7 +435,8 @@ class GranapAnatomy(StructuralComponent):
     library = AnatomyLibrary()
     root = None                      # the roots' OrganAnatomy (None: library, its classes by diameter)
     shoot = {}                       # {SubOrgan label name: OrganAnatomy}, e.g. stems and leaves (roots: library)
-    leaf_labels = ("LeafElement",)   # the SubOrgan labels of leaves: their organs get a surface node
+    leaf_labels = ("LeafElement", "Sheath")   # the kinds of leaves (SubOrgan labels, Sheath): their organs get a
+                                              # surface node
     mm_per_unit = MM_PER_M
     soil_node = False                # the default of a plant's scenario key soil_node: True, each root segment's
                                      # anatomy has one soil node (kind 4), joined to its border walls and junctions
@@ -433,8 +452,17 @@ class GranapAnatomy(StructuralComponent):
 
     @classmethod
     def _label_name(cls, g, segment) -> str:
-        code = g.property("label").get(segment)
-        return next((name for name in ANATOMY_KEYS if getattr(g.labels.SubOrgan, name, None) == code), None)
+        """The segment's kind: its SubOrgan label's name, or its organ's for the kinds named by their organ (Sheath)."""
+        labels = g.property("label")
+        code = labels.get(segment)
+        name = next((name for name in ANATOMY_KEYS if getattr(g.labels.SubOrgan, name, None) == code), None)
+        organ = None
+        for organ_name, element in ORGAN_KINDS.items():
+            if name == element:
+                organ = int(g.complex_at_scale(segment, g.scales.Organ)) if organ is None else organ
+                if labels.get(organ) == getattr(g.labels.Organ, organ_name):
+                    return organ_name
+        return name
 
     @classmethod
     def anatomy_settings(cls, g, segment) -> dict:
@@ -544,7 +572,20 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def segment_class(cls, g, segment) -> tuple:
         """The segment's anatomy class: its organ's class inputs, binned."""
-        return class_key(cls.organ_of(g, segment).class_inputs, g, segment)
+        organ = cls.organ_of(g, segment)
+        cls.check_class_inputs(organ)
+        return class_key(organ.class_inputs, g, segment)
+
+    @classmethod
+    def check_class_inputs(cls, organ) -> None:
+        """A class input reads a variable the component declares (an input the plant model's translator links, e.g.
+        stem_radius from an architecture's organ diameter), never another model's property by name."""
+        declared = {f.name for f in fields(cls) if f.metadata.get("variable_type") in ("input", "parameter")}
+        for c in organ.class_inputs:
+            if c.compute is None and c.width > 0 and c.variable not in declared:
+                raise ValueError(f"{cls.__name__}: the class input '{c.variable}' is not a declared input: declare it "
+                                 f"(input_variable(..., by=\"Architecture\", scale=SubOrgan)) and link it in the "
+                                 "plant model's translator")
 
     @classmethod
     def initiate_plant(cls, g, plant_vid: int, parameters: dict) -> None:
@@ -556,7 +597,7 @@ class GranapAnatomy(StructuralComponent):
             (parameters or {}).get("instanced_anatomy", cls.instanced))
         g.properties().setdefault("anatomy_soil_node", {})[plant_vid] = bool(
             (parameters or {}).get("soil_node", cls.soil_node))
-        segments = _segments(g, plant_vid, cls.handled_labels(g, plant_vid))
+        segments = _segments(g, plant_vid, cls.handled_labels(g, plant_vid), cls._label_name)
         cls.update_anatomies(g, segments)
         cls.update_leaf_surfaces(g, segments)
 
@@ -580,7 +621,8 @@ class GranapAnatomy(StructuralComponent):
             else:
                 done["emerged"].append(segment)
             organ = cls.organ_of(g, segment)
-            plant = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED} or None
+            own = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED}
+            plant = merged(DEFAULT_OVERRIDES.get(ANATOMY_KEYS.get(cls._label_name(g, segment)), {}), own) or None
             template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
             instanced, soil = cls.is_instanced(g, segment), cls.has_soil_node(g, segment)
             reduction = getattr(g, "reduction", None)            # the plant model's (solve.reduction)
@@ -616,15 +658,15 @@ class GranapAnatomy(StructuralComponent):
         import shapely
         s, L = g.scales, g.labels
         labels = g.property("label")
-        codes = {getattr(L.SubOrgan, name) for name in cls.leaf_labels}
-        organs = sorted({int(g.complex_at_scale(v, s.Organ)) for v in segments if labels.get(v) in codes})
+        organs = sorted({int(g.complex_at_scale(v, s.Organ)) for v in segments if cls._label_name(g, v) in cls.leaf_labels})
         if not organs:
             return
         surfaces = g.properties().setdefault("leaf_surface", {})
         path, tissue = g.view("network_path"), g.view("tissue")
         template_row = g.view("template_row")
         for organ in organs:
-            elements = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan) if labels.get(v) in codes]
+            elements = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan)
+                        if cls._label_name(g, v) in cls.leaf_labels]
             stomatal = [c for e in elements for c in list(g._children.get(e, []))
                         if g.scale(c) == s.Connection and path.get(c) == columns.STOMATAL_PATH]
             g.remove_connections(stomatal)
@@ -688,7 +730,7 @@ class GranapAnatomy(StructuralComponent):
         """MPG-style: every segment of the MPG gets its class's anatomy (emerged, or replaced on a change)."""
         g = self.mtg
         segments = [s for plant in g.components_at_scale(g.root, scale=g.scales.Plant)
-                    for s in _segments(g, plant, self.handled_labels(g, plant))]
+                    for s in _segments(g, plant, self.handled_labels(g, plant), self._label_name)]
         alive = set(segments)
         anatomy_class = g.properties().get("anatomy_class", {})
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only

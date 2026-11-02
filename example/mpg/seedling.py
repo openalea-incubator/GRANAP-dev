@@ -49,6 +49,8 @@ def _chain(g, organ, n, label, radius, bearer=None):
         elements.append(g.add_child(elements[-1], **PropsConfig(scale=s.SubOrgan, edge_type='<', label=label)))
     for rank, v in enumerate(elements):
         g.property("radius")[v], g.property("length")[v] = radius, SEGMENT
+        if label == g.labels.SubOrgan.StemElement:                      # the stems' class input
+            g.property("stem_radius")[v] = radius
         g.property("distance_from_tip")[v] = (n - 1 - rank) * SEGMENT
     return elements
 
