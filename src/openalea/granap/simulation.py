@@ -63,7 +63,6 @@ def parameters(values: dict = None, main_only: bool = False, preset: str = "for_
 def _plant_model():
     """The plant model of the component alone: a stand-in root axis (one segment) and GranapAnatomy."""
     from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-    from openalea.metafspm.coupling.translator import Translator
 
     from openalea.granap.metafspm.architectures import RootAxis
     from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
@@ -73,10 +72,12 @@ def _plant_model():
         from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
 
         def __init__(self, data_structure, time_step):
+            self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)
             self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-            self.couple(self.anatomy)
+            self.couple(self.architecture, self.anatomy)
 
         def run(self):
+            self.architecture()
             self.anatomy()
 
     return SectionAlone
@@ -149,12 +150,14 @@ class Section:
         return ax
 
 
-def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, outputs: str = None) -> Section:
+def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, outputs: str = None,
+             recorder=None) -> Section:
     """Generate one root section from *preset*'s parameters (an OrganInputData preset of a root: for_root, the
     monocot root, or for_dicot_root) changed by *parameters* ({section: {field: value}}, lengths in mm), with the
     random draws of *seed* (the same seed gives the same section). *outputs*: a folder the section is saved in
     (run.json, the run's status and versions; scenario.json, what it was built with; Plant/<model>/summaries.csv;
-    frames/, the section as an fspm-TF frame), None for none."""
+    frames/, the section as an fspm-TF frame), None for none. *recorder*: instead, a metafspm SceneRecorder of your
+    own (e.g. frames only, filtered by its frame_options)."""
     from openalea.metafspm.scene.population import Planting, planting
     from openalea.metafspm.scene.recorder import SceneRecorder
     from openalea.metafspm.scene.scene import Scene
@@ -162,8 +165,11 @@ def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, o
     anatomy = {"preset": preset, "seed": int(seed), **{section: dict(fields) for section, fields in
                                                        (parameters or {}).items()}}
     table = planting([Planting()], _plant_model(), {"root_anatomy": anatomy})
-    recorder = SceneRecorder(outputs, frame_period=1) if outputs is not None else None
-    scene = Scene(table, recorder=recorder)
+    if outputs is not None and recorder is not None:
+        raise ValueError("simulate: give outputs (a folder) or a recorder, not both")
     if outputs is not None:
+        recorder = SceneRecorder(outputs, frame_period=1)
+    scene = Scene(table, recorder=recorder)
+    if recorder is not None:
         scene.simulate(0)                                 # the section's built state, recorded
     return Section(scene=scene, parameters=dict(parameters or {}), preset=preset, seed=int(seed))

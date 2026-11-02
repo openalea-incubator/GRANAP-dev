@@ -17,34 +17,8 @@ from openalea.granap.network_base import AbstractNetwork
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.cell_class import Cell
+from openalea.granap.input_data import DEFAULT_CELL_WALL_THICKNESS, cell_wall_thickness as organ_wall_thickness
 
-
-DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
-    "epidermis": 2,
-    "exodermis": 2,
-    "hypodermis": 2,
-    "endodermis": 1.5,
-    "cortex": 1,
-    "mesophyll": 1,
-    "parenchyma": 1,
-    "stele": 1,
-    "pericycle": 1,
-    "phloem": 1,
-    "xylem": 1.5,
-    "protoxylem": 1.5,
-    "metaxylem": 2,
-    "cambium": 1,
-    "duct": 5,
-    "resin duct epithelium": 1,   # thin-walled, secretory (Ep)
-    "resin duct sheath": 2,        # thicker-walled (Sh)
-    "guard cell": 2,
-    "Strasburger cell": 1,
-    "Str. Interstitial cell": 1,
-    "outerwall": 2,
-    "air space": 0.001,
-    "pore": 0.001,
-    "aerenchyma": 0.001,
-}
 
 # ---------------------------------------------------------------------------
 # GRANAP cell ``type`` string -> MECHA ``cgroup`` integer.
@@ -737,7 +711,7 @@ class NetworkExporter:
     def __init__(self, organ: Organ):
         self.organ = organ
 
-    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float]] = DEFAULT_CELL_WALL_THICKNESS, air_link_radius: Optional[float] = None,
+    def export(self, network: AbstractNetwork, cell_wall_thickness: Union[float, Dict[str, float], None] = None, air_link_radius: Optional[float] = None,
                bridges: bool = True, bridge_radius: Optional[float] = None) -> None:
         """
         Populate the provided network graph from the cell GeoDataFrame.
@@ -763,7 +737,12 @@ class NetworkExporter:
         ``bridges``/``bridge_radius`` control step 3 — set ``bridges=False``
         to reproduce the pre-bridge graph exactly, or override every spec's
         own radius with ``bridge_radius``.
+
+        ``cell_wall_thickness`` (µm, by tissue, or one value): None, the organ's (its ``cell_wall_thickness``
+        section, else ``DEFAULT_CELL_WALL_THICKNESS``).
         """
+        if cell_wall_thickness is None:
+            cell_wall_thickness = organ_wall_thickness(self.organ.params)
         cells_gdf = self.organ.generate_cells()
 
         # Filter to cells with valid (non-null, non-empty) geometry — must match

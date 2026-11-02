@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from openalea.granap.input_data import OrganInputData
+from openalea.granap.input_data import OPTIONAL_SECTIONS, OrganInputData
 from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL, _props
 from openalea.granap.metafspm.vessels import vessel_ids
 
@@ -117,10 +117,14 @@ def default_root_parameters(key, base: OrganInputData = None, overrides: dict = 
     A root's parameters for the class *key*: *base* (default OrganInputData.for_root()) unchanged, then *overrides*
     ({param: {field: value}}, e.g. {"stele": {"thickness": 0.2}, "cortex": {"n_layers": 3}}) set on it. No rule
     derives parameters from the class (F-P3a, your answer b): a class whose anatomy differs (a thinner lateral, a
-    maturing segment) says so in its own parametrization (AnatomyLibrary's class_parameters).
+    maturing segment) says so in its own parametrization (AnatomyLibrary's class_parameters). A section the preset
+    lacks but GRANAP's optional ones (input_data.OPTIONAL_SECTIONS: cell_wall_thickness) is added with its defaults
+    first.
     """
     data = OrganInputData.for_root() if base is None else copy.deepcopy(base)
     for name, values in (overrides or {}).items():
+        if data.get(name) is None and name in OPTIONAL_SECTIONS:
+            data.params.append(OPTIONAL_SECTIONS[name]())
         for field_name, value in values.items():
             data.set_value(name, field_name, value)
     return data

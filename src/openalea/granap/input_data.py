@@ -127,6 +127,73 @@ def _ground_region_params(clsname: str, name: str, *, thickness: float,
 
 
 # ===========================================================================
+# Cell walls
+# ===========================================================================
+
+# The thickness of a cell's wall layer by its tissue (µm): a wall's thickness is the sum of its cells' layers, plus
+# the outer wall's on the section's border (the network's wall_thickness, MECHA's); "default" for any other tissue
+DEFAULT_CELL_WALL_THICKNESS: Dict[str, float] = {
+    "epidermis": 2,
+    "exodermis": 2,
+    "hypodermis": 2,
+    "endodermis": 1.5,
+    "cortex": 1,
+    "mesophyll": 1,
+    "parenchyma": 1,
+    "stele": 1,
+    "pericycle": 1,
+    "phloem": 1,
+    "xylem": 1.5,
+    "protoxylem": 1.5,
+    "metaxylem": 2,
+    "cambium": 1,
+    "duct": 5,
+    "resin duct epithelium": 1,   # thin-walled, secretory (Ep)
+    "resin duct sheath": 2,        # thicker-walled (Sh)
+    "guard cell": 2,
+    "Strasburger cell": 1,
+    "Str. Interstitial cell": 1,
+    "outerwall": 2,
+    "air space": 0.001,
+    "pore": 0.001,
+    "aerenchyma": 0.001,
+}
+DEFAULT_OTHER_WALL_THICKNESS = 1.0                  # µm: the tissues the table does not name
+
+# {field of CellWallThicknessParams: its tissue}: the tissue's name as an identifier ("Str. Interstitial cell":
+# str_interstitial_cell), "other_tissues" the default
+CELL_WALL_TISSUES: Dict[str, str] = {
+    **{"_".join("".join(c if c.isalnum() else " " for c in tissue.lower()).split()): tissue
+       for tissue in DEFAULT_CELL_WALL_THICKNESS},
+    "other_tissues": "default"}
+
+CellWallThicknessParams = create_model(
+    "CellWallThicknessParams", __base__=BaseParams,
+    name=(str, "cell_wall_thickness"),
+    **{field: (float, Field(default=float(DEFAULT_CELL_WALL_THICKNESS.get(tissue, DEFAULT_OTHER_WALL_THICKNESS)),
+                            ge=0.0, title=f"{tissue.capitalize() if tissue != 'default' else 'Other tissues'} wall",
+                            description=(f"Thickness (µm) of the {tissue} cells' wall layer" if tissue != "default"
+                                         else "Thickness (µm) of the wall layer of the cells of any other tissue")
+                            + ": a wall's thickness is the sum of its cells' layers (and of the outer wall's on the "
+                              "section's border)"))
+       for field, tissue in CELL_WALL_TISSUES.items()})
+CellWallThicknessParams.__doc__ = """The cells' wall thickness by tissue (µm), for the hydraulic network's walls: an
+optional section (the presets do not hold it; the defaults, DEFAULT_CELL_WALL_THICKNESS, apply without it)."""
+
+# Sections a preset may lack, added with their defaults when a parametrization names them
+OPTIONAL_SECTIONS = {"cell_wall_thickness": CellWallThicknessParams}
+
+
+def cell_wall_thickness(params) -> Dict[str, float]:
+    """The cells' wall thickness by tissue (µm, "default" for the others) of an organ's *params* (its sections, as
+    dicts): its cell_wall_thickness section's, else DEFAULT_CELL_WALL_THICKNESS."""
+    section = next((p for p in params if p.get("name") == "cell_wall_thickness"), None)
+    if section is None:
+        return DEFAULT_CELL_WALL_THICKNESS
+    return {tissue: float(section[field]) for field, tissue in CELL_WALL_TISSUES.items() if field in section}
+
+
+# ===========================================================================
 # Layer defaults
 # ===========================================================================
 

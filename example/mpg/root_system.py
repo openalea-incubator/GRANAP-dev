@@ -12,6 +12,7 @@ traversal of the plant graph): along the main axis, its predecessor; the lateral
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
 from openalea.metafspm.scene.population import Planting, planting
@@ -38,10 +39,12 @@ class RootSystem(CompositeModel):
     from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
 
     def __init__(self, data_structure, time_step):
+        self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)
         self.anatomy = RootSystemAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.anatomy)
+        self.couple(self.architecture, self.anatomy)
 
     def run(self):
+        self.architecture()
         self.anatomy()
 
 
@@ -70,13 +73,13 @@ def main():
 
     fig, ax = plt.subplots(figsize=(15, 7.5))
     draw_plant(ax, ds, offsets)
+    diameter = dict(zip(segments, 2e3 * np.asarray(ds.get("radius"))))          # mm: the class's binned key
     for s, (x, y) in offsets.items():
-        ax.annotate(f"segment {s}\nclass {g.property('anatomy_class')[s][0]:g} mm", (x, y + 0.5), ha="center",
-                    fontsize=8)
+        ax.annotate(f"segment {s}\ndiameter {diameter[s]:g} mm", (x, y + 0.5), ha="center", fontsize=8)
     ax.margins(0.05, 0.12)
     ax.set_xticks([])
     ax.set_yticks([])
-    n_templates = len(set(g.property("anatomy_template").values()))
+    n_templates = len(set(ds.get("anatomy_template").tolist()))
     ax.set_title(f"{len(segments)} segments, {n_templates} anatomy templates: {ds.n_nodes()} Compartments, "
                  f"{ds.n_edges()} Connections ({int((ds.get('network_path') == 5).sum())} axial junctions)")
     fig.tight_layout(rect=(0, 0.08, 1, 1))

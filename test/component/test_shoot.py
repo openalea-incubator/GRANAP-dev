@@ -2,30 +2,35 @@
 Stems and leaves too: one library per kind of segment (GranapAnatomy.shoot), each segment its kind's anatomy, and
 vessel junctions across the stem-leaf and stem-root links.
 """
-import os
-import sys
-
+from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.leaf_class import LeafAnatomy
+from openalea.granap.metafspm.architectures import new_organ, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary, preset_parameters
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "example", "mpg"))
-from seedling import _chain, _organ                                                    # noqa: E402
+from roots import initiated
 
-from openalea.metafspm.coupling.component import StructuralComponent                  # noqa: E402
-from roots import initiated                                                            # noqa: E402
+SEGMENT = 5e-3                      # m
+
+
+def _elements(n, radius):
+    """n elements of *radius*, base to tip: [(radius, length, distance from the tip)]."""
+    return [(radius, SEGMENT, (n - 1 - rank) * SEGMENT) for rank in range(n)]
 
 
 class SmallShoot(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode"), 2, L.StemElement, 2.5e-3)
-        _chain(g, _organ(g, plant, "Shoot", "Leaf"), 1, L.LeafElement, 2.5e-3, bearer=stem[1])
-        _chain(g, _organ(g, plant, "Root", "RootInternode"), 1, L.RootSegment, 0.55e-3, bearer=stem[0])
+        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+                             _elements(2, 2.5e-3))
+        segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement, _elements(1, 2.5e-3),
+                      bearer=stem[1])
+        segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+                      _elements(1, 0.55e-3), bearer=stem[0])
 
 
 class ShootAnatomy(GranapAnatomy):
@@ -65,8 +70,10 @@ class TwoElementLeaf(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode"), 1, L.StemElement, 2.5e-3)
-        _chain(g, _organ(g, plant, "Shoot", "Leaf"), 2, L.LeafElement, 2.5e-3, bearer=stem[0])
+        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+                             _elements(1, 2.5e-3))
+        segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement, _elements(2, 2.5e-3),
+                      bearer=stem[0])
 
 
 def test_leaf_surface_and_stomatal_connections():

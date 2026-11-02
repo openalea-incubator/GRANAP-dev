@@ -13,10 +13,12 @@ successive sections (xylem with xylem, phloem with phloem): by track_id where bo
 (angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions.
 """
 from dataclasses import dataclass, fields
+from functools import partial
 
 import numpy as np
 
-from openalea.metafspm.coupling.component import StructuralComponent, input_variable, parameter, state_variable
+from openalea.metafspm.coupling.component import (StructuralComponent, input_variable, parameter, planting_variable,
+                                                  state_variable)
 from openalea.metafspm.data_structure.configs import ScalesConfig
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
@@ -50,14 +52,17 @@ _UNITS = {"mm", "µm", "um", "mm2", "mm3", "°", "deg", "degrees", "rad", "%", "
 
 
 def section_fields(key: str) -> dict:
-    """The numeric fields of an anatomy kind's default preset (*key*: root_anatomy, stem_anatomy...), for its
-    sectioned parameter: {"section.field": {default, unit, description, min_value, max_value}}, the defaults the
-    preset's, the bounds its fields' (ge, le), the unit the first parenthesised unit of their description."""
+    """The numeric fields of an anatomy kind's default preset (*key*: root_anatomy, stem_anatomy...), and of GRANAP's
+    optional sections (the cells' wall thickness by tissue, cell_wall_thickness), for its sectioned parameter:
+    {"section.field": {default, unit, description, min_value, max_value}}, the defaults the preset's, the bounds its
+    fields' (ge, le), the unit the first parenthesised unit of their description."""
     if key not in _SECTION_FIELDS:
         import re
-        from openalea.granap.input_data import OrganInputData
+        from openalea.granap.input_data import OPTIONAL_SECTIONS, OrganInputData
         fields_of = {}
-        for section in getattr(OrganInputData, DEFAULT_PRESETS[key])().params:
+        preset = getattr(OrganInputData, DEFAULT_PRESETS[key])()
+        optional = [section() for name, section in OPTIONAL_SECTIONS.items() if preset.get(name) is None]
+        for section in list(preset.params) + optional:
             for name, info in type(section).model_fields.items():
                 value = getattr(section, name)
                 if name == "name" or isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -289,6 +294,18 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     return sources
 
 
+class GranapInheritance:
+    """The DataStructure's inheritance rule (ds.inheritance) for GRANAP's anatomies: granap_inheritance, the sections
+    of *fresh* (the anatomies the last update replaced) inheriting nothing. An object, not a closure: the Scene's
+    checkpoints keep it."""
+
+    def __init__(self, fresh=()):
+        self.fresh = set(fresh)
+
+    def __call__(self, ds, new_vids, is_known) -> np.ndarray:
+        return granap_inheritance(ds, new_vids, is_known, self.fresh)
+
+
 def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     """granap_inheritance, Compartment by Compartment (for sections that are not whole template copies)."""
     g = ds.mtg
@@ -354,17 +371,21 @@ class GranapAnatomy(StructuralComponent):
       stem_anatomy   stem elements (default for_monocot_stem; generated when the key is given)
       leaf_anatomy   leaf elements (default for_monocot_leaf; generated when the key is given)
       Each: "preset" (an OrganInputData preset: its organ class follows, e.g. for_needle → NeedleAnatomy), "seed",
-      and GRANAP's sections and fields ({section: {field: value}}). Within a plant, segments of a kind are classed
-      by their diameter (stems and roots, bins of 0.05 mm) and get one template per class.
+      and GRANAP's sections and fields ({section: {field: value}}), among them the cells' wall thickness by tissue
+      (the optional section cell_wall_thickness, µm: "root_anatomy.cell_wall_thickness.endodermis": 3.). Within a
+      plant, segments of a kind are classed by their diameter (stems and roots, bins of 0.05 mm) and get one
+      template per class.
 
     Advanced (class attributes): root, shoot ({SubOrgan label name: OrganAnatomy}) replace a kind's library and
     class inputs (e.g. other anatomies by distance from the tip, ClassInput targets, class_parameters); the plant's
     dict (but its preset) still applies on top. library: the roots' default library. mm_per_unit: the MPG's length
     unit in mm (1000: lengths in m).
 
-    Declared below: the inputs read from the architecture model (role "Architecture" in the composite's translator),
-    and the state variables a coupled model (e.g. MECHA's) reads: the network of every section (Compartments and
-    Connections, quantities in mm, mm2, mm3), its codes, and the 3D quantities recomputed as the segments elongate.
+    Declared below: the inputs read from the architecture model (shared by name with an architecture declaring them,
+    as the stand-ins of architectures.py do, or linked by the plant model's translator, e.g. stem_radius), the
+    planting's positions, and the state variables a coupled model (e.g. MECHA's) reads: the network of every section
+    (Compartments and Connections, quantities in mm, mm2, mm3), its codes, and the 3D quantities recomputed as the
+    segments elongate.
     """
     # ── Inputs: the segments' architecture ──
     radius: float = input_variable(unit="m", description="the segment's radius (the diameter class input)",
@@ -380,6 +401,10 @@ class GranapAnatomy(StructuralComponent):
     length: float = input_variable(unit="m", description="the segment's length, broadcast to its Compartments",
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, location="node",
                                    kind="intensive")
+    # ── Inputs: the plants' positions (the planting's), where display_triangles draws the sections ──
+    x: float = planting_variable("x")
+    y: float = planting_variable("y")
+    z: float = planting_variable("z")
 
     # ── Parameters: each plant's anatomies (its scenario's) ──
     root_anatomy: object = parameter(unit="", description="the plant's root anatomy: {'preset', 'seed', section: "
@@ -434,9 +459,10 @@ class GranapAnatomy(StructuralComponent):
     wall_length: float = state_variable(unit="mm", description="the wall's length in the section (0: not a wall)",
                                         references="GRANAP", default=0., scale=SCALES.Compartment, location="node",
                                         kind="NonInertialExtensive")
-    wall_thickness: float = state_variable(unit="µm", description="the wall's thickness: its cells' wall layers (the "
-                                                                  "AnatomyWriter's per-tissue values, µm; NaN: not a "
-                                                                  "wall)", references="GRANAP", default=np.nan,
+    wall_thickness: float = state_variable(unit="µm", description="the wall's thickness: its cells' wall layers (by "
+                                                                  "tissue: the anatomy's cell_wall_thickness section; "
+                                                                  "NaN: not a wall)", references="GRANAP",
+                                           default=np.nan,
                                            scale=SCALES.Compartment, location="node",
                                            kind="NonInertialIntensive")
     cell_area: float = state_variable(unit="mm2", description="the protoplast's area in the section (0: apoplast)",
@@ -769,8 +795,7 @@ class GranapAnatomy(StructuralComponent):
         for segment in segments - set(template_of):            # segments without an anatomy (labels not handled)
             template_of[segment] = -1.
         super().__post_init__()
-        self._replaced = set()
-        self.data_structure.inheritance = lambda ds, new, known: granap_inheritance(ds, new, known, self._replaced)
+        self.data_structure.inheritance = GranapInheritance()
 
     @postsegmentation
     def _anatomies(self):
@@ -790,7 +815,7 @@ class GranapAnatomy(StructuralComponent):
         template_of = g.properties()["anatomy_template"]
         for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
             template_of.setdefault(int(segment), -1.)
-        self._replaced = set(done["replaced"])
+        self.data_structure.inheritance.fresh = set(done["replaced"])
         self.last_update = done
 
     def display_triangles(self, where=None):
@@ -812,6 +837,8 @@ class GranapAnatomy(StructuralComponent):
         node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
         kept = np.ones(node_ids.size, dtype=bool) if where is None else np.asarray(where, dtype=bool)
         wanted = set(node_ids[kept].tolist())
+        plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
+                                  np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
         vertices, owners = [], []
         for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
@@ -824,7 +851,7 @@ class GranapAnatomy(StructuralComponent):
             drawn = np.array([row in row_of for row in rows], dtype=bool)
             if not drawn.any():
                 continue
-            centre, axis = _segment_frame(g, segment)
+            centre, axis = _segment_frame(g, segment, plant_position)
             u, v = _perpendiculars(axis)
             xy = local[drawn] / self.mm_per_unit                                   # (T, 3, 2), in m
             vertices.append(centre + xy[..., :1] * u + xy[..., 1:] * v)
@@ -842,8 +869,7 @@ class GranapAnatomy(StructuralComponent):
         centres, the mean of the segments' lengths).
         """
         length_mm = np.asarray(length, dtype=float) * self.mm_per_unit
-        ends = abs(self.data_structure.to_graph_view().incidence).T                # (edges, nodes): the edge's two nodes
-        edge_mm = 0.5 * np.asarray(ends @ length_mm).reshape(-1)
+        edge_mm = self.data_structure.map_to(length_mm, "node", "edge", "mean")      # the mean of the edge's two nodes
         path = np.asarray(network_path)
         membranes = (path == columns.PATH_CODES["membrane"]) | (path == columns.PATH_CODES["wall_air"])
         return {"wall_surface": wall_length * length_mm, "cell_volume": cell_area * length_mm,
@@ -871,9 +897,10 @@ def _template_triangles(template) -> tuple:
     return _TEMPLATE_TRIANGLES[template.index]
 
 
-def _segment_frame(g, segment) -> tuple:
+def _segment_frame(g, segment, plant_position) -> tuple:
     """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when it has them, else along a straight axis from
-    its plant's position, roots down and the shoot up, at its distance from the axis' base."""
+    its plant's position (*plant_position*: {plant: (x, y, z)}, the planting's), roots down and the shoot up, at its
+    distance from the axis' base."""
     properties = g.properties()                       # read only: g.property() would create a missing property
     ends = [properties.get(name, {}).get(segment) for name in ("x1", "y1", "z1", "x2", "y2", "z2")]
     if all(value is not None for value in ends):
@@ -887,7 +914,7 @@ def _segment_frame(g, segment) -> tuple:
         below += float(lengths.get(parent, 0.))
         parent = g.parent(parent)
     plant = g.complex_at_scale(segment, g.scales.Plant)
-    base = np.array([float(properties.get(name, {}).get(plant, 0.) or 0.) for name in ("x", "y", "z")])
+    base = np.asarray(plant_position[int(plant)], dtype=float)
     direction = -1. if properties.get("label", {}).get(segment) == g.labels.SubOrgan.RootSegment else 1.
     middle = below + float(lengths.get(segment, 0.)) / 2.
     return base + np.array([0., 0., direction * middle]), np.array([0., 0., direction])
@@ -980,34 +1007,41 @@ def _values_at(g, name, vids, default) -> np.ndarray:
     return out
 
 
+def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
+    """The properties of the axial junctions *pairs* between the sections of *parent* and *child* (junction_geometry)."""
+    n = len(pairs)
+    lengths = g.property("length")
+    between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
+    x, y = g.view("section_x"), g.view("section_y")
+    out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
+    out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
+               edge_dx=[x[b] - x[a] for a, b in pairs], edge_dy=[y[b] - y[a] for a, b in pairs],
+               membrane_surface=[0.] * n)
+    return out
+
+
 def junction_geometry(mm_per_unit=MM_PER_M):
     """
     The geometry of the axial junctions a wiring rule creates (Q-C1a): their length between the two sections' centres
     (the mean of the segments' lengths), the in-plane offset between the two vessels, the path code of an axial
-    junction (5); the other network columns NaN, the membrane surface 0.
+    junction (5); the other network columns NaN, the membrane surface 0. A function (g, parent, child, pairs) ->
+    {property: values}, picklable (the Scene's checkpoints keep the wiring).
     """
-    def properties(g, parent, child, pairs):
-        n = len(pairs)
-        lengths = g.property("length")
-        between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
-        x, y = g.view("section_x"), g.view("section_y")
-        out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
-        out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
-                   edge_dx=[x[b] - x[a] for a, b in pairs], edge_dy=[y[b] - y[a] for a, b in pairs],
-                   membrane_surface=[0.] * n)
-        return out
-    return properties
+    return partial(_junction_properties, mm_per_unit)
+
+
+def _family_pairs(family, g, parent, child, parent_compartments, child_compartments) -> list:
+    """A wiring rule: the junctions of one family of conducting cells between two sections (vessel_pairs)."""
+    return vessel_pairs(g, parent_compartments, child_compartments, family)
 
 
 def junction_rules(g, mm_per_unit=MM_PER_M) -> list:
     """
     The wiring rules of anatomy mode: axial xylem junctions (apoplastic) and phloem junctions (symplastic), with their
-    geometry (junction_geometry).
+    geometry (junction_geometry); functions, not closures, so that the Scene's checkpoints keep them.
     """
     geometry = junction_geometry(mm_per_unit)
     return [
-        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 0), "edge_label": g.labels.Connection.Apoplastic,
-         "properties": geometry},
-        {"rule": lambda g, p, c, pc, cc: vessel_pairs(g, pc, cc, 1), "edge_label": g.labels.Connection.Symplastic,
-         "properties": geometry},
+        {"rule": partial(_family_pairs, 0), "edge_label": g.labels.Connection.Apoplastic, "properties": geometry},
+        {"rule": partial(_family_pairs, 1), "edge_label": g.labels.Connection.Symplastic, "properties": geometry},
     ]

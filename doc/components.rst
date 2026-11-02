@@ -15,6 +15,10 @@ at each step.
 
 .. metafspm-component:: openalea.granap.metafspm.component.GranapAnatomy
 
+**The stand-in architectures** (``architectures.py``) declare the segments' variables GRANAP reads (``radius``,
+``length``, ``distance_from_tip``: ``SegmentArchitecture``), shared by name once a plant model couples them with
+``GranapAnatomy``; ``RootAxis`` also grows its axes at their tips (``root_growth``).
+
 .. metafspm-component:: openalea.granap.metafspm.architectures.RootAxis
 
 .. metafspm-component:: openalea.granap.metafspm.architectures.Needle

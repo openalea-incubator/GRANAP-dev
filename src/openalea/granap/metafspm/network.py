@@ -17,7 +17,8 @@ exporter's order of creation.
 import numpy as np
 import shapely
 
-from openalea.granap.anatomy_writer import CGROUP_MAP, DEFAULT_CELL_WALL_THICKNESS
+from openalea.granap.anatomy_writer import CGROUP_MAP
+from openalea.granap.input_data import cell_wall_thickness as organ_wall_thickness
 from openalea.granap.metafspm import columns
 from openalea.granap.metafspm.build import JUNCTION, PATH_LABELS, WALL, _props, clear_network
 from openalea.granap.metafspm.topology import topology_from_mpg
@@ -218,13 +219,16 @@ def _thickness(cell_wall_thickness):
     return get
 
 
-def build_network(organ, cell_wall_thickness=DEFAULT_CELL_WALL_THICKNESS) -> dict:
+def build_network(organ, cell_wall_thickness=None) -> dict:
     """
     The network of organ's section with the exporter's default settings and no bridges, built from the MPG and
     written into it (replacing the stored one): walls and junctions as Compartments anchored to the segment, every edge
     a Connection, the nodes' and edges' quantities as numeric columns (columns.py) and the MECHA indices
-    (mecha_index). Returns the updated record of the section.
+    (mecha_index). *cell_wall_thickness* (µm, by tissue, or one value): None, the organ's (its parameters'
+    cell_wall_thickness section, else the defaults). Returns the updated record of the section.
     """
+    if cell_wall_thickness is None:
+        cell_wall_thickness = organ_wall_thickness(organ.params)
     g, segment, written = organ.mpg, organ.segment, organ._mpg_written
     s, L = g.scales, g.labels
     clear_network(g, written)

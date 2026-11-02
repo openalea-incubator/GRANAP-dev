@@ -15,57 +15,42 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from openalea.metafspm.coupling.component import StructuralComponent
 from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.data_structure.configs import PropsConfig
+from openalea.metafspm.coupling.translator import Translator
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
+from openalea.granap.metafspm.architectures import SegmentArchitecture, new_organ, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
 from openalea.granap.metafspm.library import AnatomyLibrary, template_by_index
 from openalea.granap.metafspm.plots import draw_plant, tissue_legend
 
 SEGMENT = 5e-3                                               # m
 STEM_RADIUS, ROOT_RADIUS, LATERAL_RADIUS = 2.5e-3, 0.55e-3, 0.3e-3
+LEAF_RADIUS = 2e-3                                           # half the monocot leaf preset's 4 mm width
 
 
-def _organ(g, plant, kind, organ_label):
-    """An organ of a new axis of *plant* (kind: "Shoot" or "Root")."""
-    s, L = g.scales, g.labels
-    complex_ = plant
-    for scale, labels, name in ((s.Axis, L.Axis, kind), (s.GrowthUnit, L.GrowthUnit, kind),
-                                (s.Phytomer, L.Phytomer, kind), (s.Organ, L.Organ, organ_label)):
-        complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=getattr(labels, name)))
-    return complex_
+def _elements(n, radius):
+    """n elements of *radius*, base to tip: [(radius, length, distance from the tip)]."""
+    return [(radius, SEGMENT, (n - 1 - rank) * SEGMENT) for rank in range(n)]
 
 
-def _chain(g, organ, n, label, radius, bearer=None):
-    """n SubOrgan elements in *organ*, the first branched ('+') on *bearer* when given, then each after the previous."""
-    s = g.scales
-    props = PropsConfig(scale=s.SubOrgan, label=label, edge_type='+' if bearer is not None else '/')
-    elements = [g.add_component_with_topo(organ, bearer, **props) if bearer is not None else
-                g.add_component(organ, **props)]
-    for _ in range(n - 1):
-        elements.append(g.add_child(elements[-1], **PropsConfig(scale=s.SubOrgan, edge_type='<', label=label)))
-    for rank, v in enumerate(elements):
-        g.property("radius")[v], g.property("length")[v] = radius, SEGMENT
-        if label == g.labels.SubOrgan.StemElement:                      # the stems' class input
-            g.property("stem_radius")[v] = radius
-        g.property("distance_from_tip")[v] = (n - 1 - rank) * SEGMENT
-    return elements
-
-
-class SeedlingArchitecture(StructuralComponent):
-    """The architecture: the stem, two leaves, the roots from the stem's base."""
+class SeedlingArchitecture(SegmentArchitecture):
+    """The architecture: the stem, two leaves, the roots from the stem's base (its elements' radius, length and
+    distance from the tip, SegmentArchitecture's variables)."""
 
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = _chain(g, _organ(g, plant, "Shoot", "StemInternode"), 3, L.StemElement, STEM_RADIUS)
+        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+                             _elements(3, STEM_RADIUS))
         for bearer in stem[1:]:
-            _chain(g, _organ(g, plant, "Shoot", "Leaf"), 2, L.LeafElement, STEM_RADIUS, bearer=bearer)
-        main = _chain(g, _organ(g, plant, "Root", "RootInternode"), 3, L.RootSegment, ROOT_RADIUS, bearer=stem[0])
-        _chain(g, _organ(g, plant, "Root", "RootInternode"), 2, L.RootSegment, LATERAL_RADIUS, bearer=main[1])
+            segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement,
+                          _elements(2, LEAF_RADIUS), bearer=bearer)
+        main = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+                             _elements(3, ROOT_RADIUS), bearer=stem[0])
+        segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+                      _elements(2, LATERAL_RADIUS), bearer=main[1])
 
 
 class SeedlingAnatomy(GranapAnatomy):
@@ -76,23 +61,30 @@ class SeedlingAnatomy(GranapAnatomy):
 
 
 class Seedling(CompositeModel):
+    """The seedling's architecture and anatomies. Its translator links the stems' class input, stem_radius, to the
+    architecture's radius (applied at initiation too, before the anatomies are built); the other inputs are shared
+    by name."""
     initiators = (SeedlingArchitecture, SeedlingAnatomy)
     from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
+    translator = Translator().link("SeedlingAnatomy", "stem_radius", "SeedlingArchitecture", {"radius": 1.})
 
     def __init__(self, data_structure, time_step):
+        self.architecture = SeedlingArchitecture(data_structure=data_structure, time_step=time_step)
         self.anatomy = SeedlingAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.anatomy)
+        self.couple(self.architecture, self.anatomy)
 
     def run(self):
+        self.architecture()
         self.anatomy()
 
 
-def layout(g, segments):
+def layout(ds, segments):
     """Offsets (mm): the stem going up, each leaf to the right of its linked parent, the roots going down, a
     lateral root to the side of its bearer; spaced by the sections' sizes."""
+    g = ds.structure
     L = g.labels.SubOrgan
     label = g.property("label")
-    template_of = g.property("anatomy_template")
+    template_of = dict(zip(ds.entity_ids("SubOrgan").tolist(), ds.get("anatomy_template")))
 
     def size(s):
         bounds = np.array([p.bounds for p in template_by_index(template_of[s]).polygons if p is not None])
@@ -120,7 +112,7 @@ def main():
     ds = scene.populations[0].data_structure
     g = ds.mtg
     segments = [int(s) for s in ds.entity_ids("SubOrgan")]
-    offsets = layout(g, segments)
+    offsets = layout(ds, segments)
 
     fig, ax = plt.subplots(figsize=(15, 10))
     draw_plant(ax, ds, offsets, linewidth=0.15, alpha=0.25)
@@ -132,7 +124,7 @@ def main():
     ax.margins(0.04, 0.06)
     ax.set_xticks([])
     ax.set_yticks([])
-    n_templates = len(set(g.property("anatomy_template").values()))
+    n_templates = len(set(ds.get("anatomy_template").tolist()))
     ax.set_title(f"Seedling: {len(segments)} sections ({n_templates} anatomy templates: stems, leaves, roots), "
                  f"{ds.n_nodes()} Compartments, {ds.n_edges()} Connections, "
                  f"{int((ds.get('network_path') == 5).sum())} axial junctions", fontsize=10)

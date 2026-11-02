@@ -338,8 +338,9 @@ the mean of the ring's vertices), shared by the cells whose rings run along it:
    \ell_w = \sum_{k=0}^{m-1} |p_{k+1} - p_k|, \qquad \mathbf{m}_w = \frac{1}{m + 1}\sum_{k=0}^{m} p_k, \qquad
    e_w = \sum_{c \ni w} e(\text{type}_c) + \mathbb{1}_{n_w = 1}\, e_\text{outer},
 
-:math:`e` the per-tissue wall thicknesses (``DEFAULT_CELL_WALL_THICKNESS``, µm; 1 for a type not listed,
-2 for the outer wall). The edges, with :math:`\mathbf{g}_c` a cell's centroid:
+:math:`e` the per-tissue wall thicknesses (µm; by default ``DEFAULT_CELL_WALL_THICKNESS``, 1 for a type not
+listed, 2 for the outer wall), set per plant by the anatomy's optional section ``cell_wall_thickness``
+(``root_anatomy.cell_wall_thickness.endodermis``, ...). The edges, with :math:`\mathbf{g}_c` a cell's centroid:
 
 =============== ===================== ======================== =========================================================
 edge            between               length                   vector and distances

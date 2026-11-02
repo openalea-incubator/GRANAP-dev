@@ -27,7 +27,7 @@ def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=
     DataStructure node, e.g. ds.get("psi")). Returns the PatchCollection.
     """
     g = ds.mtg
-    template = template_by_index(g.property("anatomy_template")[int(segment)])
+    template = template_by_index(ds.get("anatomy_template")[ds.index_of([int(segment)], "SubOrgan")[0]])
     owners = np.asarray(ds.entity_ids("SubOrgan"))[ds.owner("SubOrgan")]
     nodes = np.flatnonzero((owners == int(segment)) & (np.asarray(ds.get("kind")) == 0))
     vids = ds.entity_ids("node")[nodes]
@@ -62,9 +62,7 @@ def tissue_legend(fig, ncol=7):
 def draw_sections(ds, titles=None, columns=4, panel=(3.6, 3.6)):
     """Every section of *ds* (its SubOrgans with an anatomy), coloured by tissue, with the tissues' legend; *panel*:
     each panel's (width, height), inches."""
-    g = ds.mtg
-    template_of = g.property("anatomy_template")
-    segments = [int(s) for s in ds.entity_ids("SubOrgan") if template_of.get(int(s), -1.) >= 0]
+    segments = [int(s) for s in np.asarray(ds.entity_ids("SubOrgan"))[np.asarray(ds.get("anatomy_template")) >= 0]]
     columns = min(columns, len(segments))
     rows = -(-len(segments) // columns)
     width, height = panel

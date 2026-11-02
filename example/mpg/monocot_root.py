@@ -1,6 +1,7 @@
 """
 The simplest use of GRANAP's anatomy component in metafspm: a monocot root of three segments gets its cross-section
-anatomies, grows one segment, and the component gives the new segment its anatomy. Each segment's section is then
+anatomies, grows one segment at its tip (the stand-in architecture's growth), and the component gives the new segment
+its anatomy. Each segment's section is then
 drawn from the plant graph, coloured by tissue.
 
     python monocot_root.py            (from GRANAP/example/mpg; figure in ./outputs/monocot_root.png)
@@ -24,30 +25,34 @@ class RootAnatomies(CompositeModel):
     from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
 
     def __init__(self, data_structure, time_step):
+        self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)
         self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.anatomy)
+        self.couple(self.architecture, self.anatomy)          # the segments' radius, length...: shared by name
 
     def run(self):
-        self.anatomy()
+        self.architecture()                                   # the root grows (root_growth)
+        self.anatomy()                                        # the new segment gets its anatomy
+
+
+def grown():
+    """The scene after one step: the root built, then grown by one segment at its tip."""
+    # one plant, its scenario: three segments, base to tip (radius, length, distance from the tip), the root preset;
+    # at each step, a new segment at the main root's tip (axis 0)
+    scenario = {"root_segments": [[RADIUS, SEGMENT, (2 - i) * SEGMENT] for i in range(3)],
+                "root_growth": [[0, RADIUS, SEGMENT]]}
+    scene = Scene(planting([Planting()], RootAnatomies, scenario))
+    scene.run()
+    return scene
 
 
 def main():
-    # one plant, its scenario: three segments, base to tip (radius, length, distance from the tip), the root preset
-    scenario = {"root_segments": [[RADIUS, SEGMENT, (2 - i) * SEGMENT] for i in range(3)]}
-    scene = Scene(planting([Planting()], RootAnatomies, scenario))
+    scene = grown()
     ds = scene.populations[0].data_structure
-    g = ds.mtg
-
-    # the root grows one segment at its tip (an architecture model's role), the component gives it its anatomy
-    tip = int(ds.entity_ids("SubOrgan")[-1])
-    new = g.add_child(tip, edge_type="<", label=g.labels.SubOrgan.RootSegment)
-    g.property("radius")[new], g.property("length")[new], g.property("distance_from_tip")[new] = RADIUS, SEGMENT, 0.
-    scene.run()
-    print("new segment:", scene.populations[0].instance.anatomy.last_update["emerged"],
-          f"- {ds.n_nodes()} Compartments, {ds.n_edges()} Connections")
+    new = scene.populations[0].instance.anatomy.last_update["emerged"]
+    print("new segment:", new, f"- {ds.n_nodes()} Compartments, {ds.n_edges()} Connections")
 
     segments = [int(s) for s in ds.entity_ids("SubOrgan")]
-    fig = draw_sections(ds, titles=[f"segment {s}" + (" (new)" if s == new else "") for s in segments])
+    fig = draw_sections(ds, titles=[f"segment {s}" + (" (new)" if s in new else "") for s in segments])
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
     os.makedirs(folder, exist_ok=True)
     fig.savefig(os.path.join(folder, "monocot_root.png"), dpi=150)
