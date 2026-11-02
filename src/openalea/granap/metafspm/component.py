@@ -340,6 +340,10 @@ class GranapAnatomy(StructuralComponent):
     anatomy_template: float = state_variable(unit="", description="the segment's anatomy template (-1: none)",
                                              references="GRANAP", default=-1., scale=SCALES.SubOrgan,
                                              kind="descriptor")
+    condensed_section: float = state_variable(unit="", description="1: the segment's anatomy is condensed onto its "
+                                                                  "conduits and soil node (condensed_anatomy)",
+                                              references="GRANAP", default=0., scale=SCALES.SubOrgan,
+                                              kind="descriptor")
     tissue: object = state_variable(unit="", description="the protoplast's tissue (None: a wall or a junction)",
                                     references="GRANAP", default=None, scale=SCALES.Compartment, location="node",
                                     dtype=object, kind="descriptor")
@@ -538,10 +542,10 @@ class GranapAnatomy(StructuralComponent):
         return bool(g.properties().get("anatomy_condensed", {}).get(plant, cls.condensed))
 
     @staticmethod
-    def condensed_section(full, key):
+    def condense_section(full, key):
         """
-        A root section's condensed template, from its full one (*full*: its anatomy with its soil node): its Layers
-        and Cells, its conduits (the protoplasts of families 0 and 1, which the junctions join) and its soil node,
+        A root section's condensed template, from its full one (*full*: its anatomy with its soil node): its conduits'
+        Cells and Layers, its conduits (the protoplasts of families 0 and 1, which the junctions join) and its soil node,
         and one equivalent Connection (network_path 8) between each pair of them, from the lower to the higher local
         index. Their conductances are the hydraulics model's (the Kron reduction of the full section).
         """
@@ -556,7 +560,12 @@ class GranapAnatomy(StructuralComponent):
         rows, values = full.properties["kind"]
         kind[rows] = np.asarray(values, dtype=float)
         kept = compartment & (np.isin(family, (0., 1.)) | (kind == SOIL_NODE))
-        structure = full.scale < scales.Compartment
+        structure = np.zeros(full.size, dtype=bool)                # the kept protoplasts' Cells and their Layers
+        above = full.complex[kept & (full.complex >= 0)]
+        while above.size:
+            structure[above] = True
+            above = full.complex[above]
+            above = above[above >= 0]
         small = full.restricted(structure | kept, key + ("restricted",))
         position = np.cumsum(structure | kept) - 1
         nodes = np.sort(position[kept])
@@ -631,7 +640,7 @@ class GranapAnatomy(StructuralComponent):
             g.properties().setdefault("condensed_section", {})[segment] = float(condensed)
             if condensed:
                 instanced = True
-                written = template.instance(g, segment, cls.add_soil_node, "soil+condensed", cls.condensed_section)
+                written = template.instance(g, segment, cls.add_soil_node, "soil+condensed", cls.condense_section)
             elif instanced:
                 written = template.instance(g, segment, cls.add_soil_node if soil else None, "soil" if soil else "")
             else:
