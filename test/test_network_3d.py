@@ -246,3 +246,59 @@ def test_dicot_root_builds():
         segment_length=0.3, seed=0)
     assert net.n_cells == len(net.result.cells)
     assert nx.is_connected(net.graph)
+
+
+# ---------------------------------------------------------------------------
+# P3: fill_matrix(orientation=...)
+# ---------------------------------------------------------------------------
+
+def _cortex_pairs(g, path):
+    return [(u, v, d["orientation"]) for u, v, d in g.edges(data=True)
+            if d["path"] == path and g.nodes[u].get("cell_type") == "cortex"
+            and g.nodes[v].get("cell_type") == "cortex"]
+
+
+def test_fill_matrix_axial_and_lateral_separately(net):
+    net3 = Network3D(net.result)
+    m = net3.export_to_adjencymatrix()
+    net3.fill_matrix(2.0, "symplastic", "cortex", orientation="lateral")
+    net3.fill_matrix(3.0, "symplastic", "cortex", orientation="axial")
+    pairs = _cortex_pairs(net3.graph, "plasmodesmata")
+    assert {o for *_, o in pairs} == {"lateral", "axial"}
+    for u, v, o in pairs:
+        assert m[u, v] == m[v, u] == (2.0 if o == "lateral" else 3.0)
+
+
+def test_fill_matrix_from_dict_passes_orientation(net):
+    net3 = Network3D(net.result)
+    m = net3.export_to_adjencymatrix()
+    net3.fill_matrix_from_dict({"cortex": 4.0}, "transmembrane", orientation="axial")
+    g = net3.graph
+    for u, v, d in g.edges(data=True):
+        if d["path"] != "membrane":
+            continue
+        cell = u if g.nodes[u]["type"] == "cell" else v
+        if g.nodes[cell]["cell_type"] == "cortex" and d["orientation"] == "axial":
+            assert m[u, v] == 4.0
+        elif d["orientation"] == "lateral":
+            assert m[u, v] == 1.0
+
+
+def test_fill_matrix_orientation_on_a_2d_network():
+    """2D edges have no orientation: they are lateral."""
+    def filled(orientation):
+        organ = _small_root()
+        m = organ.export_to_adjencymatrix()
+        organ.fill_matrix(9.0, "symplastic", "cortex", orientation=orientation)
+        return {v for row in m.data for v in row}
+
+    assert 9.0 in filled(None)
+    assert 9.0 in filled("lateral")
+    assert 9.0 not in filled("axial")
+
+
+def test_fill_matrix_rejects_unknown_orientation(net):
+    net3 = Network3D(net.result)
+    net3.export_to_adjencymatrix()
+    with pytest.raises(ValueError, match="orientation"):
+        net3.fill_matrix(1.0, "symplastic", "cortex", orientation="radial")

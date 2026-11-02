@@ -1,6 +1,6 @@
 # 3D hydraulic network from the extruded section — plan
 
-Status: **P0, P1, P2 done (2026-11-02)**, P3–P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
+Status: **P0–P3 done (2026-11-02)**, P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
 (generic / monocot / dicot / woody); stems and leaves checked afterwards; needle excluded.
 
 ## Goal
@@ -153,7 +153,10 @@ Tests in `test/test_network_3d.py` (incl. one row per cell == the 2D network).
   cell_wall_thickness=..., end_wall_thickness=..., seed=...)` → `Network3D`
   (also exposes the `Cells3DResult`, so `export_obj` still works).
 
-**P3 — `fill_matrix(orientation=...)`** (thickness and attributes moved into P2).
+**P3 — `fill_matrix(orientation=...)`** (thickness and attributes moved into P2) — DONE.
+`fill_matrix(K, label, cell_type, orientation=None|"lateral"|"axial")`, also on
+`fill_matrix_from_dict`; an edge without the attribute (2D) counts as lateral, so the
+default and `"lateral"` leave 2D unchanged.
 
 **P4 — tests, example, scale check.**
 - `example/root/network_3d.py`: build, print counts per node / edge kind, export OBJ.

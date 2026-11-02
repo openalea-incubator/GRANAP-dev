@@ -109,6 +109,7 @@ class AbstractNetwork(ABC):
         K: float,
         label: str,
         cell_type: str,
+        orientation: Optional[str] = None,
     ) -> None:
         """
         Fill entries of the adjacency matrix with a hydraulic conductivity.
@@ -130,6 +131,11 @@ class AbstractNetwork(ABC):
             * A compound name separated by ``"-"`` (e.g.
               ``"cortex-endodermis"``) matches edges where one adjacent
               cell is of the first type and the other of the second type.
+        orientation : str, optional
+            ``"lateral"`` or ``"axial"``: only edges of that orientation (3D
+            network: across side walls vs across end walls / faces).  An
+            edge without the attribute (the 2D network) is lateral.
+            ``None`` (default) = every edge.
 
         Raises
         ------
@@ -155,11 +161,18 @@ class AbstractNetwork(ABC):
             raise ValueError(
                 f"Unknown label '{label}'. Must be one of {valid_labels}."
             )
+        valid_orientations = {None, "lateral", "axial"}
+        if orientation not in valid_orientations:
+            raise ValueError(
+                f"Unknown orientation '{orientation}'. Must be one of {valid_orientations}."
+            )
 
         # Determine which walls match the cell_type filter
         matching_walls = self._get_walls_for_types(type_a, type_b)
 
         for u, v, data in self.graph.edges(data=True):
+            if orientation is not None and data.get("orientation", "lateral") != orientation:
+                continue
             path = data.get("path", "")
 
             if label == "apoplastic" and path == "wall":
@@ -189,6 +202,7 @@ class AbstractNetwork(ABC):
         self,
         K_dict: dict, # type: dict[str, float]
         label: str,
+        orientation: Optional[str] = None,
     ) -> None:
         """
         Fill entries of the adjacency matrix from a dictionary of hydraulic conductivities.
@@ -199,9 +213,11 @@ class AbstractNetwork(ABC):
             Dictionary matching cell types to hydraulic conductivity values.
         label : str
             Path type to target (e.g. "apoplastic", "transmembrane", "symplastic").
+        orientation : str, optional
+            ``"lateral"`` / ``"axial"`` filter, as in :meth:`fill_matrix`.
         """
         for cell_type, K in K_dict.items():
-            self.fill_matrix(K, label, cell_type)
+            self.fill_matrix(K, label, cell_type, orientation=orientation)
 
     # ------------------------------------------------------------------
     # Internal helpers
