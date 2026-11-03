@@ -1,6 +1,6 @@
 # 3D hydraulic network from the extruded section — plan
 
-Status: **P0–P3 done (2026-11-02)**, P4 to do. Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
+Status: **P0–P4 done (2026-11-02)**; v1 complete for roots. Stems need array storage (see P4). Plan agreed 2026-10-30. Branch: `tissue`. Scope v1: roots
 (generic / monocot / dicot / woody); stems and leaves checked afterwards; needle excluded.
 
 ## Goal
@@ -158,10 +158,16 @@ Tests in `test/test_network_3d.py` (incl. one row per cell == the 2D network).
 `fill_matrix_from_dict`; an edge without the attribute (2D) counts as lateral, so the
 default and `"lateral"` leave 2D unchanged.
 
-**P4 — tests, example, scale check.**
-- `example/root/network_3d.py`: build, print counts per node / edge kind, export OBJ.
-- Time and memory on the default monocot / dicot root; then try the default monocot stem
-  (~256k prisms) to see whether v1 scales or needs array-based storage.
+**P4 — tests, example, scale check.** — DONE.
+- `example/root/network_3d.py`: monocot root, per-type heights and thicknesses, counts,
+  lateral/axial conductivities, OBJ in `output/`, longitudinal slice plot.
+- Scale (networkx graph, default monocot stem, 9 GB cap):
+  0.4 mm = 41k prisms -> 0.79M nodes, 2.2M edges, 15 s, 2.8 GB;
+  0.8 mm = 75k prisms -> 1.5M nodes, 4.2M edges, 26 s, 4.9 GB;
+  1.6 mm (default 8 repeats) = 142k prisms -> MemoryError in the graph build.
+  About 1.2 kB per edge, all in networkx dicts. Roots fit (dicot root 1.6 mm: 2.3M edges,
+  3.8 GB). For full stems: keep nodes/edges as numpy columns and build the sparse matrix
+  from them directly, the graph becoming an optional view (as `to_metafspm` does in 2D).
 
 ## Tests (`test/test_network_3d.py`)
 - **Areas add up**: for every 2D wall, its side pieces sum to length × segment length;
