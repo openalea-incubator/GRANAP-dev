@@ -882,7 +882,7 @@ class GranapAnatomy(StructuralComponent):
             return Triangles(np.zeros((0, 3, 3)), np.zeros(0, dtype=np.int64))
         return Triangles(np.concatenate(vertices), np.concatenate(owners))
 
-    @state
+    @state(include_inactive=True)        # the sections' geometry, emerged or not
     def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
             -> dict:
         """
