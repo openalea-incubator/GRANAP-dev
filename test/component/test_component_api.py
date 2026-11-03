@@ -43,3 +43,31 @@ def test_a_lateral_is_joined_to_the_segment_it_branches_on():
     index = {int(s): i for i, s in enumerate(ds.entity_ids("SubOrgan"))}
     junctions = (ds.get("network_path") == 5) & (owner[view.tail] == index[main]) & (owner[view.head] == index[lateral])
     assert junctions.sum() > 0 and set(np.unique(ds.get("tissue")[view.head[junctions]])) >= {"metaxylem", "phloem"}
+
+
+def test_root_growth_grows_the_listed_axes_at_each_step():
+    """RootAxis's root_growth: at each step, one new segment (one NewNodes batch) at the tip of each axis listed, an
+    axis listed twice two in a row, the axis' other segments farther from its tip; the plants without it do not grow;
+    the new segments get their anatomies in the same step."""
+    import numpy as np
+    from openalea.metafspm.scene.population import Planting, planting
+    from openalea.metafspm.scene.scene import Scene
+    from openalea.granap.simulation import _plant_model
+    grown = {"root_segments": [[0.3e-3, 2e-4, 2e-4], [0.3e-3, 2e-4, 0.]],
+             "root_laterals": [[0, [[0.2e-3, 1e-4, 0.]]]],
+             "root_growth": [[1, 0.2e-3, 3e-4], [0, 0.3e-3, 2e-4], [1, 0.25e-3, 1e-4]]}
+    scene = Scene(planting([Planting(), Planting(x=0.1)], _plant_model(),
+                           plant_scenarios=[grown, {"root_segments": [[0.3e-3, 2e-4, 0.]]}]))
+    ds = scene.populations[0].data_structure
+    g = ds.structure
+    for _ in range(2):
+        scene.run()
+    first, second = (g.components_at_scale(int(plant), scale=g.scales.Axis) for plant in ds.entity_ids("Plant"))
+    main, lateral = ([int(s) for s in g.components_at_scale(axis, scale=g.scales.SubOrgan)] for axis in first)
+    assert len(main) == 4 and len(lateral) == 5 and len(g.components_at_scale(second[0], scale=g.scales.SubOrgan)) == 1
+    radius, distance = (g.property(name) for name in ("radius", "distance_from_tip"))
+    np.testing.assert_allclose([radius[s] for s in lateral], [0.2e-3, 0.2e-3, 0.25e-3, 0.2e-3, 0.25e-3])
+    np.testing.assert_allclose([distance[s] for s in lateral], [8e-4, 5e-4, 4e-4, 1e-4, 0.], atol=1e-15)
+    np.testing.assert_allclose([distance[s] for s in main], [6e-4, 4e-4, 2e-4, 0.], atol=1e-15)
+    assert all(g.parent(new) == old for old, new in zip(lateral, lateral[1:]))
+    assert set(lateral[1:]) <= set(int(s) for s in g.property("anatomy_class"))      # their anatomies

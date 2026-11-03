@@ -29,7 +29,9 @@ distance_from_tip: SegmentArchitecture), which GranapAnatomy reads as inputs:
 """
 from dataclasses import dataclass
 
-from openalea.metafspm.coupling.component import StructuralComponent, parameter, state_variable
+import numpy as np
+
+from openalea.metafspm.coupling.component import NewNodes, StructuralComponent, parameter, state_variable
 from openalea.metafspm.data_structure.configs import PropsConfig, ScalesConfig
 from openalea.metafspm.solve.decorator import segmentation
 
@@ -102,23 +104,40 @@ class RootAxis(SegmentArchitecture):
                           bearer=main[bearer])
 
     @segmentation
-    def _tip_growth(self):
-        """MPG-style: each axis that its plant's root_growth lists gets a new segment at its tip, of the radius and
-        length given, at distance 0 from the tip; the axis' other segments get that much farther from it."""
-        g = self.mtg
-        plants = self.data_structure.entity_ids("Plant").tolist()
-        growth = dict(zip(plants, self.parameter_values("root_growth", "Plant")))
-        radius, length, distance = (g.property(name) for name in ("radius", "length", "distance_from_tip"))
-        label = g.labels.SubOrgan.RootSegment
-        for plant in self.active_ids("Plant").tolist():
-            axes = g.components_at_scale(plant, scale=g.scales.Axis)
-            for axis, new_radius, new_length in growth.get(plant) or []:
-                segments = [int(v) for v in g.components_at_scale(axes[int(axis)], scale=g.scales.SubOrgan)]
-                new = g.add_child(segments[-1], **PropsConfig(scale=g.scales.SubOrgan, edge_type='<', label=label))
-                for segment in segments:
-                    distance[segment] = float(distance.get(segment, 0.)) + float(new_length)
-                radius[new], length[new], distance[new] = float(new_radius), float(new_length), 0.
-
+    def _tip_growth(self, distance_from_tip) -> dict:
+        """Each axis that its emerged plant's root_growth lists gets a new segment at its tip (its last segment), of the
+        radius and length given, at distance 0 from the tip; the axis' other segments get that much farther from it
+        (an axis listed twice grows two segments, one after the other). The new segments are one NewNodes batch."""
+        ds = self.data_structure
+        node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
+        axis_of_node = np.asarray(ds.owner("Axis"), dtype=np.int64)
+        plant_of_axis = np.asarray(ds.owner("Plant", of="Axis"), dtype=np.int64)
+        tip_of_axis = np.full(plant_of_axis.size, -1, dtype=np.int64)       # each axis' last segment (its largest id)
+        np.maximum.at(tip_of_axis, axis_of_node[axis_of_node >= 0], node_ids[axis_of_node >= 0])
+        emerged = set(self.active_ids("Plant").tolist())
+        new_distance = np.array(distance_from_tip, dtype=float)
+        parents, radii, lengths, distances, axes_grown = [], [], [], [], []
+        for plant_index, (plant, growth) in enumerate(zip(ds.entity_ids("Plant").tolist(),
+                                                          self.parameter_values("root_growth", "Plant"))):
+            if plant not in emerged or not growth:
+                continue
+            plant_axes = np.flatnonzero(plant_of_axis == plant_index)         # the plant's axes, in their order
+            for axis, new_radius, new_length in growth:
+                axis_index = int(plant_axes[int(axis)])
+                new_distance[axis_of_node == axis_index] += float(new_length)
+                earlier = [i for i, grown in enumerate(axes_grown) if grown == axis_index]
+                for i in earlier:                               # the segments this step already added to the axis
+                    distances[i] += float(new_length)
+                parents.append(-1 - earlier[-1] if earlier else int(tip_of_axis[axis_index]))
+                radii.append(float(new_radius))
+                lengths.append(float(new_length))
+                distances.append(0.)
+                axes_grown.append(axis_index)
+        return {"distance_from_tip": new_distance,
+                "new_segments": NewNodes(parent=np.asarray(parents, dtype=np.int64), edge="<",
+                                         label=ds.structure.labels.SubOrgan.RootSegment,
+                                         values={"radius": np.asarray(radii), "length": np.asarray(lengths),
+                                                 "distance_from_tip": np.asarray(distances)})}
 
 @dataclass
 class Needle(SegmentArchitecture):

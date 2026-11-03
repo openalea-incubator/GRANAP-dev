@@ -32,15 +32,13 @@ def test_each_protoplast_is_its_cells_polygon(section):
 
 def test_the_section_lies_across_its_segment(section):
     ds, anatomy = section
-    g = ds.structure
-    segment = int(ds.entity_ids("SubOrgan")[0])
     flat = anatomy.display_triangles().vertices
     assert np.ptp(flat[..., 2]) == 0.                       # no segment ends: a vertical axis, the section horizontal
     ends = dict(x1=0.01, y1=0.02, z1=-0.03, x2=0.01 + 2e-4, y2=0.02, z2=-0.03 - 2e-4)
-    for name, value in ends.items():
-        if name not in g.properties():
-            g.add_property(name)
-        g.property(name)[segment] = value
+    assert not any(ds.has(name) for name in ends)           # optional inputs nothing gives: not registered
+    for name, value in ends.items():                        # given, as an architecture declaring them would
+        ds.register(name, np.full(ds.entity_ids("SubOrgan").size, np.nan), location="SubOrgan")
+        ds.get(name)[0] = value
     try:
         placed = anatomy.display_triangles().vertices.reshape(-1, 3)
         axis = np.array([1., 0., -1.]) / np.sqrt(2.)
@@ -48,7 +46,7 @@ def test_the_section_lies_across_its_segment(section):
         np.testing.assert_allclose((placed - middle) @ axis, 0., atol=1e-15)      # across the segment's middle
     finally:
         for name in ends:
-            g.property(name).pop(segment, None)
+            ds.unregister(name)
 
 
 def test_drawing_leaves_the_mpg_as_it_was(section):

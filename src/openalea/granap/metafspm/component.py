@@ -401,6 +401,27 @@ class GranapAnatomy(StructuralComponent):
     length: float = input_variable(unit="m", description="the segment's length, broadcast to its Compartments",
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, location="node",
                                    kind="intensive")
+    # ── Inputs: the segments' ends, where display_triangles places the sections (optional: not registered when no
+    # architecture gives them, the sections then along a straight axis; the triangles light models get stay the
+    # architecture's) ──
+    x1: float = input_variable(unit="m", description="the segment's start, x (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
+    y1: float = input_variable(unit="m", description="the segment's start, y (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
+    z1: float = input_variable(unit="m", description="the segment's start, z (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
+    x2: float = input_variable(unit="m", description="the segment's end, x (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
+    y2: float = input_variable(unit="m", description="the segment's end, y (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
+    z2: float = input_variable(unit="m", description="the segment's end, z (display only)",
+                               references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
+                               optional=True)
     # ── Inputs: the plants' positions (the planting's), where display_triangles draws the sections ──
     x: float = planting_variable("x")
     y: float = planting_variable("y")
@@ -839,6 +860,7 @@ class GranapAnatomy(StructuralComponent):
         wanted = set(node_ids[kept].tolist())
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
+        frame_values = {name: _per_segment(ds, name) for name in SEGMENT_ENDS + ("length",)}
         vertices, owners = [], []
         for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
@@ -851,7 +873,7 @@ class GranapAnatomy(StructuralComponent):
             drawn = np.array([row in row_of for row in rows], dtype=bool)
             if not drawn.any():
                 continue
-            centre, axis = _segment_frame(g, segment, plant_position)
+            centre, axis = _segment_frame(g, segment, plant_position, frame_values)
             u, v = _perpendiculars(axis)
             xy = local[drawn] / self.mm_per_unit                                   # (T, 3, 2), in m
             vertices.append(centre + xy[..., :1] * u + xy[..., 1:] * v)
@@ -897,18 +919,33 @@ def _template_triangles(template) -> tuple:
     return _TEMPLATE_TRIANGLES[template.index]
 
 
-def _segment_frame(g, segment, plant_position) -> tuple:
-    """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when it has them, else along a straight axis from
-    its plant's position (*plant_position*: {plant: (x, y, z)}, the planting's), roots down and the shoot up, at its
-    distance from the axis' base."""
+SEGMENT_ENDS = ("x1", "y1", "z1", "x2", "y2", "z2")
+
+
+def _per_segment(ds, name):
+    """{segment: value} of the declared variable *name* (a SubOrgan-scale input), or None when it is not on the
+    DataStructure (an optional input nothing gives)."""
+    if not ds.has(name):
+        return None
+    location, values = ds.location(name), np.asarray(ds.get(name), dtype=float)
+    if location != "SubOrgan":                        # held at the nodes: the segment's (broadcast) value
+        values = ds.map_to(values, location, "SubOrgan", "mean")
+    return dict(zip(ds.entity_ids("SubOrgan").tolist(), np.asarray(values, dtype=float).tolist()))
+
+
+def _segment_frame(g, segment, plant_position, frame_values) -> tuple:
+    """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when the architecture gives them, else along a
+    straight axis from its plant's position (*plant_position*: {plant: (x, y, z)}, the planting's), roots down and the
+    shoot up, at its distance from the axis' base. *frame_values*: {name: {segment: value} or None}, the segments'
+    ends and lengths (_per_segment)."""
     properties = g.properties()                       # read only: g.property() would create a missing property
-    ends = [properties.get(name, {}).get(segment) for name in ("x1", "y1", "z1", "x2", "y2", "z2")]
+    ends = [(frame_values[name] or {}).get(segment) for name in SEGMENT_ENDS]
     if all(value is not None for value in ends):
         start, end = np.asarray(ends[:3], dtype=float), np.asarray(ends[3:], dtype=float)
         length = np.linalg.norm(end - start)
         if length > 0:
             return (start + end) / 2., (end - start) / length
-    lengths = properties.get("length", {})
+    lengths = frame_values["length"] or {}
     below, parent = 0., g.parent(segment)
     while parent is not None and g.scale(parent) == g.scales.SubOrgan:
         below += float(lengths.get(parent, 0.))
