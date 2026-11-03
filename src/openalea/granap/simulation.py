@@ -168,7 +168,7 @@ def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, o
     if outputs is not None and recorder is not None:
         raise ValueError("simulate: give outputs (a folder) or a recorder, not both")
     if outputs is not None:
-        recorder = SceneRecorder(outputs, frame_period=1)
+        recorder = SceneRecorder(outputs, frame_period=1, display_period=1)
     scene = Scene(table, recorder=recorder)
     if recorder is not None:
         scene.simulate(0)                                 # the section's built state, recorded

@@ -37,7 +37,7 @@ def export(presets=PRESETS, outputs: str = OUTPUTS, options: dict = None) -> lis
     paths = []
     for preset in presets:
         folder = os.path.join(outputs, preset)
-        simulate(preset=preset, recorder=SceneRecorder(folder, summaries=False, frame_period=1,
+        simulate(preset=preset, recorder=SceneRecorder(folder, summaries=False, frame_period=1, display_period=1,
                                                        frame_options=options))       # the built section, its frame
         paths.append(os.path.join(folder, "frames", "frame_000000.glb"))
     return paths
