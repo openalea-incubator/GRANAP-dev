@@ -1,4 +1,4 @@
-"""Wheat monocot root — a developmental *series* (apex -> collar) with tracked xylem.
+"""Wheat monocot root - a developmental *series* (apex -> collar) with tracked xylem.
 
 Walks up a wheat (Triticum aestivum) root, sampling the anatomy at physical lengths.
 Biologically the metaxylem **fuse** going collar -> apex, so there are many small
@@ -31,7 +31,7 @@ N_COLS = 4                                    # grid layout: 4 per row -> 3 rows
 def build_wheat_base() -> OrganInputData:
     """A wheat 'Salmone' monocot-root template (the tissue that refits around the tracked
     vessels).  The series drives the metaxylem directly (prescribed), but the phloem /
-    protoxylem tuning here still applies — those are regenerated per section around them."""
+    protoxylem tuning here still applies - those are regenerated per section around them."""
     w = OrganInputData.for_root()                     # monocot preset (planttype=1)
 
     # Stele parenchyma (its thickness is overridden per level by the series).
@@ -64,7 +64,7 @@ def build_wheat_base() -> OrganInputData:
     return w
 
 
-N_TERMINATE  = 2        # how many metaxylem terminate (do NOT fuse — they just stop)
+N_TERMINATE  = 2        # how many metaxylem terminate (do NOT fuse - they just stop)
 TERMINATE_AT = 90.0     # ...and the length (mm) at which they stop (present above, gone below)
 APEX_META = 3           # metaxylem at the apex (the fusion bottoms out here, not at 1)
 COLLAR_FUSED = 4        # fused metaxylem at the collar (+ the terminators added on top)
@@ -73,7 +73,7 @@ COLLAR_FUSED = 4        # fused metaxylem at the collar (+ the terminators added
 def n_fused(length_mm: float) -> int:
     """Number of FUSED metaxylem along the root: ``APEX_META`` at the apex (the fusion
     stops there), rising to ``COLLAR_FUSED`` toward the collar.  This schedule is *how you
-    say* how many metaxylem a given height has — set its apex value to change it."""
+    say* how many metaxylem a given height has - set its apex value to change it."""
     frac = max(0.0, (length_mm - 60.0) / (LENGTH_MM - 60.0))
     return int(np.clip(round(APEX_META + (COLLAR_FUSED - APEX_META) * frac), APEX_META, COLLAR_FUSED))
 
@@ -104,7 +104,7 @@ def main(show=True):
     # generic rendering lives in the library now; the example only supplies the
     # wheat-specific cortex retag + a title.
     res.plot(cols=N_COLS, retag=[("inner_cortex", "cortex"), ("outer_cortex", "cortex")],
-             suptitle="Wheat root fusion series (collar → apex) — vessel label = primordial ids it contains",
+             suptitle="Wheat root fusion series (collar -> apex) - vessel label = primordial ids it contains",
              show=show)
     return res
 

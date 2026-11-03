@@ -2,7 +2,7 @@
 
 These guard the sidecar ``FIELD_META`` registry and the ``describe_params`` /
 ``OrganInputData.lint`` helpers that tame ``VascularBundleParams`` (72 flat fields).
-The registry is metadata only — it must not change the emitted params (that
+The registry is metadata only - it must not change the emitted params (that
 invariant is covered by ``test_param_schema_equivalence``); here we check the
 *views* and the *lint* behave.
 """
@@ -73,7 +73,7 @@ def test_lint_ignores_unregistered_params():
 # ---------------------------------------------------------------------------
 
 def test_auto_tier_primary_is_preset_moved():
-    """A field a preset moves is primary; a field no preset touches is advanced —
+    """A field a preset moves is primary; a field no preset touches is advanced -
     even for classes with no explicit FIELD_META entry (root stele)."""
     # root preset moves stele.thickness (SteleParams) -> primary
     assert _field_tier("SteleParams", "thickness") == "primary"
@@ -83,7 +83,7 @@ def test_auto_tier_primary_is_preset_moved():
 
 def test_organ_describe_is_curated_not_the_full_wall():
     """OrganInputData.describe(primary, active) shows far fewer lines than the raw
-    flat surface — the whole point of the tiering."""
+    flat surface - the whole point of the tiering."""
     d = OrganInputData.for_dicot_stem()
     primary = d.describe(tier="primary", active_only=True)
     full_fields = sum(len(b) for b in d.to_dict_list())

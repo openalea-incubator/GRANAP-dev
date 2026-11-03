@@ -1,23 +1,23 @@
-"""Oleander (*Nerium oleander*) leaf cross-section — a measured dicot leaf.
+"""Oleander (*Nerium oleander*) leaf cross-section - a measured dicot leaf.
 
 All lengths are in mm.  Built from measurements of a real section:
 
 * length (cross-section width) 6.3; a ~constant ~0.47 mm lamina.  The measured
   thickness rise toward the midrib (1.01 at the centre, 0.56 at 0.635, 0.47 at
-  1.76) is an **abaxial keel** — a wide positive rib bulging the lower surface —
+  1.76) is an **abaxial keel** - a wide positive rib bulging the lower surface -
   not a thicker lamina;
 * a narrow **adaxial groove** over the midrib (a negative rib: 0.07 mm deep at
-  the centre, ~0.028 at 0.1 mm — a raised-cosine channel);
+  the centre, ~0.028 at 0.1 mm - a raised-cosine channel);
 * a big **continuous-cylinder midrib**: a 165-degree arc, xylem arc 0.11 thick
   organised as 34 radial files of ~7 vessels each (vessel diameter 0.018 grading
   to 0.012), a phloem arc 0.05 thick with 0.012 mm sieve elements;
-* a **multiple (3-layer) epidermis** of tall cells (0.018 x 0.021) — the oleander
+* a **multiple (3-layer) epidermis** of tall cells (0.018 x 0.021) - the oleander
   water-storage epidermis;
 * **4 palisade layers** of columnar cells (0.041 x 0.012) under the adaxial
   epidermis; a loose spongy mesophyll (0.015) below, riddled with dense, irregular
   aerenchyma lacunae (dicot-style scattered air, not the monocot's per-vein lacuna);
 * 16 small minor veins (height 0.07, width 0.043; xylem ~0.006, phloem ~0.005);
-* hypostomatous (stomata on the abaxial face only — oleander bears them in sunken
+* hypostomatous (stomata on the abaxial face only - oleander bears them in sunken
   crypts, idealised here as a plain abaxial row).
 
 A few notes on how the measurements map onto the model are inline below.
@@ -66,7 +66,7 @@ def build_nerium():
         # thin xylem rays between the files: one lane of thin cells on the photo
         arc_ray_width=0.003, arc_ray_cell_width=0.003, arc_ray_cell_length=0.012,
         # Lower vessel proportion so the vessels sit further apart (more xylem
-        # parenchyma between them) — the packed look was too dense.
+        # parenchyma between them) - the packed look was too dense.
         prop_vessel=0.42,
         # The lamina is a ~constant ~0.47 mm slab; the thickness increase toward the
         # midrib is an ABAXIAL KEEL (a wide positive rib below), *not* a thicker
@@ -147,7 +147,7 @@ def main(show=True):
 
     fig, ax = plt.subplots(figsize=(15, 4.0))
     leaf.plot_cells(show=False, ax=ax,
-                    title="Oleander (Nerium oleander) leaf — measured dicot")
+                    title="Oleander (Nerium oleander) leaf - measured dicot")
     leg = ax.get_legend()
     if leg is not None:
         leg.set_title("tissue")

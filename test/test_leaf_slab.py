@@ -69,7 +69,7 @@ def test_vein_row_is_transverse_xylem_adaxial():
 
 
 def test_stomata_on_both_epidermes():
-    """Monocot leaf is amphistomatous — stomata on both faces."""
+    """Monocot leaf is amphistomatous - stomata on both faces."""
     leaf = _build()
     guard = [c.y for c in leaf.all_cells.cells if c.type == "guard cell"]
     pores = [c for c in leaf.all_cells.cells if c.type == "pore"]
@@ -150,7 +150,7 @@ def _blunt_margin_input():
     """Dicot leaf ending in a blunt rounded margin instead of a thin taper.
 
     Full thickness out to 90 % of the half-width, then a short rounded edge, so the
-    surface curves sharply where it wraps the margin — the shape that leaves a fat
+    surface curves sharply where it wraps the margin - the shape that leaves a fat
     uncovered ribbon there.
     """
     params = OrganInputData.for_dicot_leaf().to_dict_list()
@@ -169,7 +169,7 @@ def test_fusion_fills_enclosed_holes_but_not_the_surface_ribbon():
     Voronoi edges and the organ outline, which runs unbroken past many cells wherever
     the surface curves sharply.  Fusing that ribbon stretches a single epidermis cell
     right across its neighbours, so ``FUSE_ENCLOSED_GAPS_ONLY`` keeps fusion to the
-    enclosed holes — which must still all be filled.
+    enclosed holes - which must still all be filled.
     """
     def longest_epidermis(leaf):
         return max(_longest_extent(c.polygon) for c in leaf.all_cells.cells
@@ -197,7 +197,7 @@ def _longest_extent(poly):
 
 def test_dicot_vein_is_collateral_with_cambium():
     """A dicot leaf vein is the collateral (xylem/cambium/phloem) bundle, not the
-    monocot 'face' bundle — so it has a cambium and no protoxylem lacuna."""
+    monocot 'face' bundle - so it has a cambium and no protoxylem lacuna."""
     leaf = _build_dicot()
     types = {c.type for c in leaf.all_cells.cells}
     assert "cambium" in types
@@ -237,7 +237,7 @@ def test_leaf_presets_and_routing():
 
 
 def test_dicot_palisade_is_elongated():
-    """Palisade cells are columnar — taller (y) than wide (x) by default."""
+    """Palisade cells are columnar - taller (y) than wide (x) by default."""
     leaf = _build_dicot()
     ratios = []
     for c in leaf.all_cells.cells:

@@ -1,8 +1,8 @@
 """Monocot leaf cross-section demo (Phases 1-2).
 
 Builds a wide, thin lamina whose concentric peeling reads top-to-bottom as
-epidermis / spongy / palisade / spongy / epidermis — the monocot mesophyll
-stack — with an even row of transverse veins along the mid-plane (xylem adaxial,
+epidermis / spongy / palisade / spongy / epidermis - the monocot mesophyll
+stack - with an even row of transverse veins along the mid-plane (xylem adaxial,
 phloem abaxial) and stomata on the abaxial epidermis.  Per-vein thickness bumps
 and the dicot leaf come in later phases (see LEAF_PLAN.md).
 """
@@ -35,7 +35,7 @@ def main(show=True):
 
     fig, ax = plt.subplots(figsize=(13, 3.5))
     leaf.plot_cells(show=False, ax=ax,
-                    title="Monocot leaf — veins (xylem adaxial) + abaxial stomata")
+                    title="Monocot leaf - veins (xylem adaxial) + abaxial stomata")
     leg = ax.get_legend()
     if leg is not None:
         leg.set_title("tissue")

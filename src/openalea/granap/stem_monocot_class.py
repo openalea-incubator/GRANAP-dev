@@ -2,10 +2,10 @@
 
 ``MonocotStemAnatomy`` builds a monocot stem: an epidermis and a narrow cortex
 around a large ground tissue (``pith``) in which the vascular bundles are
-*scattered* — no organised ring, no cambium.  Each bundle is a collateral
+*scattered* - no organised ring, no cambium.  Each bundle is a collateral
 'face' bundle: xylem (metaxylem at the middle, protoxylem toward the centre)
 with the phloem toward the surface.  Instantiate
-via ``StemAnatomy(input_data)`` — the factory in
+via ``StemAnatomy(input_data)`` - the factory in
 :mod:`openalea.granap.stem_class` dispatches here when ``planttype == 1``.
 
 Bundle placement (``_scattered_bundle_positions``) supports more than one
@@ -13,14 +13,14 @@ Bundle placement (``_scattered_bundle_positions``) supports more than one
 ``radius_max`` mm) so the bundle *kind* can vary with radius.  Within its band a
 spec is laid out one of two ways (its ``placement`` field):
 
-* ``random`` — bundles scattered by rejection sampling, kept clear of the
+* ``random`` - bundles scattered by rejection sampling, kept clear of the
   medullary cavity and min-distance spaced, with each candidate's oriented
   envelope required to stay clear of every bundle already placed (no clumping,
   no overlap);
-* ``even`` — bundles equally spaced on a ring at the band midpoint radius
+* ``even`` - bundles equally spaced on a ring at the band midpoint radius
   (circumference / ``n_bundles`` apart), rotated by the spec's ``angle`` phase so
   two close-radius bands can interleave; with ``ring_shape='outline'`` the ring
-  follows the pith edge — or, out in the cortex/rind, the organ outline —
+  follows the pith edge - or, out in the cortex/rind, the organ outline -
   instead of a circle (any ``base_shape``).
 """
 
@@ -54,7 +54,7 @@ class MonocotStemAnatomy(StemAnatomy):
     #
     # No _parse_vascular_params override: build_bundle reads the raw xylem /
     # phloem / cambium param dicts directly, and the bundle count is the
-    # vascular_bundle.n_bundles field — so there is nothing to pre-parse.
+    # vascular_bundle.n_bundles field - so there is nothing to pre-parse.
 
     def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
         """Declarative description of how the scattered bundles are assembled.
@@ -183,7 +183,7 @@ class MonocotStemAnatomy(StemAnatomy):
         first valid random dart, each bundle draws ``n_candidates`` candidates and
         takes the one **farthest from every bundle already placed** (Mitchell's
         best-candidate rule).  The band therefore fills into its emptiest spots and
-        ends up evenly spread — no clumps or big holes — while staying irregular (not
+        ends up evenly spread - no clumps or big holes - while staying irregular (not
         a ring/grid like ``even``).
         """
         n = int(bp.get("n_bundles", 0))
@@ -260,14 +260,14 @@ class MonocotStemAnatomy(StemAnatomy):
         The ring holds ``n_bundles`` slots a full turn apart (circumference /
         ``n_bundles``), at the spec's ``radius`` (mm; 0 -> half the pith radius,
         clamped to the section so the ring may sit in the cortex/rind), rotated by the
-        spec's ``angle`` phase (degrees) — set two same-radius bands half a step apart
+        spec's ``angle`` phase (degrees) - set two same-radius bands half a step apart
         to interleave them.  A slot is skipped (with a log) if it falls outside the
         section or its envelope would overlap a bundle already placed, so ``even``
         never produces overlap either.
 
         With ``ring_shape='outline'`` the ring follows an outline instead of a
-        circle — the pith edge (``polygon``), or the organ outline (``section``) for a
-        ring out in the cortex/rind — so the bundles follow any ``base_shape``: see
+        circle - the pith edge (``polygon``), or the organ outline (``section``) for a
+        ring out in the cortex/rind - so the bundles follow any ``base_shape``: see
         :meth:`_outline_ring`.  Slots are then equally spaced by arc length and each
         bundle faces the ring's outward normal.
         """
@@ -315,7 +315,7 @@ class MonocotStemAnatomy(StemAnatomy):
         Up to the pith radius the ring is the pith edge pulled inward by (pith radius
         - ``radius``); beyond it the ring is out in the cortex/rind and follows the
         organ outline (``section``, out to the epidermis) pulled inward by (its
-        equivalent radius - ``radius``) — so peripheral bundles line the organ's
+        equivalent radius - ``radius``) - so peripheral bundles line the organ's
         surface whatever its shape.  On a round stem both are the same circle.
         ``radius`` = 0 puts the ring just inside the pith edge: half a bundle height
         plus the clearance in, so the bundles line it without crossing it.  Of a

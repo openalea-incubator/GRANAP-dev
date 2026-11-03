@@ -1,7 +1,7 @@
 """Build a dicot root from the ``for_dicot_root`` preset, update to renoncule cytomine data and plot it
 
 Configuration model: an organ is configured through its ``OrganInputData`` and
-then **built once** — construction snapshots the params and parses the vascular
+then **built once** - construction snapshots the params and parses the vascular
 geometry. So all tuning is applied to ``data`` *before* the organ is built, using
 ``data.set_value(...)`` for existing entries and ``data.params.append(...)`` for
 new tissue layers.

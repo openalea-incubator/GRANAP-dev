@@ -21,9 +21,9 @@ def five_pl(t: float, c: float = 0.5, b: float = 3.0, m: float = 1.0) -> float:
     t : float
         Normalized position >= 0 (e.g. radial distance, 0 = centre).
     c : float
-        Inflection point — position of the steepest descent.
+        Inflection point - position of the steepest descent.
     b : float
-        Hill coefficient — sharpness of the transition.
+        Hill coefficient - sharpness of the transition.
     m : float
         Asymmetry exponent.
     """

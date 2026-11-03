@@ -91,7 +91,7 @@ def clean_docstring(doc: str | None, max_chars: int = MAX_DOC_CHARS) -> str:
     text = first_para or doc
 
     if len(text) > max_chars:
-        text = text[: max_chars - 1].rstrip() + "…"
+        text = text[: max_chars - 1].rstrip() + "..."
 
     return text
 
@@ -339,7 +339,7 @@ def build_html(svg: str, docs_map: dict[str, dict[str, str]]) -> str:
 <body>
   <div id="topbar">
     <strong>{PACKAGE_NAME} call graph</strong>
-    <span class="hint">Click a node to highlight dependencies · Hover to see docstrings · Shift+wheel to zoom · Esc to reset</span>
+    <span class="hint">Click a node to highlight dependencies | Hover to see docstrings | Shift+wheel to zoom | Esc to reset</span>
   </div>
 
   <div id="graph-wrap">

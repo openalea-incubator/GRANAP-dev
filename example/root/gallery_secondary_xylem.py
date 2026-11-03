@@ -78,7 +78,7 @@ def main(show=False):
     for j in range(n, len(axs_flat)):
         axs_flat[j].set_visible(False)
 
-    plt.suptitle("Dicot root — secondary xylem with Apollonian packing", fontsize=14)
+    plt.suptitle("Dicot root - secondary xylem with Apollonian packing", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

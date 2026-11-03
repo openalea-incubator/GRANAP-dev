@@ -2,7 +2,7 @@
 
 Pins the seed=0 cell-type census + a coarse geometry hash for four canonical
 root configs. Save a baseline on a known-good tree, then re-check after each
-optimisation; wins ①/② in the perf doc must keep every hash unchanged.
+optimisation; wins (1)/(2) in the perf doc must keep every hash unchanged.
 
 Usage (from repo root, env `granap`):
     python doc/perf_characterize.py save     # write baseline next to this file

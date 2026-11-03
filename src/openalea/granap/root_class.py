@@ -49,7 +49,7 @@ def _get_planttype(input_data) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Base class — shared geometry, acts as factory via __new__
+# Base class - shared geometry, acts as factory via __new__
 # ---------------------------------------------------------------------------
 
 class RootAnatomy(Organ):
@@ -61,7 +61,7 @@ class RootAnatomy(Organ):
     instance.  Subclass directly if you always know the type.
     """
 
-    # Roots: no ring smoothing — keep each peeled layer's thickness exact so
+    # Roots: no ring smoothing - keep each peeled layer's thickness exact so
     # the innermost region (the stele) is not shrunk below its nominal size.
     LAYER_SMOOTH_FACTOR: float = 0.0
 
@@ -82,7 +82,7 @@ class RootAnatomy(Organ):
         return super().__new__(cls)
 
     # ------------------------------------------------------------------
-    # Initialisation — shared across both plant types
+    # Initialisation - shared across both plant types
     # ------------------------------------------------------------------
 
     def __init__(self, input_data=None, seed=None):
@@ -172,11 +172,11 @@ class RootAnatomy(Organ):
             self.layer_manager.add_layer(Layer.from_dict(param))
 
     # ------------------------------------------------------------------
-    # Geometry — shared
+    # Geometry - shared
     # ------------------------------------------------------------------
 
     def _create_base_shape(self) -> Polygon:
-        # One shape family for every organ contour — see
+        # One shape family for every organ contour - see
         # GeometryProcessor.contour_polygon.  The root star uses the xylem-star
         # parameters (peak/valley radii + arcs); focus_ellipse prefers a measured
         # profile, else width/height + exponent.
@@ -266,7 +266,7 @@ class RootAnatomy(Organ):
     def _xylem_star_region(self, stele_polygon: Polygon) -> Tissue:
         """Build the star-shaped xylem *region* (pure geometry).
 
-        Shape-first: the star is assembled and clipped by region algebra — placed
+        Shape-first: the star is assembled and clipped by region algebra - placed
         at the stele centre, clipped to the stele, with the pith subtracted.  Sets
         ``self.xylem_star`` (the region later steps carve phloem out of) and
         ``self.pith_polygon``.  Returns the xylem :class:`Tissue`; an *empty*
@@ -358,7 +358,7 @@ class RootAnatomy(Organ):
     # See ROOT_SERIES_PLAN.  When ``self._prescribed_vessels`` is set (a list of
     # (x, y, r, track_id)), the vascular recipe places exactly these xylem vessels
     # at the given positions/radii carrying their persistent track_id, instead of
-    # packing random ones — so a vessel keeps its identity across the apex->collar
+    # packing random ones - so a vessel keeps its identity across the apex->collar
     # series.  The surrounding tissue still generates around them (the "refit").
     def prescribe_vessels(self, vessels) -> "RootAnatomy":
         """Prescribe the exact xylem vessel set for this section: an iterable of
@@ -419,7 +419,7 @@ class RootAnatomy(Organ):
         Cells below the threshold are kept whole; the point-level mask in
         ``Organ.generate_cells`` then clips their seeds that poke into a vessel, so
         they abut the vessels cleanly.  This is the middle ground between the old
-        rule (drop the cell if *any* seed touched a vessel — over-removes) and the
+        rule (drop the cell if *any* seed touched a vessel - over-removes) and the
         point-level mask alone (leaves distorted partial cells / slivers).
         """
         if not getattr(self, "xylem_star", None) or not self.vascular_polygons:

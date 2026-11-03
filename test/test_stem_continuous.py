@@ -5,7 +5,7 @@ uninterrupted ring of xylem / cambium / phloem.  The asserts pin the two
 properties that define it:
 
 * the three tissue *regions* each form a single connected annulus regardless of
-  the xylem layout — the ``"files"`` layout only adds thin radial parenchyma
+  the xylem layout - the ``"files"`` layout only adds thin radial parenchyma
   strips *inside* the xylem, forcing the vessels into radial files without
   breaking the xylem / phloem / cambium annuli;
 * the xylem is endarch (small protoxylem on the inner/pith face grading to large
@@ -108,7 +108,7 @@ def test_files_line_up_xylem_only():
     files = _stem(xylem_layout="files", n_xylem_files=6)
     tp = files.vascular_tissue_polygons
     # Every tissue region stays one connected annulus (files only add parenchyma
-    # *inside* the xylem — they never cut the xylem / phloem / cambium annuli).
+    # *inside* the xylem - they never cut the xylem / phloem / cambium annuli).
     for tissue in ("xylem", "cambium", "phloem"):
         assert _n_components(tp.get(tissue, [])) == 1, \
             f"{tissue} region is not a single continuous annulus"

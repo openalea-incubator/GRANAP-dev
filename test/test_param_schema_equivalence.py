@@ -5,7 +5,7 @@ mixins for the xylem / phloem / cambium / planttype / stomata / mesophyll / ICS 
 aerenchyma families).  Consumers (``build_bundle``, the organ classes, ``from_xml``)
 read parameters off plain dicts via ``.get(name, default)``, so the refactor is
 **schema-only**: it is correct iff every preset's ``to_dict_list()`` output is
-unchanged — same param blocks, same field names, same values, same order.
+unchanged - same param blocks, same field names, same values, same order.
 
 This test freezes that output as a golden JSON (``golden/param_dicts.json``) and
 asserts it never drifts.  Regenerate deliberately with::
@@ -16,8 +16,8 @@ asserts it never drifts.  Regenerate deliberately with::
 
 Comparison is **field-order-insensitive within each param block** (each block is
 compared as a name-keyed dict) but preserves block sequence: consumers read every
-field by name, so unifying two classes onto a shared base — which naturally
-reorders fields — is a no-op to them and must pass, while any changed *key* or
+field by name, so unifying two classes onto a shared base - which naturally
+reorders fields - is a no-op to them and must pass, while any changed *key* or
 *value* is a real, caught regression.
 """
 
@@ -92,4 +92,4 @@ if __name__ == "__main__":
         _write_golden()
     else:
         test_preset_param_dicts_unchanged()
-        print("OK — matches golden")
+        print("OK - matches golden")

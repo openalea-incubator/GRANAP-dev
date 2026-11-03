@@ -1,4 +1,4 @@
-"""Gallery: monocot xylem modes — 'default' (metaxylem ring), 'arch', and 'star'.
+"""Gallery: monocot xylem modes - 'default' (metaxylem ring), 'arch', and 'star'.
 
 Two parameterisations per mode:
   default : 1 metaxylem, and 6 metaxylem.
@@ -48,12 +48,12 @@ def cell_type_counts(root: RootAnatomy) -> dict:
 
 scenarios = [
     # -- default: ring of discrete metaxylem bundles ------------------------
-    {"label": "Default — 1 metaxylem", "shape": "default",
+    {"label": "Default - 1 metaxylem", "shape": "default",
      "xylem": {"n_vascular_bundles": 1}},
-    {"label": "Default — 6 metaxylem", "shape": "default",
+    {"label": "Default - 6 metaxylem", "shape": "default",
      "xylem": {"n_vascular_bundles": 6}},
     # -- arch: metaxylem ring + graded protoxylem poles ---------------------
-    {"label": "Arch — 6 metaxylem / 10 protoxylem", "shape": "arch",
+    {"label": "Arch - 6 metaxylem / 10 protoxylem", "shape": "arch",
      "xylem": {"n_metaxylem": 6, "n_vascular_peak": 10,
                "vessel_diameter": 0.08, "vessel_diameter_sd": 0.005,
                "vessel_diameter_min": 0.05, "outer_radius": 0.24,
@@ -64,17 +64,17 @@ scenarios = [
                "protoxylem_pole_width_outer": 0.02,
                "gradient_inflection": 0.5, "gradient_steepness": 2},
      "phloem": {"sieve_diameter": 0.015, "cluster_width": 0.04, "cluster_height": 0.035}},
-    {"label": "Arch — 4 metaxylem / 4 protoxylem", "shape": "arch",
+    {"label": "Arch - 4 metaxylem / 4 protoxylem", "shape": "arch",
      "xylem": {"n_metaxylem": 4, "n_vascular_peak": 4, "outer_radius": 0.24,
                "vessel_diameter": 0.08, "vessel_diameter_min": 0.05 ,
                "protoxylem_diameter_min": 0.01, "protoxylem_diameter": 0.06,
                "protoxylem_pole_width_inner" : 0.06, "protoxylem_pole_width_outer" : 0.02},
      "phloem": {"sieve_diameter": 0.015, "cluster_width": 0.04, "cluster_height": 0.035}},
     # -- star: star-shaped xylem + phloem in the valleys between arms --------
-    {"label": "Star — 11 arms, no pith", "shape": "star",
+    {"label": "Star - 11 arms, no pith", "shape": "star",
      "xylem": {"n_vascular_peak": 11, "arc_peak_side": 0.012, "arc_valley_side": 0.02},
      "phloem": {"cluster_width": 0.015, "cluster_height": 0.02, "sieve_diameter": 0.008}},
-    {"label": "Star — 6 arms, with pith", "shape": "star",
+    {"label": "Star - 6 arms, with pith", "shape": "star",
      "xylem": {"n_vascular_peak": 6, "pith_radius": 0.03}},
 ]
 
@@ -104,7 +104,7 @@ def main(show=True):
     for j in range(len(scenarios), len(axs_flat)):
         axs_flat[j].set_visible(False)
 
-    plt.suptitle("Monocot — xylem modes (default / arch / star)", fontsize=14)
+    plt.suptitle("Monocot - xylem modes (default / arch / star)", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

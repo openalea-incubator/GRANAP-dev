@@ -1,5 +1,5 @@
 """
-Small 3D mesh helpers — no new dependency (pure numpy): just an OBJ exporter
+Small 3D mesh helpers - no new dependency (pure numpy): just an OBJ exporter
 for visual inspection. Cell/vessel geometry itself is built by
 generate_cell_3d.extrude_polygon (literal-copy 2D-cell extrusion).
 """

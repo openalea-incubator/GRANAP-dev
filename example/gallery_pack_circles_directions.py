@@ -37,7 +37,7 @@ def main(show=False):
         if legend:
             legend.remove()
 
-    plt.suptitle("Dicot xylem — pack_circles direction comparison", fontsize=13)
+    plt.suptitle("Dicot xylem - pack_circles direction comparison", fontsize=13)
     plt.tight_layout()
     if show:
         plt.show()

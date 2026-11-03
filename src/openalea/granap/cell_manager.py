@@ -57,7 +57,7 @@ class CellManager:
 
         for cell in cells:
             new_cell = copy.copy(cell)
-            # id_layer is an absolute layer index — preserve it as-is
+            # id_layer is an absolute layer index - preserve it as-is
             new_cell.id_cell  = max_id_cell  + cell.id_cell  + 1
             new_cell.id_group = max_id_group + cell.id_group + 1
             self.cells.append(new_cell)
@@ -96,7 +96,7 @@ class CellManager:
 
         A cell's footprint is its Voronoi polygon if it has one, else its seed
         point.  Both predicates are evaluated in bulk (vectorised shapely) rather
-        than one shapely call per cell — same result, far fewer Python-level
+        than one shapely call per cell - same result, far fewer Python-level
         shapely dispatches.
         """
         if not self.cells:
@@ -166,7 +166,7 @@ class CellManager:
     def next_group_id(self):
         """Next free ``id_group`` for appending a new cell group.
 
-        ``get_last_id_group() + 1`` when there are cells, else 0 — the idiom
+        ``get_last_id_group() + 1`` when there are cells, else 0 - the idiom
         used everywhere vascular tissue is seeded group by group.
         """
         return self.get_last_id_group() + 1 if self.cells else 0

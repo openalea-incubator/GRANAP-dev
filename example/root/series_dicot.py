@@ -1,7 +1,7 @@
-"""Dicot root — a primary-growth *series* (apex -> collar) with tracked xylem.
+"""Dicot root - a primary-growth *series* (apex -> collar) with tracked xylem.
 
 Dicot primary xylem vessels stay put (no fusion/migration); what changes along the root is
-the **pith** — a central front that recedes from apex to collar.  A vessel appears once the
+the **pith** - a central front that recedes from apex to collar.  A vessel appears once the
 pith has receded past it (outer protoxylem first, inner metaxylem last) and grows to its 5PL
 target.  Positions + targets are captured once from the collar (smallest pith); the phloem,
 cambium and cortex regenerate around the tracked vessels in each section.
@@ -25,7 +25,7 @@ N_COLS = 4                                   # grid layout
 
 def build_dicot_base() -> OrganInputData:
     """A dicot-root template (the tissue that refits around the tracked vessels).  Primary
-    growth only — secondary growth stays off."""
+    growth only - secondary growth stays off."""
     d = OrganInputData.for_dicot_root()          # dicot preset (planttype=2)
     d.set_value("xylem", "n_vascular_peak", 4)   # tetrarch star
     d.set_value("xylem", "radius_peak_side", 0.24)

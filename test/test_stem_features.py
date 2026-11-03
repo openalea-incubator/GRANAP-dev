@@ -7,7 +7,7 @@
 * the ``CellManager.remove_cells`` identity fix (the epidermis-gap bug),
 * the unified absolute peak/valley ``star`` contour.
 
-One assertion per behaviour — enough to catch a regression, not exhaustive.
+One assertion per behaviour - enough to catch a regression, not exhaustive.
 """
 
 import os
@@ -61,7 +61,7 @@ def test_bundle_pattern_places_every_bundle():
 
 def test_bundle_pattern_grouped_forms_clusters():
     """'grouped' spacing on a 3-arm star clusters the sequence into 3 lobes with
-    empty valleys between — so the bundle angles show exactly 3 wide gaps."""
+    empty valleys between - so the bundle angles show exactly 3 wide gaps."""
     stem = StemAnatomy(_pattern_stem("grouped", "star", 3, ["big", "small", "small"]), seed=SEED)
     stem.generate_cells()
     bundles = _bundles(stem)

@@ -66,7 +66,7 @@ def test_secondary_phloem_zone_placement():
     # not at the cambium-arm angles (parenchyma ray positions).
     in_valley, in_arm = _zone_geometry_ok(root)
     assert in_valley, "Phloem zone not found at vessel-zone (valley) angle"
-    assert not in_arm, "Phloem zone found at cambium-arm (parenchyma ray) angle — wrong position"
+    assert not in_arm, "Phloem zone found at cambium-arm (parenchyma ray) angle - wrong position"
 
     # Sieve elements are always present.
     counts = cell_type_counts(root)

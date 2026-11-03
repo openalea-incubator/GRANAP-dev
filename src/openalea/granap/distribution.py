@@ -1,7 +1,7 @@
 """Shape of a randomly drawn size (vessel, protoxylem, sieve-element diameter...).
 
-Every size parameter keeps its own scalar fields — ``<x>_diameter`` (mean or
-gradient target), ``<x>_diameter_sd``, ``<x>_diameter_min`` — and gains one
+Every size parameter keeps its own scalar fields - ``<x>_diameter`` (mean or
+gradient target), ``<x>_diameter_sd``, ``<x>_diameter_min`` - and gains one
 optional ``<x>_diameter_distribution``: a :class:`Distribution` that says only
 **which shape** the per-element jitter follows.  Every family is moment-matched
 to the (mean, sd) the caller passes, in linear space, so ``mean`` and ``sd``

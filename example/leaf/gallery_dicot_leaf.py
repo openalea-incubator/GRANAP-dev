@@ -1,13 +1,13 @@
-"""Dicot leaf cross-section demo (dorsiventral) — midrib bundle designs.
+"""Dicot leaf cross-section demo (dorsiventral) - midrib bundle designs.
 
 Palisade mesophyll under the adaxial (upper) epidermis, spongy mesophyll above
 the abaxial (lower) one, and one big central midrib.  The **same leaf** is shown
 with the central midrib built two ways:
 
-1. **arc / cylinder-slice** — concentric xylem / cambium / phloem arcs (a pie
+1. **arc / cylinder-slice** - concentric xylem / cambium / phloem arcs (a pie
    slice of the continuous dicot-stem cylinder), xylem adaxial -> phloem abaxial,
    with the xylem in radial files (lines);
-2. **collateral bundle** — the ordinary compact collateral vein used before the
+2. **collateral bundle** - the ordinary compact collateral vein used before the
    arc bundle existed (xylem / cambium / phloem in radial files, packed into one
    envelope).
 
@@ -49,9 +49,9 @@ def build_dicot_leaf(midrib_kind="arc"):
     is a flat ``thickness_profile`` (full thickness out to near the edge, then a short
     rounded taper).  ``midrib_kind`` picks how the central vein is built:
 
-    * ``"arc"``        — a slice of a vascular cylinder (concentric xylem / cambium /
+    * ``"arc"``        - a slice of a vascular cylinder (concentric xylem / cambium /
       phloem arcs, xylem in radial files);
-    * ``"collateral"`` — the ordinary compact collateral bundle used before the arc
+    * ``"collateral"`` - the ordinary compact collateral bundle used before the arc
       bundle existed.
 
     Both use the same ``width`` (``MIDRIB_WIDTH``), so the two leaves are identical
@@ -83,8 +83,8 @@ def build_dicot_leaf(midrib_kind="arc"):
     # Sunken, keeled midrib: the adaxial (upper) surface dips into a groove (a NEGATIVE
     # rib) while the abaxial (lower) surface bulges into a keel (a positive rib), so the
     # whole midrib sits a bit below the lamina.  The lamina mid-line drops with it, and
-    # the bundle is centred on that (shifted-down) mid-line — i.e. it stays centred
-    # between the two epidermes — automatically (see LeafAnatomy._vein_y).
+    # the bundle is centred on that (shifted-down) mid-line - i.e. it stays centred
+    # between the two epidermes - automatically (see LeafAnatomy._vein_y).
     if midrib_kind == "arc":
         midrib["arc_degrees"] = ARC_DEGREES    # a slice of the vascular cylinder
         midrib["arc_radius"] = ARC_RADIUS
@@ -121,7 +121,7 @@ SCENARIOS = [
 def main(show=True):
     fig, axs = plt.subplots(len(SCENARIOS), 1, figsize=(13, 6.5))
     for ax, (label, kind) in zip(axs.ravel(), SCENARIOS):
-        print(f"=== dicot leaf — {label} ===")
+        print(f"=== dicot leaf - {label} ===")
         t0 = time.time()
         leaf = LeafAnatomy(build_dicot_leaf(kind), seed=SEED)
         leaf.generate_cells()
@@ -134,7 +134,7 @@ def main(show=True):
                 txt.set_fontsize(6)
         ax.set_aspect("equal")
 
-    plt.suptitle("Dicot leaf — same lamina, midrib as an arc vs a collateral bundle",
+    plt.suptitle("Dicot leaf - same lamina, midrib as an arc vs a collateral bundle",
                  fontsize=14)
     plt.tight_layout()
     if show:

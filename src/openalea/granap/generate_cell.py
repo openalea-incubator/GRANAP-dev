@@ -199,7 +199,7 @@ class CellGenerator:
                     layer["cell_width"] * 0.7,
                 )
 
-            # The next-inner layer polygon is loop-invariant — fetch and prepare
+            # The next-inner layer polygon is loop-invariant - fetch and prepare
             # it once (prepared geometry speeds the per-group contains() queries).
             next_inner = (
                 layers_polygons[i_layer + 1]["polygon"]
@@ -231,7 +231,7 @@ class CellGenerator:
                 else:
                     cell_border_points = layer_cell_borders[i]
                     ring = cell_border_points[1:]
-                    # Discard border points that bleed into the next inner layer —
+                    # Discard border points that bleed into the next inner layer -
                     # they would create seeds inside the wrong tissue zone.  One
                     # vectorised contains_xy() call replaces a shapely Point per point.
                     if next_inner is not None and len(ring):
@@ -399,7 +399,7 @@ class CellGenerator:
                 vertices = vor.vertices[region_vertices_indices]
                 # Voronoi regions are convex by construction, hence always valid,
                 # so the per-polygon is_valid check + buffer(0) repair (~one call
-                # per seed) was a no-op in the normal case — dropped (perf
+                # per seed) was a no-op in the normal case - dropped (perf
                 # proposal F1). The -1 / empty-region guard above already handles
                 # unbounded / degenerate regions.
                 cell.polygon = sp.Polygon(vertices)
@@ -408,7 +408,7 @@ class CellGenerator:
                 updated_cells.add_cell(cell)
                 
         # Union the per-seed Voronoi polygons into one 'biological' cell per
-        # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
+        # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` - at
         # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
         # ~13s of pure overhead (see doc/performance_proposals.md (1)). Plain
         # Python grouping + shapely ``unary_union`` (what dissolve calls
@@ -465,7 +465,7 @@ class CellGenerator:
                        skipped).  Index position must correspond to
                        ``cell_ids``.
             cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
-                       index, integer position, …).
+                       index, integer position, ...).
             protect_ids:Optional set of ``cell_ids`` in ``protected_shape_set``. 
                         Used for small inserted mid-wall air spaces 
                         Left ``None`` for the ordinary cell/aerenchyma pipeline.
@@ -473,16 +473,16 @@ class CellGenerator:
         Returns:
             ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set)``
 
-            * ``cell_vkeys``            – ``{cell_id: [snapped (x,y) tuples]}``
-            * ``vertex_to_cells``       – ``{(x,y): set(cell_ids)}``
-            * ``edge_to_cells``         – ``{edge_key: set(cell_ids)}``
-            * ``junction_set``          – set of ``(x,y)`` junction vertices
-            * ``protected_shape_set``   – set of ``(x,y)`` vertices that are protected
+            * ``cell_vkeys``            - ``{cell_id: [snapped (x,y) tuples]}``
+            * ``vertex_to_cells``       - ``{(x,y): set(cell_ids)}``
+            * ``edge_to_cells``         - ``{edge_key: set(cell_ids)}``
+            * ``junction_set``          - set of ``(x,y)`` junction vertices
+            * ``protected_shape_set``   - set of ``(x,y)`` vertices that are protected
         """
         n_dec = 6
 
         # ------------------------------------------------------------------
-        # Phase 0 — collect raw vertices and snap nearby ones together
+        # Phase 0 - collect raw vertices and snap nearby ones together
         # ------------------------------------------------------------------
         raw_cell_data: Dict[Any, list] = {}
         all_raw_verts: list = []
@@ -548,7 +548,7 @@ class CellGenerator:
                 canonical[ci] = snapped
 
         # ------------------------------------------------------------------
-        # Phase 1 — build cell_vkeys, vertex_to_cells, edge_to_cells
+        # Phase 1 - build cell_vkeys, vertex_to_cells, edge_to_cells
         # ------------------------------------------------------------------
         vertex_to_cells: Dict[tuple, set] = {}
         cell_vkeys: Dict[Any, List[tuple]] = {}
@@ -575,7 +575,7 @@ class CellGenerator:
                 edge_to_cells.setdefault(ek, set()).add(cid)
 
         # ------------------------------------------------------------------
-        # Phase 2 — identify junction vertices
+        # Phase 2 - identify junction vertices
         # ------------------------------------------------------------------
         junction_set: set = set()
 
@@ -614,12 +614,12 @@ class CellGenerator:
         bigger one.
 
         Voronoi grouping can leave one group's cell overlapping and buried inside a
-        larger neighbour — e.g. a companion seeded right against a sieve, whose few
+        larger neighbour - e.g. a companion seeded right against a sieve, whose few
         border points give it a Voronoi footprint the bigger cell's union swallows.
         It then renders as one cell drawn inside another.
 
         A cell ``i`` is treated as nested when a larger cell ``j`` contains ``i``'s
-        interior point *and* covers at least ``min_overlap`` of ``i``'s area — so
+        interior point *and* covers at least ``min_overlap`` of ``i``'s area - so
         ordinary edge-sharing neighbours (whose overlap is ~0) are never touched.
         The nested cell is removed and merged into the smallest such enclosing cell
         (a no-op when it is already fully covered), keeping the larger cell intact.
@@ -708,7 +708,7 @@ class CellGenerator:
         if not cell_vkeys:
             return grouped_cells
 
-        # Phase 3 — rebuild each polygon keeping only junction and protected vertices
+        # Phase 3 - rebuild each polygon keeping only junction and protected vertices
         for idx, cell in enumerate(grouped_cells):
             if idx not in cell_vkeys:
                 continue

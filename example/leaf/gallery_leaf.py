@@ -1,8 +1,8 @@
 """Gallery: monocot vs dicot leaf cross-sections, side by side.
 
-* **monocot** — spongy / palisade / spongy mesophyll, an even row of transverse
+* **monocot** - spongy / palisade / spongy mesophyll, an even row of transverse
   'face' veins (xylem adaxial), amphistomatous;
-* **dicot** — dorsiventral palisade (adaxial) / spongy (abaxial), a central midrib
+* **dicot** - dorsiventral palisade (adaxial) / spongy (abaxial), a central midrib
   + scattered minor collateral veins, stomata denser on the abaxial face.
 
 Both built from the ``OrganInputData.for_*_leaf()`` presets.
@@ -33,11 +33,11 @@ def _twisted_girdered_monocot():
 
 
 SCENARIOS = [
-    ("monocot leaf — uniform mesophyll + inter-bundle aerenchyma",
+    ("monocot leaf - uniform mesophyll + inter-bundle aerenchyma",
      OrganInputData.for_monocot_leaf()),
-    ("dicot leaf — palisade (adaxial) / spongy (abaxial), midrib + minor veins",
+    ("dicot leaf - palisade (adaxial) / spongy (abaxial), midrib + minor veins",
      OrganInputData.for_dicot_leaf()),
-    ("monocot leaf — twisted lamina + sclerenchyma girders to both epidermes",
+    ("monocot leaf - twisted lamina + sclerenchyma girders to both epidermes",
      _twisted_girdered_monocot()),
 ]
 
@@ -60,7 +60,7 @@ def main(show=True):
                 txt.set_fontsize(6)
         ax.set_aspect("equal")
 
-    plt.suptitle("Leaf cross-sections — monocot / dicot", fontsize=14)
+    plt.suptitle("Leaf cross-sections - monocot / dicot", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

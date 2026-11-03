@@ -1,10 +1,10 @@
-"""Maize monocot root — a developmental *series* (apex -> collar) with tracked xylem.
+"""Maize monocot root - a developmental *series* (apex -> collar) with tracked xylem.
 
 Walks a maize (Zea mays, B73-like) root from the apex (0) to the collar, sampling
 the anatomy at physical lengths.  Unlike the wheat series, **nothing fuses and
 nothing terminates**: the metaxylem count is held constant along the whole root
-(``META`` vessels, the B73 polyarch ring).  What changes with length is size —
-the vessels, the stele and the cortex grow toward the collar — and the tissue
+(``META`` vessels, the B73 polyarch ring).  What changes with length is size -
+the vessels, the stele and the cortex grow toward the collar - and the tissue
 refits around the vessels each section.
 
 Identity is still tracked: each metaxylem keeps its colour, so you can follow one
@@ -31,13 +31,13 @@ LENGTH_MM = 1500.0                            # apex (0) .. collar (150 cm)
 N_COLS = 4                                    # grid layout: 4 per row -> 3 rows
 
 META = 6                                      # metaxylem, constant apex .. collar
-                                             # (the B73 polyarch ring — no fusion)
+                                             # (the B73 polyarch ring - no fusion)
 
 
 def build_maize_base() -> OrganInputData:
     """A maize 'B73' monocot-root template (the tissue that refits around the tracked
     vessels).  The series drives the metaxylem count directly; the phloem / protoxylem
-    tuning here still applies — those are regenerated per section around them.
+    tuning here still applies - those are regenerated per section around them.
 
     Same numbers as the B73 panel of ``monocot_maize.py``, minus the aerenchyma:
     the series keeps a solid cortex so the semi-3D stack reads cleanly."""
@@ -79,7 +79,7 @@ def build_maize_base() -> OrganInputData:
 
 
 def n_fused(length_mm: float) -> int:
-    """Number of metaxylem along the root: ``META`` everywhere.  Constant — this is
+    """Number of metaxylem along the root: ``META`` everywhere.  Constant - this is
     the maize series' whole point: the vessels neither fuse nor terminate, they
     only grow toward the collar."""
     return META
@@ -110,7 +110,7 @@ def main(show=True):
     fig = res.plot(
         cols=N_COLS,
         retag=[("inner_cortex", "cortex"), ("outer_cortex", "cortex")],
-        suptitle="Maize root series (collar → apex) — colour follows one metaxylem identity",
+        suptitle="Maize root series (collar -> apex) - colour follows one metaxylem identity",
         show=False,
     )
     # RootSeriesResult.plot titles sections in mm; this series is 150 cm long, so

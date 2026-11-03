@@ -22,7 +22,7 @@ from openalea.granap.tissue_class import TissueRecipe
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------------------------
-# Module-level constants — geometry tuning parameters
+# Module-level constants - geometry tuning parameters
 # ---------------------------------------------------------------------------
 # Number of epidermis border-point cells to skip at the start of the boundary
 _STOMATA_SKIP_BORDER_PTS: int = 300
@@ -77,7 +77,7 @@ class NeedleAnatomy(Organ):
         # 3. Transfusion tissue params
         self.transfusion_params = next(p for p in self.params if p["name"] == "transfusion_tissue")
 
-        # 3. Intercellular spaces / aerenchyma — store raw config dicts directly
+        # 3. Intercellular spaces / aerenchyma - store raw config dicts directly
         self.intercellular_spaces_params = [p for p in self.params if p["name"] == "inter_cellular_spaces"]
         self.aerenchyma_params = self._get_param("aerenchyma")
 
@@ -318,7 +318,7 @@ class NeedleAnatomy(Organ):
         Built and run by the shared ``Organ._create_vascular_tissue`` scaffold.
 
         The xylem / phloem / cambium / Strasburger grid packed into the two
-        central ellipses is a **bespoke fill** — its "region" is two *oriented*
+        central ellipses is a **bespoke fill** - its "region" is two *oriented*
         ellipses carrying axis/angle metadata that the grid loop consumes, so it
         does not map onto the shape-first region+fill verbs.  It therefore stays a
         single ``special`` step, mirroring root's bespoke steps (metaxylem border,
@@ -348,7 +348,7 @@ class NeedleAnatomy(Organ):
 
         Each grid coordinate is built in the ellipse's local frame, then rotated
         by the ellipse angle and translated to its centre (:func:`place`); cells
-        that land inside the ellipse are kept.  A bespoke fill — there is no
+        that land inside the ellipse are kept.  A bespoke fill - there is no
         region to pack, the layout is an explicit grid.
         """
         list_ellipses_polygons: List[Polygon] = []
@@ -439,7 +439,7 @@ class NeedleAnatomy(Organ):
         return recipe
 
     # ------------------------------------------------------------------
-    # Geometry helpers — pure computation, no cell placement
+    # Geometry helpers - pure computation, no cell placement
     # ------------------------------------------------------------------
 
     def _duct_zone_data(self, layers_polygons):
@@ -498,7 +498,7 @@ class NeedleAnatomy(Organ):
         """
         Compute stomata geometry from triplet positions without placing cells.
 
-        triplet_centers: list of ((px,py), (cx,cy), (nx,ny)) — prev/curr/next
+        triplet_centers: list of ((px,py), (cx,cy), (nx,ny)) - prev/curr/next
                          epidermis seed positions for each stoma.
         sp:             stomata parameter dict.
         cell_diam:      epidermis cell diameter.
@@ -572,7 +572,7 @@ class NeedleAnatomy(Organ):
         The air-space cells use the same labelling conventions as the base
         intercellular routine (``id_layer=0``, ``id_group=id_cell``).
         """
-        MAJOR_WALL_FRACTION = 1.0 / 3.0   # principal diagonal ≈ 1/3 of the wall length
+        MAJOR_WALL_FRACTION = 1.0 / 3.0   # principal diagonal ~ 1/3 of the wall length
         AXIS_RATIO = 2.0                  # principal : secondary diagonal = 2 : 1
 
         mesophyll_cells = [
@@ -689,7 +689,7 @@ class NeedleAnatomy(Organ):
         return Polygon([tuple(v) for v in verts])
 
     # ------------------------------------------------------------------
-    # Cell-placement methods — call geometry helpers then place cells
+    # Cell-placement methods - call geometry helpers then place cells
     # ------------------------------------------------------------------
 
     def add_canal(self):
@@ -765,13 +765,13 @@ class NeedleAnatomy(Organ):
         """
         extra = {}
 
-        # Resin ducts — delegate entirely to the shared geometry helper
+        # Resin ducts - delegate entirely to the shared geometry helper
         duct_data, _ = self._duct_zone_data(layers_polygons)
         if duct_data:
             extra["resin_duct"]  = [d["outer"] for d in duct_data]
             extra["resin_canal"] = [d["canal"] for d in duct_data]
 
-        # Stomata — approximate seed positions from the epidermis layer polygon
+        # Stomata - approximate seed positions from the epidermis layer polygon
         stomata_params_list = [p for p in self.params if p["name"] == "stomata"]
         if stomata_params_list and layers_polygons:
             sp        = stomata_params_list[0]

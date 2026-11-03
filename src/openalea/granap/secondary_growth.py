@@ -4,8 +4,8 @@ Free-function ports of the dicot-root secondary-growth algorithms so the dicot
 *stem* can reuse them without forking the root: rendering the cambium as
 concentric cell files, packing secondary-xylem vessels + axial parenchyma into a
 zone, and the secondary phloem (a band standing on the cambium, split radially
-into an alive sub-zone — sieve tubes + companion cells + parenchyma — and a dead
-sub-zone — sieve tubes + parenchyma).
+into an alive sub-zone - sieve tubes + companion cells + parenchyma - and a dead
+sub-zone - sieve tubes + parenchyma).
 
 Every function takes an explicit :class:`CellManager` (+ an rng where packing is
 involved), so they are decoupled from the organ classes.  Geometry is in absolute
@@ -127,7 +127,7 @@ def fill_secondary_xylem_sector(cells, rng, sector: Polygon, sx: dict,
 
     Mirrors the dicot root's ``fit_secondary_xylem`` inner loop: the sector is first
     cut by the medullar-ray corridors (``medullar_union``) into fragments, then each
-    fragment is split into the ``annual_bands`` (growth rings) — a graded vessel pack
+    fragment is split into the ``annual_bands`` (growth rings) - a graded vessel pack
     per band, referenced to the band's ``(r_inner, r_outer)`` so the size gradient
     restarts each ring (small at the ring start, large toward its outer edge).  With
     ``annual_bands=None`` (``n_ring`` = 1) the fragment is packed whole; with
@@ -164,7 +164,7 @@ def fill_secondary_xylem_sector(cells, rng, sector: Polygon, sx: dict,
                     axial = piece
                 if not axial.is_empty:
                     # Fill the whole axial zone at once, eroding against the *full*
-                    # piece (not each fragment) — the root's erosion_polygon — so the
+                    # piece (not each fragment) - the root's erosion_polygon - so the
                     # concentric rings seat correctly and the parenchyma actually fills
                     # the non-vessel area instead of leaving gaps the Voronoi inflates.
                     next_id = fill_by_rings(cells, axial, sx["cell_diameter"],
@@ -358,7 +358,7 @@ def prepare_medullar_rays(cells, rng, annular_zone, vessel_zones, primary_contou
                           prop_stele, cambium_cell_diameter, mr, r_inner_min: float = 0.0):
     """Build the medullar-ray corridors (before vessel packing so they can cut the
     vessel sectors) and clear cambium seeds inside them.  Returns
-    ``(medullar_ray_polys, medullar_union)`` — ``([], None)`` when none requested.
+    ``(medullar_ray_polys, medullar_union)`` - ``([], None)`` when none requested.
 
     ``r_inner_min`` holds the ray corridors off the primary xylem: their inner tips
     start at this radius (a short margin outside the primary ring) so those cells are
@@ -455,7 +455,7 @@ def fill_medullar_rays(cells, medullar_poly, theta_c, cx, cy, mr, start_id) -> i
 def fill_ray_parenchyma_split(cells, rng, vessel_zones, annular_zone, cx, cy, sx,
                               r_outer, gap_thetas, gap_half, r_start, start_id) -> int:
     """Ray parenchyma in the interfascicular gaps, filled as radial lanes that split
-    (lane count doubles) as the arc widens outward — the root's ``_fill_ray_parenchyma``,
+    (lane count doubles) as the arc widens outward - the root's ``_fill_ray_parenchyma``,
     keyed on the gap centres ``gap_thetas`` (midway between adjacent xylem sectors)
     each spanning ``+/- gap_half``.  ``gap_half`` is a scalar (uniform gaps) or one
     value per gap (a mixed-kind pattern, where the between-group gaps differ from the

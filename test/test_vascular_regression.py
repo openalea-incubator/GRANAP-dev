@@ -13,7 +13,7 @@ drifted run-to-run because the jitter used the global ``np.random``.
 Cross-platform note: ``dicot_stem`` used to differ on macOS/Windows because the
 xylem file-separator strips were clipped to the zone before being used to cut it
 (``_xylem_file_strips``), which left severance to a collinear-boundary decision
-GEOS resolves at the last bit — a 1e-9 nudge flipped 2 of 8 bundles from 3 xylem
+GEOS resolves at the last bit - a 1e-9 nudge flipped 2 of 8 bundles from 3 xylem
 files to 2.  With the cutter left unclipped all 8 bundles split as parameterised
 and the census is stable to ~1e-4.  Counts here are stable across GEOS 3.13/3.14
 and py3.13/3.14; the geometry stack is pinned in ``pyproject.toml``.
@@ -35,7 +35,7 @@ SEED = 0
 # -- canonical configurations ------------------------------------------------
 #
 # Each builder returns a *constructed organ* (seeded), so the suite spans both
-# RootAnatomy and NeedleAnatomy.  Build a fresh organ every call — generation
+# RootAnatomy and NeedleAnatomy.  Build a fresh organ every call - generation
 # mutates it.
 
 def monocot_default() -> RootAnatomy:
@@ -146,7 +146,7 @@ def _check(name: str) -> None:
 
 
 # Reproducibility is a property of the RNG plumbing (does the jitter draw from the
-# organ's seeded rng, or from the global one?), not of a preset — so it is checked on
+# organ's seeded rng, or from the global one?), not of a preset - so it is checked on
 # one organ of each kind rather than on all seven, which cost 54 s and caught nothing
 # the three below would miss.
 REPRO = ("monocot_default", "needle_default", "dicot_stem")

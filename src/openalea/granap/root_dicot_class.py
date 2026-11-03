@@ -2,7 +2,7 @@
 
 ``DicotRootAnatomy`` builds a dicot stele: star-shaped primary xylem with a
 cambium and phloem, plus optional secondary growth (secondary xylem/phloem,
-medullar rays, companion cells).  Instantiate via ``RootAnatomy(input_data)`` —
+medullar rays, companion cells).  Instantiate via ``RootAnatomy(input_data)`` -
 the factory in :mod:`openalea.granap.root_class` dispatches to this class when
 ``planttype == 2``.
 """
@@ -242,7 +242,7 @@ class DicotRootAnatomy(RootAnatomy):
     def _phloem_valley_zones(self, stele_polygon: Polygon):
         """Build the phloem regions: one :class:`Tissue` per valley between peaks.
 
-        Shape-first — each valley starts as a ``Tissue("phloem", ellipse)`` and is
+        Shape-first - each valley starts as a ``Tissue("phloem", ellipse)`` and is
         shaped purely by region algebra: clipped to the stele and carved out of
         the xylem star.  Returns ``(tissues, adjustment)``; the cells are filled
         in later by the recipe's packing step.  ``adjustment`` is the clearance
@@ -300,7 +300,7 @@ class DicotRootAnatomy(RootAnatomy):
     def _add_phloem_step(self, recipe: TissueRecipe, stele_polygon: Polygon) -> None:
         """Declarative phloem step: valley *regions* filled by circle-packing.
 
-        Shape-first vocabulary — the regions (:meth:`_phloem_valley_zones`, built
+        Shape-first vocabulary - the regions (:meth:`_phloem_valley_zones`, built
         lazily at recipe-build time because they are carved from the xylem star
         placed by an earlier step) are filled by the recipe's ``packing``
         strategy.  Each filled region is recorded (buffered by the phloem
@@ -393,7 +393,7 @@ class DicotRootAnatomy(RootAnatomy):
     def _groups_intersecting(zone, cells) -> set:
         """id_groups of ``cells`` whose seed (x, y) intersects ``zone``.
 
-        Vectorised ``intersects_xy`` over the cells' coordinates — replaces a
+        Vectorised ``intersects_xy`` over the cells' coordinates - replaces a
         per-cell ``zone.intersects(Point(c.x, c.y))`` (perf proposal (2)).
         """
         if not cells:
@@ -432,15 +432,15 @@ class DicotRootAnatomy(RootAnatomy):
         # ellipse / focus_ellipse stays elongated instead of collapsing to the
         # stele's inscribed circle).
         #
-        # * 'star' — oriented_star_polygon orients the arm toward whichever side
+        # * 'star' - oriented_star_polygon orients the arm toward whichever side
         #   owns the larger radius.  With the default radius_valley_side >
         #   radius_peak_side the arm points to the primary-xylem *valleys*, where
         #   the cambium produces secondary xylem and bulges outward (the star is
         #   offset half a period); for a diarch (2 peaks) the secondary cambium
         #   then runs perpendicular to the primary xylem.  Laplacian-smoothed.
-        # * 'focus_ellipse' — one smooth best-fit superellipse (axes from the
+        # * 'focus_ellipse' - one smooth best-fit superellipse (axes from the
         #   measured profile, exponent least-squares fitted) for a mature ring.
-        # * 'circle' / 'ellipse' — a plain ring sized by radius_valley_side.
+        # * 'circle' / 'ellipse' - a plain ring sized by radius_valley_side.
         shape = sc.get("shape", "star")
         n_peaks = int(sc.get("n_peaks", 0)) or p["n_vascular_peak"]
         contour = GeometryProcessor.contour_polygon(
@@ -461,7 +461,7 @@ class DicotRootAnatomy(RootAnatomy):
         """Constant-tangential-width radial strip centred on ``theta``.
 
         A rectangle of tangential width ``width`` running from ``r_inner`` (default
-        the stele centre) out to ``r_outer`` along the ``theta`` direction — the
+        the stele centre) out to ``r_outer`` along the ``theta`` direction - the
         phloem-band footprint of a medullar ray, whose cells are filled at constant
         tangential ``base_width`` (so a rectangle matches the ray better than an
         angular wedge, which would taper).  ``r_inner`` lets a ray start partway out
@@ -518,8 +518,8 @@ class DicotRootAnatomy(RootAnatomy):
         intersection clips cleanly); the arm then tapers to ``top_width`` at
         ``height`` along the outward local ``normal``.
 
-        Curving the base along the contour — rather than the earlier straight
-        chord along the local tangent — is what fixes the inverted taper: on a
+        Curving the base along the contour - rather than the earlier straight
+        chord along the local tangent - is what fixes the inverted taper: on a
         convex cambium a straight base chord bows out to a larger radius, so once
         clipped to the annular band the wide base landed at the *outer* edge
         (pinched at the cambium, wide at the tip).  The arm still leans along the
@@ -550,7 +550,7 @@ class DicotRootAnatomy(RootAnatomy):
         """``(center_theta, base_half_width)`` for each phloem compartment.
 
         A compartment is the angular sector between two consecutive rays inside a
-        vessel zone — bounded by the parenchyma rays at the zone edges
+        vessel zone - bounded by the parenchyma rays at the zone edges
         (``theta_v +/- half_width``) and by any medullar rays in between.  Each one
         becomes its own tapering trapeze, so the phloem is split medullar<->medullar
         and medullar<->parenchyma rather than spanning the whole zone as one block.
@@ -685,7 +685,7 @@ class DicotRootAnatomy(RootAnatomy):
         full circle.
 
         Each corridor is a rectangle of constant tangential width ``base_width``
-        (via ``_radial_strip``), not an angular wedge — so the ray keeps the same
+        (via ``_radial_strip``), not an angular wedge - so the ray keeps the same
         physical width whatever the radius.
 
         Returns a list of (polygon, theta_c) tuples.
@@ -715,7 +715,7 @@ class DicotRootAnatomy(RootAnatomy):
                 return []
             clip_zone = unary_union(valid_zones)
 
-        # rays :: list of (theta, r_inner) — initial rays start at 0 (clipped to
+        # rays :: list of (theta, r_inner) - initial rays start at 0 (clipped to
         # the annulus inner edge = the cambium); rate-driven rays start at r_j.
         rays: list = []
 
@@ -986,7 +986,7 @@ class DicotRootAnatomy(RootAnatomy):
 
         The zone is recorded as an ANNULUS (secondary cambium minus the primary
         cambium), not the filled star: the filled polygon contains the origin, so
-        the mask would clear every stele parenchyma seed in the core — including
+        the mask would clear every stele parenchyma seed in the core - including
         the interstitial stele between the primary xylem vessels, leaving those
         vessels' Voronoi cells to blow up.  Subtracting the primary cambium keeps
         the primary xylem exactly as primary growth renders it while still
@@ -1046,7 +1046,7 @@ class DicotRootAnatomy(RootAnatomy):
         can cut the vessel zones), share their angles/width with
         :meth:`fit_secondary_phloem`, and clear cambium seeds inside them.
 
-        Returns ``(medullar_ray_polys, medullar_union)`` — ``([], None)`` when no
+        Returns ``(medullar_ray_polys, medullar_union)`` - ``([], None)`` when no
         medullar rays are requested.  ``r_outer`` is the real outer xylem radius,
         over which rate-driven rays are initiated.
         """
@@ -1249,7 +1249,7 @@ class DicotRootAnatomy(RootAnatomy):
                         gradient_radial_range=grr,
                         rng=self.rng,
                     )
-                    # Seed one vessel per packed circle — the shared pack-and-seed verb.
+                    # Seed one vessel per packed circle - the shared pack-and-seed verb.
                     placed_out = place_packed_group(
                         self.vascular_cells, packed, "xylem",
                         n_border=25, id_base=next_id, angle_center=None,
@@ -1308,8 +1308,8 @@ class DicotRootAnatomy(RootAnatomy):
         The phloem occupies a band that follows the secondary cambium contour
         (the cambium polygon buffered outward by ``height``).  With
         ``shape="trapeze"`` (default) one tapering trapeze sits in each
-        *compartment* — the angular sector between two consecutive rays
-        (medullar<->medullar or medullar<->parenchyma) — with a wide base at the
+        *compartment* - the angular sector between two consecutive rays
+        (medullar<->medullar or medullar<->parenchyma) - with a wide base at the
         cambium narrowing to ``top_width`` at the band's outer edge.  With
         ``shape="band"`` the whole buffered-cambium band is used directly as a
         single continuous ring, skipping the per-compartment trapeze carving.
@@ -1336,7 +1336,7 @@ class DicotRootAnatomy(RootAnatomy):
         r_outer = max(maxx - cx, cx - minx, maxy - cy, cy - miny) * 1.5
 
         # One tapering trapeze per compartment (between consecutive rays), each
-        # standing perpendicular on the cambium surface — unless shape="band",
+        # standing perpendicular on the cambium surface - unless shape="band",
         # which uses the whole buffered-cambium ring directly.
         cam_ext = secondary_cambium_polygon.exterior
         if sp.get("shape", "trapeze") == "band":
@@ -1414,7 +1414,7 @@ class DicotRootAnatomy(RootAnatomy):
 
         # The Voronoi renders a packed cell ~half a neighbouring parenchyma cell
         # wider than its packed circle (negligible for big xylem vessels, but it
-        # visibly bloats the small sieve/companion — the parenchyma has to be small
+        # visibly bloats the small sieve/companion - the parenchyma has to be small
         # *relative to* the cell for it to render true, exactly as for xylem). We
         # keep the packing at the requested diameter (so the count/spacing set by
         # prop_sieve is unchanged), then shrink each seeded circle by this
@@ -1450,7 +1450,7 @@ class DicotRootAnatomy(RootAnatomy):
             comp_area_each  = (np.pi * (sp["companion_diameter"] / 2) * (sp["companion_width"]/2)) if alive else 0.0
             combined_area   = 0.0
 
-            # Pass 1 — seed every sieve element.  Packed at the requested diameter
+            # Pass 1 - seed every sieve element.  Packed at the requested diameter
             # (so prop_sieve's count/spacing is unchanged), then each circle is
             # scaled down by the parenchyma-derived voronoi growth (floored at
             # sieve_r_floor, never grown past the packed radius) so it renders at
@@ -1483,7 +1483,7 @@ class DicotRootAnatomy(RootAnatomy):
                 sieve_centers.append((pcx, pcy, r_draw))
                 combined_area += increment
 
-            # Pass 2 — one companion cell beside each sieve (alive only).  Built
+            # Pass 2 - one companion cell beside each sieve (alive only).  Built
             # after all sieves so it can be rejected if it overlaps ANY sieve (not
             # just the ones placed so far), which is what produced companion cells
             # nested inside a neighbouring sieve.
@@ -1526,7 +1526,7 @@ class DicotRootAnatomy(RootAnatomy):
                         companion_polys.append(comp_circle)
                         break   # one companion per sieve
 
-            # Parenchyma ground tissue — fill the arm minus the sieve/companion
+            # Parenchyma ground tissue - fill the arm minus the sieve/companion
             # footprints so it packs around them (one hole per sieve/companion), no
             # overlaps.  Hug the holes (initial_space=0): the default ring erosion
             # leaves a cell-wide moat around every sieve that its Voronoi cell then

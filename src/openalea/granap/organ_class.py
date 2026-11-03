@@ -50,8 +50,8 @@ class Organ(AbstractNetwork, ABC):
     AUTO_FUSE_GAPS: bool = True
 
     #: Whether :meth:`fuse_gaps` only absorbs gaps *enclosed by cells* and leaves the
-    #: uncovered ribbon along the organ surface alone.  That ribbon — between the
-    #: outermost Voronoi edges and the outline — runs unbroken past many cells and
+    #: uncovered ribbon along the organ surface alone.  That ribbon - between the
+    #: outermost Voronoi edges and the outline - runs unbroken past many cells and
     #: survives the sliver opening wherever the surface curves sharply (leaf tips,
     #: blunt margins), so fusing it stretches one surface cell right across its
     #: neighbours.  Set False to fuse every gap, surface ones included.
@@ -341,16 +341,16 @@ class Organ(AbstractNetwork, ABC):
                           segment_length: Optional[float] = None) -> Cells3DResult:
         """Build a 3D model of this organ by extruding its 2D cross-section.
 
-        Generates a fresh 2D cross-section — *ordinary* intercellular space
+        Generates a fresh 2D cross-section - *ordinary* intercellular space
         disabled (3D intercellular space isn't modelled yet), aerenchyma
-        handled per ``aerenchyma_mode`` — and stacks literal copies of each
+        handled per ``aerenchyma_mode`` - and stacks literal copies of each
         cell's real 2D polygon along Z at its own tissue-type height; vessels
         get one extrusion spanning the whole segment. See
         :mod:`generate_cell_3d` for the full mechanics and the reasoning
         behind this design (it replaced an earlier 3D-Voronoi approach that
         proved too fragile/expensive).
 
-        This organ is left as it was found — the parameters overridden for the
+        This organ is left as it was found - the parameters overridden for the
         2D pass are restored and cached geometry is invalidated, so a later
         :meth:`generate_cells` returns this organ's own 2D section.
 
@@ -369,10 +369,10 @@ class Organ(AbstractNetwork, ABC):
                 ``n_axial_repeats``.
             aerenchyma_mode: when aerenchyma is applied relative to the
                 extrusion. ``"before"`` (default) builds it in 2D and extrudes
-                each lacuna as one full-span prism — continuous axial
+                each lacuna as one full-span prism - continuous axial
                 channels, the rice-root case. ``"after"`` suppresses the 2D
                 pass and instead retypes individual extruded prisms to "air
-                space" — a distributed void network, the leaf case.
+                space" - a distributed void network, the leaf case.
                 ``"none"`` disables it entirely.
             seed: RNG seed for the per-cell axial phase shift; defaults to
                 this organ's own seeded ``self.rng``.
@@ -419,7 +419,7 @@ class Organ(AbstractNetwork, ABC):
         """Rename every cell tagged ``old_tag`` to ``new_tag``.
 
         Retags the live cells in ``all_cells`` and, when the cells have
-        already been materialised, the cached ``_cells_gdf`` too — so plots
+        already been materialised, the cached ``_cells_gdf`` too - so plots
         and exports reflect the new tag without a full regeneration.
         Returns the number of cells retagged.
         """
@@ -462,7 +462,7 @@ class Organ(AbstractNetwork, ABC):
         """Detect empty space inside the organ that no cell was assigned to.
 
         A gap is the organ outline minus the union of every cell polygon (minus the
-        declared voids — the medullary cavity — when ``exclude_voids``).  These arise
+        declared voids - the medullary cavity - when ``exclude_voids``).  These arise
         where the pipeline drops or clips cells: ``simplify_cells`` /
         ``remove_nested_cells`` deleting a small cell, Voronoi clipping at the
         boundary, or a bundle removal mask leaving a sliver between the bundle sheath
@@ -476,7 +476,7 @@ class Organ(AbstractNetwork, ABC):
         area.  ``enclosed_only`` keeps just the holes the tissue closes around,
         dropping the ribbon that runs along the organ surface (see
         :attr:`FUSE_ENCLOSED_GAPS_ONLY`); the default reports every gap, so this stays
-        a full diagnostic.  Returns the gap polygons, largest first — feed them to a
+        a full diagnostic.  Returns the gap polygons, largest first - feed them to a
         plot or read their ``.area`` / ``.centroid`` to locate each hole.
 
         Call after :meth:`generate_cells` (it reads the materialised cells).
@@ -520,7 +520,7 @@ class Organ(AbstractNetwork, ABC):
         cell type sharing the most boundary with the hole (so a pith gap goes to the
         pith, a sheath gap to the sheath, never into a vessel it merely touches).  The
         hole is then unioned into the neighbouring cell of that zone with the longest
-        shared border — the nearest cell of the same tissue — so no empty space is
+        shared border - the nearest cell of the same tissue - so no empty space is
         left and the cell simply grows to fill it.
 
         Only gaps the tissue closes around are absorbed, unless
@@ -555,7 +555,7 @@ class Organ(AbstractNetwork, ABC):
         if enclosed_only:
             # Clip the recoverable area too. Without this the ``recover`` dilation
             # below reconnects an enclosed hole near the surface to the ribbon, and
-            # the cell fused with it smears along the ribbon anyway — defeating the
+            # the cell fused with it smears along the ribbon anyway - defeating the
             # filter find_gaps just applied.
             raw = raw.intersection(self._filled_cell_mass([c.polygon for c in cells]))
 
@@ -607,7 +607,7 @@ class Organ(AbstractNetwork, ABC):
         Optionally reshape layer polygons after they have been built.
 
         The default implementation is a no-op (returns the list unchanged).
-        Subclasses can override this to morph each layer's polygon — for
+        Subclasses can override this to morph each layer's polygon - for
         example, interpolating between the outer organ shape and an inner
         ellipse so that the central cylinder has a different cross-section.
 
@@ -719,7 +719,7 @@ class Organ(AbstractNetwork, ABC):
         """
         requested = self.aerenchyma_params.get("aerenchyma_proportion", 0)
         if not requested:
-            # No aerenchyma requested — still fuse/simplify the intercellular air.
+            # No aerenchyma requested - still fuse/simplify the intercellular air.
             self.merge_intercellular_aerenchyma()
             return
 
@@ -784,7 +784,7 @@ class Organ(AbstractNetwork, ABC):
         ctr = np.array([pocket.centroid.x, pocket.centroid.y])
         pverts = np.asarray(pocket.exterior.coords)[:-1]
         # A reflex neighbour can *wrap around* the pocket with no area overlap, and its
-        # bbox need not overlap the tiny pocket — so probe a buffered pocket and select
+        # bbox need not overlap the tiny pocket - so probe a buffered pocket and select
         # by distance, and keep the most-reflex neighbour as A.
         adj_tol = max(1e-6, 0.5 * np.sqrt(pocket.area / np.pi))
         probe = pocket.buffer(adj_tol)
@@ -1189,13 +1189,13 @@ class Organ(AbstractNetwork, ABC):
 
         for cell in tissue_cells:
             # A degenerate cell (polygon fully consumed by an upstream removal
-            # mask, e.g. a bundle envelope) carries no geometry to carve — drop
+            # mask, e.g. a bundle envelope) carries no geometry to carve - drop
             # it, mirroring the None guard on the air spaces above.
             if cell.polygon is None:
                 self.all_cells.remove_cells([cell])
                 continue
             # Only carve cells the aerenchyma / lacuna air actually reaches.  A cell
-            # the air never touches must be left intact — carving is a no-op there,
+            # the air never touches must be left intact - carving is a no-op there,
             # but the `> 1E-6` keep-test below would otherwise *delete* an untouched
             # small cell (e.g. a tiny intercellular air space at exactly 1e-6),
             # orphaning its footprint into an empty gap.

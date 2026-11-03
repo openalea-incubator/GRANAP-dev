@@ -1,9 +1,9 @@
-"""Special-tissue placements — the organ-agnostic half of the vocabulary.
+"""Special-tissue placements - the organ-agnostic half of the vocabulary.
 
 Some anatomical features are *cell-relative* / post-fill: they are carved into or
 seeded around cells that already exist (resin ducts, stomata, the metaxylem
 sheath, companion cells, intercellular spaces).  They do not fit the shape-first
-"region then fill" model in :mod:`tissue_class` — there is no region to fill,
+"region then fill" model in :mod:`tissue_class` - there is no region to fill,
 only existing cells to add to or replace.
 
 This module collects those placements as **named, parameterised functions** so an
@@ -18,7 +18,7 @@ these functions take that precomputed geometry and do the cell placement.
     place_stomata    : guard cells + substomatal chamber + pore for each stoma
     consider_as_cell : collapse a region into a single cell
 
-The cell-relative nature is why these stay below the tissue abstraction — see
+The cell-relative nature is why these stay below the tissue abstraction - see
 ``doc/tissue_refactor.md`` ("the cells-first engine").
 """
 
@@ -81,7 +81,7 @@ def seat_air_spaces(
 
     ``air_faces`` and ``air_union`` are passed separately on purpose: callers may
     insert the *simplified* air polygons individually while carving with their
-    union, or insert the union's connected components — the caller decides what a
+    union, or insert the union's connected components - the caller decides what a
     single lacuna cell is.
 
     When ``protect_topology`` is True the inserted lacunae are flagged so every

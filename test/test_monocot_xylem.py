@@ -69,7 +69,7 @@ def test_arch_mode_with_pith():
         if c.type in ("metaxylem", "protoxylem") and pith_circle.contains(Point(c.x, c.y))
     ]
     assert len(vessels_in_pith) == 0, (
-        f"Found {len(vessels_in_pith)} vessels inside the pith circle — expected 0"
+        f"Found {len(vessels_in_pith)} vessels inside the pith circle - expected 0"
     )
 
     stele_in_pith = [
@@ -107,7 +107,7 @@ def test_star_mode_with_pith():
         if c.type == "xylem" and pith_circle.contains(Point(c.x, c.y))
     ]
     assert len(xylem_in_pith) == 0, (
-        f"Found {len(xylem_in_pith)} xylem vessels inside the pith circle — expected 0"
+        f"Found {len(xylem_in_pith)} xylem vessels inside the pith circle - expected 0"
     )
 
     stele_in_pith = [
@@ -142,7 +142,7 @@ def test_star_phloem_sits_between_arms():
 # Each vessel is one Voronoi group seeded by a ring just inside its outline, and
 # fit_metaxylem_sheath lays a ring of stele seeds half a stele cell outside it.
 # The vessel's wall falls half-way between the two rings, so the vessel ring is
-# inset by that same gap (tissue_class.seed_ring_inset) — otherwise the realised
+# inset by that same gap (tissue_class.seed_ring_inset) - otherwise the realised
 # vessel overshoots by a near-constant amount that inflates small vessels most.
 
 def test_seed_ring_inset_rule():

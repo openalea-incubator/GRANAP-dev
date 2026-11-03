@@ -1,4 +1,4 @@
-"""Holly (*Ilex aquifolium*) leaf cross-section — a measured dicot leaf.
+"""Holly (*Ilex aquifolium*) leaf cross-section - a measured dicot leaf.
 
 All lengths are in mm.  Built from measurements of a real section:
 
@@ -123,7 +123,7 @@ def build_holly(seed=SEED):
          "n_layers": 1, "shift": 0.3, "order": 3},
         # 2 columnar palisade layers under the adaxial epidermis
         {"name": "palisade", "cell_diameter": 0.040, "cell_width": 0.015, "n_layers": 2},
-        # spongy fills the rest (cell size not measured — 0.02 chosen)
+        # spongy fills the rest (cell size not measured - 0.02 chosen)
         {"name": "spongy", "cell_diameter": 0.02, "cell_width": 0.02},
         midrib, minor,
         # midrib vessels: 0.012 (inner face) grading to 0.006 (cambium)
@@ -158,7 +158,7 @@ def main(show=True):
 
     fig, ax = plt.subplots(figsize=(15, 4.0))
     leaf.plot_cells(show=False, ax=ax,
-                    title="Holly (Ilex aquifolium) leaf — measured dicot")
+                    title="Holly (Ilex aquifolium) leaf - measured dicot")
     leg = ax.get_legend()
     if leg is not None:
         leg.set_title("tissue")

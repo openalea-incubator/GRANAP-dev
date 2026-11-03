@@ -2,8 +2,8 @@
 
 Model under test:
   * A **tissue** is a tagged anatomical *region* (a shapely shape).  It is
-    manipulated as pure geometry — rotate / translate / smooth / boolean-combine
-    — entirely before any cell exists.
+    manipulated as pure geometry - rotate / translate / smooth / boolean-combine
+    - entirely before any cell exists.
   * **Filling** a region with cells (``fill_*``) is a separate, terminal step.
   * A **cell** is the filled polygon; the only verb on it is ``retag``.
   * A monocot/dicot stele is assembled from an inspectable ``TissueRecipe``.

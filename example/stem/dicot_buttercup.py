@@ -5,14 +5,14 @@ then directly the ground tissue (no separate cortex), carrying a ring of **8 big
 8 small** open collateral bundles, alternating.  Primary growth: fascicular cambium
 only (no interfascicular cambium).
 
-* **big** — 0.24 mm high x 0.17 mm wide (fibre caps not included), centred
+* **big** - 0.24 mm high x 0.17 mm wide (fibre caps not included), centred
   0.320 mm under the epidermis; fibre caps outside that envelope: 2 layers toward
   the centre, and toward the epidermis a cap thinning from 5 layers over the pole
   (90°) through 4 (70°) and 3 (30°) to 2 at the flanks (0°);
   xylem in 2 poles with a few vessels between, vessel diameter 0.035 (near the
   cambium) -> 0.018 (inner edge); phloem 0.09 x 0.07 (w x h), sieve 0.011,
   companion cells 0.010 x 0.02 (d x w).
-* **small** — 0.15 x 0.125, centred 0.270 mm under the epidermis; the same cells,
+* **small** - 0.15 x 0.125, centred 0.270 mm under the epidermis; the same cells,
   but scaled-down regions (fewer vessels).
 
 Ground-tissue cell diameter: 0.017 under the epidermis -> 0.035 at 0.18 mm depth
@@ -150,7 +150,7 @@ def main(show=True):
         print(f"    {t:16s} {counts[t]}")
 
     fig, ax = plt.subplots(figsize=(10, 10))
-    stem.plot_cells(show=False, ax=ax, title="Buttercup dicot stem — 8 big + 8 small bundles")
+    stem.plot_cells(show=False, ax=ax, title="Buttercup dicot stem - 8 big + 8 small bundles")
     leg = ax.get_legend()
     if leg is not None:
         leg.set_title("tissue")

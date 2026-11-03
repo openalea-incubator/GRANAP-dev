@@ -3,11 +3,11 @@
 Sample a root's anatomy along its axis, from one physical position to another (lengths
 in mm).  A tracked xylem vessel can, along the way:
 
-* **fuse** with its nearest neighbour (by distance) — the count drops and the survivor
+* **fuse** with its nearest neighbour (by distance) - the count drops and the survivor
   gets bigger;
-* **terminate** — a vessel that just stops: a singleton present only for
+* **terminate** - a vessel that just stops: a singleton present only for
   ``length >= its stop``, then gone (its id retired, never reused);
-* be **created** — a vessel that appears: a singleton present only for
+* be **created** - a vessel that appears: a singleton present only for
   ``length <= its appear`` point.
 
 Vessel positions come from the **monocot class's own arrangement** for the current count
@@ -21,9 +21,9 @@ Schedules (count, vessel/stele radius, any evolving param) may be given either a
 ``(value_at_low_length, value_at_high_length)`` tuple for a simple linear ramp, or as a
 ``length -> value`` callable for anything else.
 
-Fused size is set by ``area_retention``: a group's area = ``base_area × (1 +
-area_retention × (members - 1))`` — 0 = no growth on fusion, 1 = area-conserving (a pair
-is √2 wider), in between = a partial gain ("slightly bigger").
+Fused size is set by ``area_retention``: a group's area = ``base_area x (1 +
+area_retention x (members - 1))`` - 0 = no growth on fusion, 1 = area-conserving (a pair
+is sqrt(2) wider), in between = a partial gain ("slightly bigger").
 """
 
 import copy
@@ -56,7 +56,7 @@ class RootSeriesResult:
         return [r for r in self.track_rows if r["track_id"] == track_id]
 
     def follow_primordial(self, p: int) -> List[dict]:
-        """Every (length, track_id, members) the primordial ``p`` belongs to — i.e. which
+        """Every (length, track_id, members) the primordial ``p`` belongs to - i.e. which
         (possibly fused) vessel it is part of at each position."""
         return [r for r in self.track_rows if p in r["members"]]
 
@@ -121,7 +121,7 @@ class RootSeriesResult:
 
 
 def _fmt_members(members) -> str:
-    """Label of the primordial ids inside a (possibly fused) vessel — the exact ids joined
+    """Label of the primordial ids inside a (possibly fused) vessel - the exact ids joined
     by '+', so '0+1+2+3' (four fused) is never confused with '0+3' (two fused)."""
     return "+".join(str(m) for m in sorted(members))
 
@@ -148,11 +148,11 @@ class RootSeries:
     fuse / terminate / are created along the root.
 
     Positions to sample (choose one):
-        lengths: explicit list of physical positions (mm) — may be sparse / irregular.
+        lengths: explicit list of physical positions (mm) - may be sparse / irregular.
         start, end, samples: sample ``samples`` evenly from ``start`` mm to ``end`` mm.
 
     Vessel schedules (each a ``(start, end)`` linear-ramp tuple **or** a ``length -> value``
-    callable; ``start`` = the value at the first sampled position, ``end`` at the last —
+    callable; ``start`` = the value at the first sampled position, ``end`` at the last -
     following the direction you give, not min/max):
         n_fused: number of FUSED metaxylem vessels at a length (terminators / creators
             are extra, added on top).  The most a length can have is the maximum of this
@@ -161,13 +161,13 @@ class RootSeries:
             ``area_retention``.
         stele_radius: stele radius (mm) at a length.
 
-    Events (optional) — a list with **one entry per vessel**, so the list length is how
+    Events (optional) - a list with **one entry per vessel**, so the list length is how
     many, and each entry is *that vessel's* length (list different numbers for different
     heights):
-        terminations: one stop-length per terminating vessel — present for
+        terminations: one stop-length per terminating vessel - present for
             ``length >= stop``, then gone (id retired).  e.g. ``[90, 90]`` = two vessels
             stopping at 90 mm; ``[90, 120]`` = two stopping at different heights.
-        creations: one appear-length per created vessel — present for ``length <= appear``.
+        creations: one appear-length per created vessel - present for ``length <= appear``.
             e.g. ``[40, 70]`` = two vessels appearing at <= 40 mm and <= 70 mm.
 
     Other:
@@ -179,8 +179,8 @@ class RootSeries:
             not from the previous sample, so adding samples interpolates the same series
             rather than changing it.  0 = snap straight to the slot.
         fusion_length: length (mm) over which two vessels destined to fuse *approach each
-            other* before merging.  Without it a fusing pair sits on its class slots —
-            which are maximally spread — until the count drops, so the merge is a jump
+            other* before merging.  Without it a fusing pair sits on its class slots -
+            which are maximally spread - until the count drops, so the merge is a jump
             across a gap (in the wheat example the parents were 1.15x further apart than
             contact).  Over the last ``fusion_length`` mm the pair is pulled off its slots
             onto the touching configuration, so it is exactly in contact at the section
@@ -189,7 +189,7 @@ class RootSeries:
             so a crowded stele converges partially rather than overlapping.  0 (default)
             = the old abrupt behaviour.
         param_schedules: ``{"name.field": schedule}`` to evolve any other config field.
-        ring_fraction: advanced — only used for the even-ring fallback when the class
+        ring_fraction: advanced - only used for the even-ring fallback when the class
             arrangement is degenerate.
         seed: shared RNG seed (stable tissue refit across sections).
     """
@@ -243,7 +243,7 @@ class RootSeries:
         self._ppos = {rid: unit[k] for k, rid in enumerate(self._ring_ids)}
         # merge tree fuses by DISTANCE between fuser positions, not by id.
         self._parts = self._all_partitions({f: self._ppos[f] for f in range(self.N_fuse)})
-        # which groups fuse where — needed by the pre-fusion approach (empty when
+        # which groups fuse where - needed by the pre-fusion approach (empty when
         # fusion_length == 0, so that path costs nothing)
         self._approach = self._fusion_approach_schedule()
 
@@ -310,7 +310,7 @@ class RootSeries:
         """The k metaxylem centres the monocot class would place in a stele of radius R
         (its pizza-slice arrangement), for vessels up to ``vd`` across.  Falls back to an
         even ring if the class geometry is degenerate (e.g. its known n=2 quirk), returns
-        too few, or spaces them closer than ``vd`` — a slot arrangement the vessels do not
+        too few, or spaces them closer than ``vd`` - a slot arrangement the vessels do not
         actually fit in is no use, since they now migrate all the way onto it."""
         slots = MonocotRootAnatomy.metaxylem_positions(Point(0, 0).buffer(R), k, vd)
         ok = len(slots) == k
@@ -382,7 +382,7 @@ class RootSeries:
         return cfg
 
     def _event_lengths(self) -> List[float]:
-        """The exact lengths at which the vessel set jumps — a fusion (``n_fused`` crossing
+        """The exact lengths at which the vessel set jumps - a fusion (``n_fused`` crossing
         an integer), a termination, or a creation.
 
         These are properties of the *schedules*, not of how you sampled them, and they are
@@ -394,7 +394,7 @@ class RootSeries:
         bounds = {e for e in (self.terminations + self.creations) if lo < e < hi}
         # n_fused is stepwise; find every step by scanning, then bisecting the change.
         # The scan is deliberately a FIXED grid over the span: sizing it from the number of
-        # requested lengths would make the bracket — and so the crossing, to the last bit —
+        # requested lengths would make the bracket - and so the crossing, to the last bit -
         # depend on the sampling, which is exactly what this is here to avoid.
         n = 4096
         grid = np.linspace(lo, hi, n + 1)
@@ -421,14 +421,14 @@ class RootSeries:
         return sorted(set(self.lengths) | set(self._event_lengths()), reverse=True)
 
     def _n_groups(self, length: float) -> int:
-        """Number of fused groups at ``length`` — the schedule, clipped to the tree.
+        """Number of fused groups at ``length`` - the schedule, clipped to the tree.
 
         The floor is 0, not 1: a series may end with no metaxylem at all.
         """
         return int(np.clip(int(self.n_fused(length)), 0, self.N_fuse))
 
     def _fusion_approach_schedule(self) -> Dict[tuple, Tuple[float, List[tuple]]]:
-        """``{parent members: (last_length, [sibling members])}`` — for every group that
+        """``{parent members: (last_length, [sibling members])}`` - for every group that
         is about to fuse, the LAST sampled length at which it is still separate and the
         other groups it merges with there.
 
@@ -455,7 +455,7 @@ class RootSeries:
 
     def _approach_targets(self, L: float, vessels: list, reps: list
                           ) -> Dict[int, Tuple[float, Tuple[float, float], frozenset]]:
-        """``{vessel index: (beta, (x, y), partners)}`` — the touching position each
+        """``{vessel index: (beta, (x, y), partners)}`` - the touching position each
         about-to-fuse vessel should be blended toward at ``L``, how strongly, and the
         indices of the vessels it is fusing with (the only ones it may touch).
 
@@ -526,7 +526,7 @@ class RootSeries:
 
         Placement is a function of the length alone.  Migration is timed from the event
         (``anchor_L``), not from the previous sample, and the walk steps through the exact
-        event boundaries whatever the user asked to render — so adding samples interpolates
+        event boundaries whatever the user asked to render - so adding samples interpolates
         the same series instead of producing a different one.
         """
         want = set(self.lengths)
@@ -660,7 +660,7 @@ class DicotRootSeries:
 
     Unlike the monocot series, dicot primary xylem vessels do **not** fuse or migrate:
     each protoxylem / metaxylem keeps its place.  What changes along the root is the
-    **pith** — a central front that *recedes* (from the apex toward the collar).  Three
+    **pith** - a central front that *recedes* (from the apex toward the collar).  Three
     things together define the space a xylem vessel may occupy (per the model): the
     **star shape**, the **5PL diameter function** and the **pith**.  The first two are
     baked in once by extracting a reference section (the smallest-pith end, where the star
@@ -668,9 +668,9 @@ class DicotRootSeries:
     size come from there.  The pith is then the only per-section front:
 
     * a vessel is **present** once the pith has receded past it (there is room outside the
-      pith at its position) — so the outer protoxylem appear first and the inner metaxylem
+      pith at its position) - so the outer protoxylem appear first and the inner metaxylem
       only near the collar;
-    * its size is ``min(5PL target, room the pith leaves)`` — small when it has just
+    * its size is ``min(5PL target, room the pith leaves)`` - small when it has just
       cleared the pith, growing to its full 5PL target as the pith recedes further.
 
     Positions are stored as a fraction of the stele radius, so if ``stele_radius`` grows
@@ -682,7 +682,7 @@ class DicotRootSeries:
     Schedules (each a ``(value_at_start, value_at_end)`` linear-ramp tuple **or** a
     ``length -> value`` callable):
         stele_radius: stele radius (mm) at a length.
-        pith_radius: pith radius (mm) at a length — the receding central front (typically
+        pith_radius: pith radius (mm) at a length - the receding central front (typically
             large at the apex, small/zero at the collar).
         param_schedules: ``{"name.field": schedule}`` to evolve any other config field
             (e.g. ``"xylem.vessel_diameter"`` to grow the 5PL target itself).
@@ -730,7 +730,7 @@ class DicotRootSeries:
         return lambda L, a=a, b=b, s=start, e=end: a + (b - a) * (L - s) / (e - s)
 
     def _pith_at(self, length: float) -> float:
-        """Pith radius at ``length``, snapped to exactly 0 below a tiny epsilon — a
+        """Pith radius at ``length``, snapped to exactly 0 below a tiny epsilon - a
         sub-epsilon pith (e.g. 1e-17 from a ramp) perturbs the packing, making the
         extracted primordial set non-reproducible."""
         pith = float(self.pith_radius(length))
@@ -747,7 +747,7 @@ class DicotRootSeries:
 
     # -- primordial extraction (star + 5PL baked in) ------------------------
     def _ref_length(self) -> float:
-        """The sample where the pith is smallest — the star is fully packed there, so it is
+        """The sample where the pith is smallest - the star is fully packed there, so it is
         the reference for every vessel's position + 5PL target size."""
         return min(self.lengths, key=self._pith_at)
 
@@ -799,7 +799,7 @@ class DicotRootSeries:
 
         A vessel at fractional radius ``fd`` sits at ``fd * stele_radius(L)``; the pith front
         is ``pith_radius(L)``.  ``room = distance - pith`` is how much radius the pith leaves
-        it — present once ``room >= present_min_radius``, sized ``min(5PL target, room)``.
+        it - present once ``room >= present_min_radius``, sized ``min(5PL target, room)``.
         Returns ``[(x, y, r, tid, members)]`` (members = the singleton ``(tid,)``)."""
         R = float(self.stele_radius(length))
         pith = self._pith_at(length)

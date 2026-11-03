@@ -23,7 +23,7 @@ def _square(cx, cy, h=0.4):
 
 
 # ---------------------------------------------------------------------------
-# Cell.radial — the shared seeding idiom (angle/radius from a centre)
+# Cell.radial - the shared seeding idiom (angle/radius from a centre)
 # ---------------------------------------------------------------------------
 
 def test_cell_radial_polar_from_center():

@@ -100,7 +100,7 @@ def main(show=True):
             ax.legend(loc="upper right", fontsize=8, frameon=False)
 
     fig.suptitle(f"Same monocot root, same mean ({mean} mm) and SD ({sd} mm) of the metaxylem "
-                 f"diameter — four distribution shapes", fontsize=13)
+                 f"diameter - four distribution shapes", fontsize=13)
     plt.tight_layout()
     if show:
         plt.show()

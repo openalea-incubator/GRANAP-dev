@@ -3,7 +3,7 @@
 ``MonocotRootAnatomy`` builds a monocot stele: either the 'default' ring of
 discrete metaxylem bundles or the 'arch' variant (an evenly-spaced metaxylem
 ring with a stele sheath and graded protoxylem poles).  Instantiate via
-``RootAnatomy(input_data)`` — the factory in :mod:`openalea.granap.root_class`
+``RootAnatomy(input_data)`` - the factory in :mod:`openalea.granap.root_class`
 dispatches to this class when ``planttype == 1``.
 """
 
@@ -147,7 +147,7 @@ class MonocotRootAnatomy(RootAnatomy):
         if getattr(self, "_prescribed_vessels", None) is not None:
             # Developmental series: the metaxylem are the prescribed (tracked) vessels;
             # the protoxylem + phloem are regenerated per section around them (untracked),
-            # reusing the same default-mode steps — their count follows n_vascular_bundles,
+            # reusing the same default-mode steps - their count follows n_vascular_bundles,
             # which the series sets to the metaxylem count for scaling.
             recipe.special("prescribed metaxylem",
                            lambda: self._place_prescribed_xylem(
@@ -167,7 +167,7 @@ class MonocotRootAnatomy(RootAnatomy):
             # Star (actinostele) mode: a star-shaped xylem region packed with
             # size-graded vessels (shared base-class machinery, same as the dicot
             # primary xylem), then phloem strands in the valleys between arms.
-            # No cambium — the phloem is positioned relative to the xylem star's
+            # No cambium - the phloem is positioned relative to the xylem star's
             # valley radius (see _phloem_valley_zones).
             if self.vascular_params.get("n_vascular_peak", 0) == 0:
                 return recipe                   # no xylem arms -> empty
@@ -195,7 +195,7 @@ class MonocotRootAnatomy(RootAnatomy):
                            produces=("phloem",))
         else:
             # Bespoke placements (a single-vessel border fill, a cell-relative
-            # sheath, and pizza-sliced bundles) — not plain region+fill, so they
+            # sheath, and pizza-sliced bundles) - not plain region+fill, so they
             # stay `special` steps rather than declarative `fill`s.
             recipe.special("metaxylem ring",
                            lambda: self.fit_metaxylem_elements(polygon),
@@ -215,7 +215,7 @@ class MonocotRootAnatomy(RootAnatomy):
     def _phloem_valley_zones(self, stele_polygon: Polygon):
         """Phloem regions in the valleys between the xylem star arms.
 
-        Monocot roots have no cambium, so — unlike the dicot — the phloem band
+        Monocot roots have no cambium, so - unlike the dicot - the phloem band
         is positioned relative to the xylem star's *valley radius* (the arm
         bases) rather than a cambium radius: it sits between that valley radius
         and the stele edge, interpolated by ``relative_distance``.  Shape-first:
@@ -265,8 +265,8 @@ class MonocotRootAnatomy(RootAnatomy):
         """Declarative phloem step: valley *regions* filled by circle-packing.
 
         Mirrors the dicot phloem step but with no cambium clearance (monocot has
-        no cambium): the recorded region — used by the unified vascular mask in
-        ``generate_cells`` to clear the stele seeds underneath — is the phloem
+        no cambium): the recorded region - used by the unified vascular mask in
+        ``generate_cells`` to clear the stele seeds underneath - is the phloem
         footprint itself.  The regions are built lazily at build time because
         they are carved from the xylem star placed by the earlier fill step.
         """
@@ -295,7 +295,7 @@ class MonocotRootAnatomy(RootAnatomy):
 
     @staticmethod
     def metaxylem_positions(stele_polygon: Polygon, n: int, vessel_diameter: float):
-        """The class's canonical metaxylem *centres* for ``n`` vessels — the same
+        """The class's canonical metaxylem *centres* for ``n`` vessels - the same
         geometry as :meth:`fit_metaxylem_elements` (pizza-slice the stele into ``n``
         wedges, inscribe one vessel per wedge), minus the rng size jitter and cell
         seeding.  Pure geometry, so a caller (e.g. the developmental series) can ask
@@ -343,7 +343,7 @@ class MonocotRootAnatomy(RootAnatomy):
             )
 
             # Region: a single metaxylem vessel inscribed in the pizza slice.
-            # (One big vessel per slice — its cells are seeded along the vessel
+            # (One big vessel per slice - its cells are seeded along the vessel
             # border, a bespoke fill that does not map onto the packing verbs.)
             metaxylem = Tissue(
                 "metaxylem",
@@ -426,7 +426,7 @@ class MonocotRootAnatomy(RootAnatomy):
         polygon = polygon.difference(unary_union(self.vascular_polygons))
 
         if polygon.is_empty:
-            # The metaxylem fill the band the bundles would sit in — a heavily
+            # The metaxylem fill the band the bundles would sit in - a heavily
             # fused series section can do this.  Nothing to place; say so rather
             # than dying inside pizza_slice on an empty centroid.
             log.warning("no room left for protoxylem/phloem: the vascular "
@@ -510,8 +510,8 @@ class MonocotRootAnatomy(RootAnatomy):
         The metaxylem live in a solid annulus ``[pith_r, r_split]`` (clipped to
         the stele), sliced into ``n_metaxylem`` equal sectors.  In each sector a
         vessel of ``vessel_diameter`` (+/- ``vessel_diameter_sd``) is placed as a
-        circle when it fits, or — when the sector is too tight for the vessels to
-        fit side by side — an aspect-capped **radial ellipse** (falling back to
+        circle when it fits, or - when the sector is too tight for the vessels to
+        fit side by side - an aspect-capped **radial ellipse** (falling back to
         the largest inscribed circle).  So the count is exactly ``n_metaxylem``,
         regularly spaced, and never tied to which arm has a protoxylem pole.
         ``n_metaxylem == 0`` defaults to ``n_vascular_peak`` sectors."""
@@ -610,7 +610,7 @@ class MonocotRootAnatomy(RootAnatomy):
         Metaxylem and protoxylem are *not* forced onto the same arm.  For every
         pole (a peak tip at the pericycle) the nearest metaxylem centre is found
         and the protoxylem is packed into a straight **corridor** from that
-        metaxylem out to the pole tip — so an aligned pole gets a radial file and
+        metaxylem out to the pole tip - so an aligned pole gets a radial file and
         an orphan pole (no metaxylem in its own arm) leans across to connect to
         the closest one.  Within the corridor the size gradient runs over
         ``[r_split, outer_r]`` (largest inner, smallest at the pericycle) and the

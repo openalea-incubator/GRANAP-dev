@@ -1,10 +1,10 @@
 """Dicot stem anatomy (eustele).
 
 ``DicotStemAnatomy`` builds a dicot stem: a central pith ringed by a single ring
-of discrete *collateral* vascular bundles — xylem on the inner (pith) face,
-phloem on the outer (cortex) face, with a strip of fascicular cambium between —
+of discrete *collateral* vascular bundles - xylem on the inner (pith) face,
+phloem on the outer (cortex) face, with a strip of fascicular cambium between -
 then a cortex and epidermis outside.  Instantiate via ``StemAnatomy(input_data)``
-— the factory in :mod:`openalea.granap.stem_class` dispatches here when
+- the factory in :mod:`openalea.granap.stem_class` dispatches here when
 ``planttype == 2``.
 
 The bundles are placed on an evenly-spaced ring at the pith/cortex boundary
@@ -46,7 +46,7 @@ class DicotStemAnatomy(StemAnatomy):
     #
     # No _parse_vascular_params override: build_bundle reads the raw xylem /
     # phloem / cambium param dicts directly, and the bundle count is the
-    # vascular_bundle.n_bundles field — so there is nothing to pre-parse.
+    # vascular_bundle.n_bundles field - so there is nothing to pre-parse.
 
     def _vascular_recipe(self, polygon: Polygon) -> TissueRecipe:
         """Declarative description of how the eustele bundle ring is assembled.
@@ -110,7 +110,7 @@ class DicotStemAnatomy(StemAnatomy):
 
     def _primary_phloem_thickness(self) -> float:
         """Radial thickness reserved outside the secondary phloem for the displaced
-        primary-phloem remnant — the bundle's phloem-fraction share of its height.
+        primary-phloem remnant - the bundle's phloem-fraction share of its height.
 
         Zero unless ``secondary_phloem.keep_primary`` is set: secondary growth
         crushes the primary phloem, so it is not rendered (nor room reserved for it)
@@ -145,11 +145,11 @@ class DicotStemAnatomy(StemAnatomy):
         Shared by the eustele bundle ring and the continuous cylinder.  ``circle`` /
         ``ellipse`` sit at ``r_default`` (the auto-derived pith-edge radius, flattened
         by ``ring_ellipse_ratio`` for the ellipse).  ``star`` uses the **same absolute
-        peak/valley parameterisation as the root** — ``radius_peak_side`` /
+        peak/valley parameterisation as the root** - ``radius_peak_side`` /
         ``radius_valley_side`` (mm) + ``arc_peak_side`` / ``arc_valley_side`` +
-        ``n_peaks`` — so there is a single way to describe a star contour across
+        ``n_peaks`` - so there is a single way to describe a star contour across
         organs (``r_default`` is not used for a star).  ``outline`` is ``polygon``
-        itself — the pith/cortex boundary — so the ring follows any ``base_shape``."""
+        itself - the pith/cortex boundary - so the ring follows any ``base_shape``."""
         shape = spec.get("ring_shape", "circle")
         if shape == "outline":
             # Pulled inward so its equivalent radius is r_default: the boundary itself
@@ -170,8 +170,8 @@ class DicotStemAnatomy(StemAnatomy):
             ellipse_ratio=float(spec.get("ring_ellipse_ratio", 0.75)))
 
     def _cambium_ring_contour(self, polygon: Polygon) -> Polygon:
-        """The drawn contour the eustele bundles are placed on — the (primary)
-        cambium ring — in the ``ring_shape`` family."""
+        """The drawn contour the eustele bundles are placed on - the (primary)
+        cambium ring - in the ``ring_shape`` family."""
         bp = self._get_param("vascular_bundle")
         cx, cy = polygon.centroid.x, polygon.centroid.y
         return self._ring_contour(cx, cy, self._primary_ring_radius(polygon), bp, polygon)
@@ -194,7 +194,7 @@ class DicotStemAnatomy(StemAnatomy):
             px, py = pts[i]
             nx_pt, ny_pt = pts[(i + 1) % n]
             # (i - 1) % n, not i - 1: the resampled ring is closed (pts[n] == pts[0]),
-            # so a bare pts[-1] is pts[0] itself — the current point — which flattens
+            # so a bare pts[-1] is pts[0] itself - the current point - which flattens
             # the tangent for slot 0 and mis-orients that bundle.
             px_pt, py_pt = pts[(i - 1) % n]
             tx, ty = nx_pt - px_pt, ny_pt - py_pt          # local tangent
@@ -250,7 +250,7 @@ class DicotStemAnatomy(StemAnatomy):
     def _bundle_params(self, spec: dict = None) -> dict:
         """Bundle params with the fascicular cambium gap sized to the ring.
 
-        The cambium — the fascicular strip *and* the secondary ring — is one band
+        The cambium - the fascicular strip *and* the secondary ring - is one band
         of ``n_layers`` cell files laid on the ring contour.  For the fascicular
         strip to hold the same ``n_layers`` as the interfascicular ring, the bundle
         must reserve a gap at least that thick between xylem and phloem; so this
@@ -287,7 +287,7 @@ class DicotStemAnatomy(StemAnatomy):
     @staticmethod
     def _contour_sampler(contour: Polygon, cx: float, cy: float, n_dense: int = 1440):
         """Return ``(pose, perimeter)`` where ``pose(s)`` maps an arc-length position
-        ``s`` (mm along the contour) to a ``(px, py, theta)`` slot — the point at that
+        ``s`` (mm along the contour) to a ``(px, py, theta)`` slot - the point at that
         arc length and the outward normal there.
 
         The contour is densely, uniformly resampled once so a bundle can be dropped
@@ -451,8 +451,8 @@ class DicotStemAnatomy(StemAnatomy):
     def _build_bundle_ring(self, polygon: Polygon) -> None:
         """Build the eustele: bundles on a shared cambium contour, then the cambium.
 
-        The cambium *shape* is defined once — the ring contour
-        (:meth:`_cambium_ring_contour`) and its ``n_layers`` cell files — and each
+        The cambium *shape* is defined once - the ring contour
+        (:meth:`_cambium_ring_contour`) and its ``n_layers`` cell files - and each
         bundle is placed on it, anchored on its cambium band
         (``bundle_cambium_anchor``) so every fascicular strip sits on the contour.
         Bundles are built *without* their cambium (``fill_cambium=False``); the
@@ -485,9 +485,9 @@ class DicotStemAnatomy(StemAnatomy):
         else:
             slots = [(px, py, th, bp) for (px, py, th) in self._ring_slots(polygon)]
 
-        conducting: List[Polygon] = []      # xylem / phloem zones — the ring avoids these
-        fascicular: List[Polygon] = []      # per-bundle cambium zones — the primary clip region
-        sheath: List[Polygon] = []          # bundle-sheath zones — the ring must not eat these
+        conducting: List[Polygon] = []      # xylem / phloem zones - the ring avoids these
+        fascicular: List[Polygon] = []      # per-bundle cambium zones - the primary clip region
+        sheath: List[Polygon] = []          # bundle-sheath zones - the ring must not eat these
         inner_cambium: List[Polygon] = []   # bicollateral inner-phloem-side cambium bands
         for cx, cy, theta, slot_bp in slots:
             ground = self._pith_cell_diameter_at(np.hypot(cx - cx0, cy - cy0), r_pith)
@@ -511,8 +511,8 @@ class DicotStemAnatomy(StemAnatomy):
                     sheath.append(g)
             # The bundle is anchored on its outermost cambium band, so that one sits
             # on the shared ring contour (laid by _build_cambium).  A bicollateral
-            # bundle also has an inner cambium band on the inner-phloem side — off the
-            # ring — which _build_cambium never reaches, so fill it directly.
+            # bundle also has an inner cambium band on the inner-phloem side - off the
+            # ring - which _build_cambium never reaches, so fill it directly.
             if cambia_here:
                 cambia_here.sort(key=lambda gg: np.hypot(gg.centroid.x - cx0,
                                                          gg.centroid.y - cy0))
@@ -526,8 +526,8 @@ class DicotStemAnatomy(StemAnatomy):
 
         # Inner (bicollateral) cambium bands sit on their own inner ring, off the main
         # contour.  Lay them with the *same* n_layers-file renderer as the outer
-        # cambium — along an inner contour at their mean radius, clipped to the inner
-        # zones — so both faces read as the same number of layers.
+        # cambium - along an inner contour at their mean radius, clipped to the inner
+        # zones - so both faces read as the same number of layers.
         if inner_cambium:
             r_in = float(np.mean([np.hypot(z.centroid.x - cx0, z.centroid.y - cy0)
                                   for z in inner_cambium]))
@@ -547,7 +547,7 @@ class DicotStemAnatomy(StemAnatomy):
         gets *materialised* depends on the growth stage:
 
         * **primary** (``secondary`` False): only the arcs that fall **inside a
-          bundle** — the fascicular cambium strips (``keep_union`` = the bundle
+          bundle** - the fascicular cambium strips (``keep_union`` = the bundle
           cambium zones).  These zones are already registered per bundle.
         * **secondary** (``secondary`` True): the **entire ring**.  The bundle
           sheaths (and the parenchyma bundle-sheath file) lying on the band are
@@ -591,11 +591,11 @@ class DicotStemAnatomy(StemAnatomy):
             if sheath_union is not None:
                 keep_union = keep_union.difference(sheath_union.buffer(0.5 * cell_d))
             # In primary growth every cambium file is fascicular/inner and must stay
-            # inside a bundle — the 0.25-cell buffer above (and the mean-radius inner
+            # inside a bundle - the 0.25-cell buffer above (and the mean-radius inner
             # contour for a bicollateral bundle's inner cambium) can otherwise push a
             # seed past the envelope.  Clip the keep region to the bundle envelopes,
             # eroded by the cell's border reach (~0.7 cell) so it confines the *whole*
-            # cell, not just its seed centre — a seed on the very edge would still grow
+            # cell, not just its seed centre - a seed on the very edge would still grow
             # a cell that pokes out.  No cambium cell is then seeded beyond its bundle.
             env_union = unary_union(self.vascular_tissue_polygons.get("bundle", []))
             if env_union is not None and not env_union.is_empty:
@@ -618,7 +618,7 @@ class DicotStemAnatomy(StemAnatomy):
         # Primary: a band-edge seed can pass the sheath block yet still have a border
         # cell reach into the sheath.  Drop any cambium group that touches the sheath
         # so the sheath keeps its ring unbroken (the secondary path clears the sheath
-        # the other way — the ring replaces it).
+        # the other way - the ring replaces it).
         if not secondary and sheath:
             self._clear_vascular_cells(unary_union(sheath), ("cambium",))
 
@@ -656,18 +656,18 @@ class DicotStemAnatomy(StemAnatomy):
         secondary xylem is built radially on top of it; the **primary phloem** is
         crushed outward ahead of the new secondary phloem.  Radial stack, pith->cortex:
 
-        * **primary xylem** — a thin remnant per bundle pinned just inside the primary
+        * **primary xylem** - a thin remnant per bundle pinned just inside the primary
           ring (:meth:`_build_primary_xylem`), reusing ``build_bundle``;
-        * **secondary xylem** — the annulus between the primary ring and the secondary
+        * **secondary xylem** - the annulus between the primary ring and the secondary
           cambium (minus the cambial band shell), split into a graded-vessel sector
           behind each bundle (``prop_stele`` wide, so ``prop_stele`` -> 1 merges the
           sectors into a continuous cylinder) with **parenchyma rays** in the gaps;
-        * **secondary cambium** — a closed contour at radius
+        * **secondary cambium** - a closed contour at radius
           ``secondary_cambium.radius_valley_side`` (the shared circle / ellipse /
           star / focus_ellipse family), the stem having grown outward to hold it;
-        * **secondary phloem** — a band just outside the cambium (root-style trapezes,
+        * **secondary phloem** - a band just outside the cambium (root-style trapezes,
           alive/dead split), one arm behind each bundle;
-        * **primary phloem** — a thin remnant per bundle pushed just outside the
+        * **primary phloem** - a thin remnant per bundle pushed just outside the
           secondary phloem band (:meth:`_build_primary_phloem`).
         """
         cx, cy = polygon.centroid.x, polygon.centroid.y
@@ -687,14 +687,14 @@ class DicotStemAnatomy(StemAnatomy):
         # Inner radius of the secondary-xylem annulus.  On a non-circular primary ring
         # (star / ellipse) the bundles sit at varying radii, so the sectors and the
         # interfascicular fills must start at the *minimum* contour radius (the star
-        # valleys) and be clipped back to the annulus — otherwise the valley bundles
+        # valleys) and be clipped back to the annulus - otherwise the valley bundles
         # are left with an empty band out to the peak radius.  Equals r_prim for a
         # circle, so the uniform eustele is unchanged.
         _pc = np.asarray(primary_contour.exterior.coords)
         r_inner = float(np.hypot(_pc[:, 0] - cx, _pc[:, 1] - cy).min())
         # The secondary cambium is described by radius (like the root) from the
         # shared contour family: circle / ellipse sized by radius_valley_side, a
-        # peak/valley star, or a focus_ellipse.  It is not clipped — the stem grows
+        # peak/valley star, or a focus_ellipse.  It is not clipped - the stem grows
         # outward to hold it (see _secondary_annulus_thickness).
         secondary_contour = GeometryProcessor.contour_polygon(
             sc.get("shape", "circle"), cx=cx, cy=cy,
@@ -772,7 +772,7 @@ class DicotStemAnatomy(StemAnatomy):
             if not zone.is_empty:
                 sectors.append(zone)
 
-        # Real outer xylem radius (inner edge of the cambium band) — the span over
+        # Real outer xylem radius (inner edge of the cambium band) - the span over
         # which rate-driven medullar rays are initiated and vessels graded.
         r_outer = r_sec - band_depth
 
@@ -812,7 +812,7 @@ class DicotStemAnatomy(StemAnatomy):
         # the whole interfascicular gap: the sectors flare from the bundle width, so
         # near the pith the gap is far wider than the fixed +/-gap_half wedge.  Clearing
         # that whole gap of pith seeds while the ray fill reaches only the wedge would
-        # leave an empty band the neighbouring Voronoi cells balloon into — so the
+        # leave an empty band the neighbouring Voronoi cells balloon into - so the
         # pith is left in place there (as it grades into the interfascicular rays).
         if sectors and max(gap_halves, default=0.0) > 0.0:
             wedges = unary_union([sg.angular_wedge(cx, cy, gc, gh, r_outer_wedge)
@@ -837,7 +837,7 @@ class DicotStemAnatomy(StemAnatomy):
 
     def _primary_tissue_bp(self, bp: dict, role: str, thickness: float) -> dict:
         """A copy of the ``vascular_bundle`` params reduced to a single-tissue banded
-        bundle — xylem-only or phloem-only, no cambium, no sheath — of radial
+        bundle - xylem-only or phloem-only, no cambium, no sheath - of radial
         ``thickness``.
 
         Lets :func:`~openalea.granap.vascular_bundle.build_bundle` lay just the
@@ -896,7 +896,7 @@ class DicotStemAnatomy(StemAnatomy):
         The primary xylem is endarch and immovable, so it stays put while the
         secondary xylem is built radially on top of it.  A xylem-only remnant bundle
         (:meth:`_primary_tissue_bp`) is anchored so its **outer** edge sits on the
-        primary ring — i.e. it occupies the outer pith, flush against where the
+        primary ring - i.e. it occupies the outer pith, flush against where the
         secondary-xylem annulus begins.  A single file of ``bundle sheath`` cells is
         then laid along the **pith-facing** part of each envelope only (the inner
         half, radius below the envelope centre), leaving the outer side open so the

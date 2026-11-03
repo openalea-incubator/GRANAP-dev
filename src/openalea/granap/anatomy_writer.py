@@ -101,7 +101,7 @@ class AnatomyWriter:
             junc_positions = [i for i in range(n) if vkeys[i] in junction_set]
 
             if len(junc_positions) < 2:
-                # no junctions → single wall loop
+                # no junctions -> single wall loop
                 shape_signature = tuple(vk for vk in vkeys if vk in protected_shape_set)
                 wall_key = (tuple(sorted(vkeys)), shape_signature,)
                 if wall_key not in wall_registry:
@@ -146,7 +146,7 @@ class AnatomyWriter:
             f'\t<cells count="{len(valid_gdf)}">'
         ]
 
-        # Write cells using GDF index as id — matches graph node numbering
+        # Write cells using GDF index as id - matches graph node numbering
         for row_idx, row in valid_gdf.iterrows():
             group_id = cellgroups.get(row.get("type", ""), 0)
             xml_lines.append(f'\t\t<cell id="{row_idx}" group="{group_id}" truncated="false" >')
@@ -657,7 +657,7 @@ def build_wall_registry(cells_gdf, cell_wall_thickness: Union[float, Dict[str, f
     it bounds of ``cell_wall_thickness[type]``, plus ``"outerwall"`` for an outer
     wall.  ``None`` if no cell has a boundary.
     """
-    # Filter to cells with valid (non-null, non-empty) geometry — must match
+    # Filter to cells with valid (non-null, non-empty) geometry - must match
     # the same filter used in write_to_xml so that both paths call
     # _build_topology with exactly the same polygon set, guaranteeing
     # identical KD-tree snapping results and canonical junction coordinates.
@@ -666,7 +666,7 @@ def build_wall_registry(cells_gdf, cell_wall_thickness: Union[float, Dict[str, f
     )
     cells_gdf = cells_gdf[valid_mask]
 
-    # Phases 0–2 — snapping, topology maps, junction detection
+    # Phases 0-2 - snapping, topology maps, junction detection
     polys    = list(cells_gdf["geometry"])
     cell_ids = list(cells_gdf.index)
 
@@ -690,7 +690,7 @@ def build_wall_registry(cells_gdf, cell_wall_thickness: Union[float, Dict[str, f
     if not cell_vkeys:
         return None
 
-    # Phase 3 — walk cell boundaries to define walls
+    # Phase 3 - walk cell boundaries to define walls
     # A "wall" = the polyline segment between two consecutive
     # junction vertices along one cell boundary.  Two cells that
     # share the same (juncA, juncB) segment share a wall.
@@ -832,7 +832,7 @@ class NetworkExporter:
                            ]  
         )
 
-        # Phase 4 — assign MECHA-compatible node indices
+        # Phase 4 - assign MECHA-compatible node indices
         network.n_walls = len(wall_registry)
         network.n_junctions = len(junction_list)
         network.n_cells = len(cells_gdf)
@@ -842,7 +842,7 @@ class NetworkExporter:
             for i, row_idx in enumerate(cells_gdf.index)
         }
 
-        # Phase 5 — add nodes to graph
+        # Phase 5 - add nodes to graph
         # Wall nodes
         for wd in wall_registry.values():
             network.graph.add_node(
@@ -885,7 +885,7 @@ class NetworkExporter:
 
         air_nodes = { cell_row_to_node[row_idx] for row_idx in protected_air_cells}   
 
-        # Phase 6 — add edges
+        # Phase 6 - add edges
         network._wall_to_cells = {
             wd["id"]: [cell_row_to_node[r] for r in wd["cells"]]
             for wd in wall_registry.values()
@@ -987,7 +987,7 @@ class NetworkExporter:
                 )
 
         # ------------------------------------------------------------------
-        # Phase 8 — construct direct air-space connectivity ("air_link")
+        # Phase 8 - construct direct air-space connectivity ("air_link")
         #
         # Motif:
         # air space -> new junction -> old junction -> new junction -> air space
@@ -1001,7 +1001,7 @@ class NetworkExporter:
         # ------------------------------------------------------------------
 
         # ------------------------------------------------------------------
-        # Step 1 — classify junctions
+        # Step 1 - classify junctions
         # ------------------------------------------------------------------
 
         new_junctions = set()
@@ -1028,7 +1028,7 @@ class NetworkExporter:
         }
 
         # ------------------------------------------------------------------
-        # Step 2 — map each air space to its adjacent NEW junctions
+        # Step 2 - map each air space to its adjacent NEW junctions
         # ------------------------------------------------------------------
 
         air_to_new_junctions = {}
@@ -1052,7 +1052,7 @@ class NetworkExporter:
             air_to_new_junctions[air_node] = attached_new_junctions
 
         # ------------------------------------------------------------------
-        # Step 3 — construct air_link edges
+        # Step 3 - construct air_link edges
         # ------------------------------------------------------------------
 
         for air_a in air_nodes:
@@ -1152,13 +1152,13 @@ class NetworkExporter:
                         break
 
         # ------------------------------------------------------------------
-        # Step 4 — bridge air_link within a given radius
+        # Step 4 - bridge air_link within a given radius
         #
         # Two protected air spaces (e.g. the sub-stomatal chamber and a
         # mesophyll rhombus) are not always adjacent and so never match the
         # junction motif above. Link every pair of protected air spaces whose
         # polygons lie within ``air_link_radius`` of each other (true
-        # boundary-to-boundary gap, not centroid distance — elongated rhombi
+        # boundary-to-boundary gap, not centroid distance - elongated rhombi
         # can have a centroid well outside the radius while their nearest tip
         # is right next to the other air space). Defaults to 3x the median
         # wall length so the radius scales with the organ's own cell size.

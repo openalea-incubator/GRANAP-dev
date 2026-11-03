@@ -1,8 +1,8 @@
 """Continuous (non-fascicular) dicot stem anatomy.
 
 Where :class:`~openalea.granap.stem_dicot_class.DicotStemAnatomy` builds the
-textbook *eustele* — discrete collateral bundles separated by interfascicular
-parenchyma — this variant builds the **non-fascicular** pattern: an uninterrupted
+textbook *eustele* - discrete collateral bundles separated by interfascicular
+parenchyma - this variant builds the **non-fascicular** pattern: an uninterrupted
 vascular *cylinder* laid down as a ring from the start, as seen in *Linum*,
 *Ricinus* and rapidly-woody dicots (and, developmentally, in what any dicot
 becomes once its interfascicular cambium closes the ring).
@@ -10,11 +10,11 @@ becomes once its interfascicular cambium closes the ring).
 The cylinder is three concentric annuli on the pith/cortex boundary,
 pith -> cortex:
 
-* an **endarch xylem annulus** toward the pith — small protoxylem on the inner
+* an **endarch xylem annulus** toward the pith - small protoxylem on the inner
   (pith) face grading to large metaxylem toward the cambium;
 * a **continuous cambium ring** on the boundary (the same renderer the eustele
   uses for its closed secondary cambium);
-* a **phloem annulus** toward the cortex — sieve elements + companion cells with
+* a **phloem annulus** toward the cortex - sieve elements + companion cells with
   parenchyma around them.
 
 The xylem annulus is optionally organised into radial **files** (lines):
@@ -92,7 +92,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
     # ------------------------------------------------------------------
 
     def _cylinder_contour(self, polygon: Polygon) -> Polygon:
-        """The cambium-ring contour the cylinder is built on — the pith/cortex
+        """The cambium-ring contour the cylinder is built on - the pith/cortex
         boundary in the ``vascular_cylinder.ring_shape`` family."""
         cyl = self._get_param("vascular_cylinder")
         cx, cy = polygon.centroid.x, polygon.centroid.y
@@ -142,7 +142,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
         """Split an annular ``zone`` into ``n`` adjacent pie-slice sectors (no gaps).
 
         A purely computational split: unioning the sectors gives back ``zone``.  It
-        keeps each ``pack_circles`` call to a small sub-region — the packer is
+        keeps each ``pack_circles`` call to a small sub-region - the packer is
         superlinear in the number of circles per region, so packing ``n`` sectors is
         an order of magnitude faster than one big annulus (with the same cells).  Any
         packer clearance along a seam is filled afterwards by the parenchyma pass."""
@@ -245,7 +245,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
         # --- phloem: sieve + companion cells, parenchyma around them --------
         # Packed in angular sectors: the phloem annulus holds many small sieve cells
         # and pack_circles is superlinear, so one big annulus is ~20x slower than the
-        # same cells packed sector-by-sector.  The sectors are invisible — seams are
+        # same cells packed sector-by-sector.  The sectors are invisible - seams are
         # filled by the parenchyma pass and blend into the (>=50%) phloem parenchyma,
         # so the phloem stays one continuous ring.
         if not phloem_annulus.is_empty:
@@ -266,7 +266,7 @@ class ContinuousDicotStemAnatomy(DicotStemAnatomy):
 
         # --- register removal masks / tissue view ---------------------------
         # The xylem files are parenchyma *inside* the xylem annulus (like the
-        # bundle), so the xylem stays one connected annulus region — no separate
+        # bundle), so the xylem stays one connected annulus region - no separate
         # ray tissue is registered.
         if not xylem_annulus.is_empty:
             self.vascular_tissue_polygons.setdefault("xylem", []).append(xylem_annulus)

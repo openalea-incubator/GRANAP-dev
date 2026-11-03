@@ -1,8 +1,8 @@
 """Structure tests for the growth cases the golden suite does not pin.
 
 ``test_vascular_regression`` covers the monocot and dicot-primary presets by exact
-census.  What is left here are the two presets it does not carry — ``for_dicot_secondary``
-and ``for_woody_dicot`` — and the relation between them (woody repeats vessel packing,
+census.  What is left here are the two presets it does not carry - ``for_dicot_secondary``
+and ``for_woody_dicot`` - and the relation between them (woody repeats vessel packing,
 so it must out-vessel the single-ring secondary case).
 """
 
@@ -43,7 +43,7 @@ def _census(make_organ) -> dict:
 # Presence-of-tissue checks for the monocot and dicot-primary presets used to live
 # here; ``test_vascular_regression`` pins their exact census (absences included), so
 # they said nothing this file did not already get for free.  Reproducibility is
-# likewise a property of the RNG plumbing, not of a preset — ``test_seed0_reproducible``
+# likewise a property of the RNG plumbing, not of a preset - ``test_seed0_reproducible``
 # covers it on a representative few.
 
 

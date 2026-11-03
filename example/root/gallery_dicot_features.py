@@ -1,4 +1,4 @@
-"""Gallery: dicot root — star-shaped xylem with Apollonian packing."""
+"""Gallery: dicot root - star-shaped xylem with Apollonian packing."""
 
 import sys
 import os
@@ -44,7 +44,7 @@ BASE_CAMBIUM = {
 
 scenarios = [
     {"label": "Diarch (2 peaks)\n",  "kwargs": {**BASE_KWARGS, "n_vascular_peak": 2}, "cambium": BASE_CAMBIUM},
-    {"label": "Tétrarch (4 peaks)\n", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4}, "cambium": BASE_CAMBIUM},
+    {"label": "Tetrarch (4 peaks)\n", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4}, "cambium": BASE_CAMBIUM},
     {"label": "Heptarch (7 peaks)",   "kwargs": {**BASE_KWARGS, "n_vascular_peak": 7}, "cambium": BASE_CAMBIUM},
     {"label": "Narrow peaks",
      "kwargs": {**BASE_KWARGS, "arc_valley_side": 0.05, "arc_peak_side": 0.05,
@@ -87,7 +87,7 @@ def main(show=True):
     for j in range(n, len(axs_flat)):
         axs_flat[j].set_visible(False)
 
-    plt.suptitle("Dicot root — star-shaped xylem with Apollonian packing", fontsize=14)
+    plt.suptitle("Dicot root - star-shaped xylem with Apollonian packing", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

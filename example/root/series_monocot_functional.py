@@ -1,6 +1,6 @@
 """Monocot root series defined entirely by smooth functions of length.
 
-One cross-section is written by hand — the collar — and the other eleven are
+One cross-section is written by hand - the collar - and the other eleven are
 produced by evolving it along the root. Nothing below is a per-section value:
 every quantity that changes is a ``length -> value`` schedule, collected in
 :data:`RELATIONS` so the same functions that drive the model also draw the
@@ -17,17 +17,17 @@ What the schedules say
                 ~59 cm, and under half a vessel by the apex.  The drop is 5
                 fusions plus 2 terminations = 7; the terminations are done inside
                 the first 30 cm, the fusions run on past it.
-    vessel size grows as the count falls — the survivors carry the same water
+    vessel size grows as the count falls - the survivors carry the same water
     stele/root  barely change for the first 40 cm, then taper
     protoxylem  12 poles at the collar falling to 4 at the apex, on the stele's
-                own taper rather than the metaxylem count — so the poles thin out
+                own taper rather than the metaxylem count - so the poles thin out
                 with the stele that carries them (a third, not a tenth) and are
                 still there once the last metaxylem has gone
 
 The apex carries **no metaxylem at all** but keeps its protoxylem and phloem.
 That is expressible because ``xylem.n_protoxylem`` is a count in its own right:
 poles are specified early at the apex while metaxylem differentiate later, so
-there is nothing to scale them off — see the note in
+there is nothing to scale them off - see the note in
 ``root_monocot_class.fit_phloem_protoxylem_elements``.
 """
 
@@ -43,7 +43,7 @@ from openalea.granap.root_series import RootSeries
 
 SEED = 0
 N_LEVELS = 30
-COLLAR = 1000.0            # mm — the hand-written section
+COLLAR = 1000.0            # mm - the hand-written section
 APEX = 0.0
 N_COLS = 4
 
@@ -51,17 +51,17 @@ META_COLLAR = 8            # metaxylem in the base section
 N_TERMINATE = 2            # vessels that stop rather than fuse
 TERMINATIONS = [900.0, 750.0]   # ...at 10 cm and 25 cm from the collar
 TERMINATION_ZONE = 300.0   # both terminations are done within the first 30 cm
-META_DECAY = 0.00235       # 1/mm — exponential decay rate of the fused count
-TIP_MID = 960.0            # mm — where the last vessel goes, and how sharply
+META_DECAY = 0.00235       # 1/mm - exponential decay rate of the fused count
+TIP_MID = 960.0            # mm - where the last vessel goes, and how sharply
 TIP_WIDTH = 40.0
 POLES_COLLAR = 12          # protoxylem poles in the base section
 POLES_APEX = 4             # ...and at the apex, where no metaxylem are left
-TAPER_MID = 650.0          # mm — where the root/stele taper is steepest
-TAPER_WIDTH = 130.0        # mm — how sharp that transition is
+TAPER_MID = 650.0          # mm - where the root/stele taper is steepest
+TAPER_WIDTH = 130.0        # mm - how sharp that transition is
 
 
 def d(length: float) -> float:
-    """Distance travelled from the collar (mm) — what the landmarks refer to.
+    """Distance travelled from the collar (mm) - what the landmarks refer to.
 
     Note this is *not* the axis the figures use.  Length itself is measured from
     the apex (0) to the collar (1000), which is how the series is presented; the
@@ -74,7 +74,7 @@ def d(length: float) -> float:
 def _decay(x: float, y0: float, y_inf: float, rate: float) -> float:
     """Exponential relaxation from y0 toward the limit y_inf.
 
-    Smooth everywhere and monotone, with no corner to explain — it approaches
+    Smooth everywhere and monotone, with no corner to explain - it approaches
     its limit rather than arriving at one and stopping.
     """
     return y_inf + (y0 - y_inf) * np.exp(-rate * x)
@@ -94,10 +94,10 @@ FUSED_COLLAR = META_COLLAR - N_TERMINATE      # 6 fusing classes + 2 terminators
 
 
 def fused_groups(length: float) -> float:
-    """Fused groups as a CONTINUOUS quantity — this is the actual schedule.
+    """Fused groups as a CONTINUOUS quantity - this is the actual schedule.
 
     An exponential decay from 6, times a logistic that closes the last vessel off
-    at the tip. Both are smooth, so their product is too — no segments, no corner.
+    at the tip. Both are smooth, so their product is too - no segments, no corner.
 
     The decay alone cannot do it: a rate that puts the 2 -> 1 step at ~59 cm from
     the collar still leaves 0.57 of a vessel at the apex, which rounds to one.
@@ -124,7 +124,7 @@ def n_active_terminators(length: float) -> int:
 def metaxylem(length: float) -> float:
     """Metaxylem as a continuous quantity: the smooth fused-group curve plus the
     terminating vessels still running. The two terminations are events, so they
-    are the only discontinuities in it — the 8 -> 1 fall itself is a curve."""
+    are the only discontinuities in it - the 8 -> 1 fall itself is a curve."""
     return fused_groups(length) + n_active_terminators(length)
 
 
@@ -141,7 +141,7 @@ def vessel_radius(length: float) -> float:
 
 
 def _taper(length: float) -> float:
-    """1 near the collar, 0 near the apex, steepest at TAPER_MID — the shared
+    """1 near the collar, 0 near the apex, steepest at TAPER_MID - the shared
     shape for the root and the stele. Barely moves over the first 40 cm, which
     is the whole point of using a sigmoid here rather than a straight line."""
     return _logistic(d(length), TAPER_MID, TAPER_WIDTH)
@@ -153,7 +153,7 @@ def _taper01(length: float) -> float:
     The raw sigmoid only approaches its asymptotes (0.993 at the collar, 0.063
     at the apex), which is fine where it is used as a *shape* to scale a
     dimension by, but not where both endpoints are values the model states
-    outright — there, the section you asked for is the one you should get.
+    outright - there, the section you asked for is the one you should get.
     """
     lo, hi = _taper(APEX), _taper(COLLAR)
     return (_taper(length) - lo) / (hi - lo)
@@ -169,7 +169,7 @@ def cortex_cell_diameter(length: float) -> float:
 
 
 def cortex_layers(length: float) -> float:
-    """Cortex layers as a continuous quantity — the taper sigmoid, scaled."""
+    """Cortex layers as a continuous quantity - the taper sigmoid, scaled."""
     return 4.0 + 1.0 * _taper(length)
 
 
@@ -184,8 +184,8 @@ def protoxylem_poles(length: float) -> float:
 
     Follows the *stele's* taper, not the metaxylem count: poles are laid down
     early at the apex and are a property of the stele, while metaxylem
-    differentiate later and centrally. Scaling them off the metaxylem — as a
-    proto:meta ratio does — makes the count collapse toward the apex and, worse,
+    differentiate later and centrally. Scaling them off the metaxylem - as a
+    proto:meta ratio does - makes the count collapse toward the apex and, worse,
     move non-monotonically, since it multiplies a rising ratio by a falling
     staircase. Taking them off the same sigmoid as ``stele_radius`` instead
     keeps poles roughly proportional to the stele circumference they sit on.
@@ -297,8 +297,8 @@ def build_series() -> RootSeries:
 def main(show=True):
     res = build_series().generate()
     res.plot(cols=N_COLS,
-             suptitle="Monocot root series — every section a function of length "
-                      "(collar 100 cm → apex 0 cm)",
+             suptitle="Monocot root series - every section a function of length "
+                      "(collar 100 cm -> apex 0 cm)",
              show=show)
     return res
 

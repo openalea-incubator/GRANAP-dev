@@ -467,7 +467,7 @@ class TissueStep:
     A step is just a label, the tags it is expected to produce, and a callable
     that performs the work (typically a closure over one or more of the
     primitives / edit verbs above, or an existing ``fit_*`` method).  Keeping
-    the build order as data — rather than buried in control flow — lets a recipe
+    the build order as data - rather than buried in control flow - lets a recipe
     be inspected (:meth:`TissueRecipe.describe`), reordered, or extended with
     edit-verb steps without touching the generators.
     """
@@ -506,7 +506,7 @@ def _dispatch_fill(target: CellManager, tissue: "Tissue", strategy: str, rng, **
     ``**kw`` is forwarded verbatim to the chosen primitive, so each strategy
     keeps its own parameters.  The strategies have different return types
     (``packing`` returns the placed-circle list; ``rings`` the next free id;
-    ``line`` ``None``) — whatever the primitive returns is handed to the step's
+    ``line`` ``None``) - whatever the primitive returns is handed to the step's
     ``record`` hook so the caller can do its own bookkeeping.
     """
     if strategy == "packing":
@@ -522,7 +522,7 @@ class TissueRecipe:
     """An ordered, inspectable sequence of :class:`TissueStep` objects.
 
     Beyond the low-level :meth:`add` (wrap an arbitrary callable), a recipe can
-    be expressed *declaratively* — a step names a region (:class:`Tissue`) and a
+    be expressed *declaratively* - a step names a region (:class:`Tissue`) and a
     fill strategy, rather than wrapping a bespoke ``fit_*`` method:
 
         recipe = TissueRecipe(cells=organ.vascular_cells, rng=organ.rng)
@@ -551,7 +551,7 @@ class TissueRecipe:
         """Set the target CellManager + rng used by :meth:`fill` / :meth:`fill_each`.
 
         ``cells`` may be a :class:`CellManager` or a zero-arg callable returning
-        one — pass a callable when the organ replaces its manager between steps,
+        one - pass a callable when the organ replaces its manager between steps,
         so each fill resolves the *current* manager at build time.
         """
         self._cells = cells
@@ -641,7 +641,7 @@ class TissueRecipe:
         return [(s.name, s.produces) for s in self.steps]
 
     def plan(self) -> List[Tuple[str, str, Tuple[str, ...]]]:
-        """Return ``(name, kind, produces)`` for each step — the full plan.
+        """Return ``(name, kind, produces)`` for each step - the full plan.
 
         Richer than :meth:`describe` (which is kept name+produces for
         back-compat); ``kind`` distinguishes fill / fill_each / cleanup / special

@@ -320,7 +320,7 @@ def plot_tissues(organ: "Organ",
     ax.set_aspect("equal")
     ax.set_xlabel("x (mm)")
     ax.set_ylabel("y (mm)")
-    ax.set_title(f"{organ.__class__.__name__} — {'fused' if fuse else 'rings'}")
+    ax.set_title(f"{organ.__class__.__name__} - {'fused' if fuse else 'rings'}")
 
     if fig is not None:
         plt.tight_layout()

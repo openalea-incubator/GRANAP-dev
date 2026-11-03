@@ -80,8 +80,8 @@ class GeometryProcessor:
     def place_local(geoms, cx: float, cy: float, angle_deg: float):
         """Map local-frame geometries (radial axis = local +y) to their place.
 
-        Applies the same transform as :meth:`oriented_ellipse` — ``rotate(angle_deg
-        - 90, origin=0)`` then ``translate(cx, cy)`` — to every geometry in
+        Applies the same transform as :meth:`oriented_ellipse` - ``rotate(angle_deg
+        - 90, origin=0)`` then ``translate(cx, cy)`` - to every geometry in
         ``geoms``, so an envelope built at the origin with its radial axis along
         +y and all of its interior sub-zones move together to ``(cx, cy)`` at
         orientation ``angle_deg``.  Returns a list of transformed geometries.
@@ -148,7 +148,7 @@ class GeometryProcessor:
         therefore points to whichever side owns the larger radius:
 
         - ``radius_peak_side >= radius_valley_side``: the arm points along the
-          reference (peak) direction — branch tips at ``2*pi*k/n``, no offset.
+          reference (peak) direction - branch tips at ``2*pi*k/n``, no offset.
         - ``radius_valley_side > radius_peak_side``: the star is offset half a
           period so the arm falls on the valley direction instead.
 
@@ -218,8 +218,8 @@ class GeometryProcessor:
                         smooth: float = None) -> Polygon:
         """One source of truth for an organ / tissue *contour* outline, at ``(cx, cy)``.
 
-        Every contour in the package — the organ ``base_shape``, the eustele /
-        cylinder ring, and the root / stem secondary cambium — comes from here, so
+        Every contour in the package - the organ ``base_shape``, the eustele /
+        cylinder ring, and the root / stem secondary cambium - comes from here, so
         the ``circle`` / ``ellipse`` / ``star`` / ``focus_ellipse`` / ``square`` /
         ``rectangle`` / ``triangle`` family is defined once.
 
@@ -227,11 +227,11 @@ class GeometryProcessor:
         ``triangle`` use ``width`` / ``height`` (each falling back to ``2*radius``
         when 0, and ``ellipse`` height further to ``2*radius*ellipse_ratio``).
 
-        ``star`` is the single peak/valley parameterisation used everywhere — an
+        ``star`` is the single peak/valley parameterisation used everywhere - an
         :meth:`oriented_star_polygon` from absolute ``radius_peak_side`` /
         ``radius_valley_side`` + arcs over ``n_branches`` arms.  When the valley
         radius is the larger the star is rotated half a period automatically (arms
-        point to the valleys — the root secondary cambium's "peaks in the
+        point to the valleys - the root secondary cambium's "peaks in the
         primary-xylem valleys").
 
         ``focus_ellipse`` prefers a measured ``profile`` (best-fit superellipse),
@@ -439,7 +439,7 @@ class GeometryProcessor:
         Named ``focus_ellipse`` because ``exponent`` acts as a "latus rectum" knob
         on top of a classic ellipse.  Same bounding box as
         :meth:`ellipse_to_polygon` (half-axes ``rx``, ``ry``), but ``exponent``
-        controls how *full* the outline is — a way to enlarge the shape (bigger
+        controls how *full* the outline is - a way to enlarge the shape (bigger
         latus rectum, more area, blunter flanks) **without** changing the width or
         height:
 
@@ -505,10 +505,10 @@ class GeometryProcessor:
     def egg_polygon(cx, cy, a_out, a_in, b, angle, n=28):
         """Teardrop / 'violin' shape: an asymmetric oval whose widest point (half
         width ``b``) is NOT at the middle of the major axis.  Two half-ellipses
-        share that waist — an ``a_out`` lobe on the +major side and an ``a_in``
+        share that waist - an ``a_out`` lobe on the +major side and an ``a_in``
         lobe on the -major side.  Its area is ``pi*b*(a_out+a_in)/2`` (independent
         of the split), i.e. the same as a symmetric ellipse of semi-major
-        ``(a_out+a_in)/2`` — so the waist can be offset without changing area.
+        ``(a_out+a_in)/2`` - so the waist can be offset without changing area.
 
         ``angle`` (degrees) orients the +major (the ``a_out`` lobe) direction."""
         xo = np.linspace(0.0, a_out, n)
@@ -619,9 +619,9 @@ class GeometryProcessor:
         ``tt <= enforce_gradient_min``) the vessel diameter is the gradient target
         itself (never clamped up to ``diameter_min``), so a spot that cannot hold
         a full-target vessel (as a circle or radial ellipse) is left empty rather
-        than filled with a shrunken circle — "big vessels only, gaps empty".
+        than filled with a shrunken circle - "big vessels only, gaps empty".
 
-        Returns ``(placed_records, total_area, remaining_pieces)`` — the leftover
+        Returns ``(placed_records, total_area, remaining_pieces)`` - the leftover
         pieces are handed to the space-first packer for the small interstitial
         fill (hybrid).
         """
@@ -692,7 +692,7 @@ class GeometryProcessor:
             # non-overlapping ring is a whole diameter out.  But when nothing fit
             # (e.g. this radius is jammed against the pith or a zone edge), step
             # out by a small increment instead of a full D so the march doesn't
-            # leap over the radii where the big vessels *would* fit — which
+            # leap over the radii where the big vessels *would* fit - which
             # otherwise leaves the whole ring to the interstitial space-fill and
             # no radial ellipse ever gets a chance.  The carve-and-recheck above
             # dedups any overlap the finer stepping might revisit.
@@ -746,7 +746,7 @@ class GeometryProcessor:
         """
         Pole of inaccessibility (largest inscribed circle): ``(cx, cy, radius)``.
 
-        Computed by GEOS via :func:`shapely.maximum_inscribed_circle` — a single
+        Computed by GEOS via :func:`shapely.maximum_inscribed_circle` - a single
         C call returning the centre->boundary segment.  This replaced a Python
         grid search + scipy Nelder-Mead refinement that ran once per packed
         circle and dominated ``pack_circles``.  The result differs from the old
@@ -828,7 +828,7 @@ class GeometryProcessor:
                                  axis as ``gradient_inflection``) over which the gradient
                                  minimum is enforced.  Where the local gradient position
                                  ``t <= enforce_gradient_min``, no circle smaller than the
-                                 gradient-prescribed target is placed — a spot too tight
+                                 gradient-prescribed target is placed - a spot too tight
                                  for the local target is left empty instead of being filled
                                  with a shrunken circle.  Beyond it (or with the default
                                  ``0.0``) the global ``diameter_min`` applies as usual, so
@@ -846,7 +846,7 @@ class GeometryProcessor:
             pack_strategy:       Packing order.  "space" (default) is the space-first
                                  Apollonian fill (largest inscribed circle first, sized by
                                  the gradient at that spot).  "target" is a size-first,
-                                 gradient-driven *radial* pass — it places the big vessels
+                                 gradient-driven *radial* pass - it places the big vessels
                                  first at the radius the gradient assigns (ellipse if the
                                  arm is too narrow), then fills the leftover space with the
                                  space-first packer for the small interstitial cells

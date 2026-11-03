@@ -25,7 +25,7 @@ _BUILT: dict = {}
 
 def make_secondary_root(**mr_kwargs) -> RootAnatomy:
     """Dicot secondary-growth root with a medullar-ray param entry, memoised on its
-    kwargs — the rate=0 reference root is wanted by two tests and takes ~12 s."""
+    kwargs - the rate=0 reference root is wanted by two tests and takes ~12 s."""
     key = tuple(sorted(mr_kwargs.items()))
     if key not in _BUILT:
         data = OrganInputData.for_dicot_root()
@@ -82,8 +82,8 @@ def test_rate_zero_matches_n_medullar():
     """With rate=0, exactly n_medullar rays are present (no rate-driven extras).
 
     (Inner bands can show slightly fewer because the primary cambium is
-    star-shaped — rays over its peaks start at a larger radius than in its
-    valleys — so we assert the full-extent total, and that the outer band does
+    star-shaped - rays over its peaks start at a larger radius than in its
+    valleys - so we assert the full-extent total, and that the outer band does
     not exceed n_medullar.)"""
     root = make_secondary_root(n_medullar=6, n_medullar_rate=0.0, allow_non_vascular=True)
     assert distinct_rays(root) == 6, "Expected exactly n_medullar rays at rate=0"

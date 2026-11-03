@@ -1,27 +1,27 @@
-"""Demo: dicot stem growth — primary bundles, the ring closing, then wood.
+"""Demo: dicot stem growth - primary bundles, the ring closing, then wood.
 
-The *same* eustele — one ring of collateral bundles (xylem inner / phloem outer /
-fascicular cambium between) around a central pith — drawn at three growth stages:
+The *same* eustele - one ring of collateral bundles (xylem inner / phloem outer /
+fascicular cambium between) around a central pith - drawn at three growth stages:
 
-1. **primary growth** (``secondary_growth = False``) — the cambium is visible
+1. **primary growth** (``secondary_growth = False``) - the cambium is visible
    only *inside* each bundle (the fascicular cambium strip); the bundles stay
    discrete, separated by pith/cortex parenchyma.
-2. **interfascicular cambium** — still ``secondary_growth = False`` (same
+2. **interfascicular cambium** - still ``secondary_growth = False`` (same
    primary-sized stem, same discrete bundle layout), but built with
    ``DicotStemAnatomy._build_cambium`` forced onto its ``secondary=True``
-   branch — the exact pass that closes the ring under real secondary growth.
+   branch - the exact pass that closes the ring under real secondary growth.
    That branch only materialises the interfascicular cambium band; it never
    touches xylem/phloem or the pith radius, so this is the ring closing in
-   isolation, with no wood and no growth in size at all — not an
+   isolation, with no wood and no growth in size at all - not an
    approximation of an early secondary-growth moment, but the same
    ring-closing code secondary growth itself calls, run on its own.
-3. **secondary growth** (``secondary_growth = True``) — the same closed ring
+3. **secondary growth** (``secondary_growth = True``) - the same closed ring
    (now via the library's own path, unforced), grown well outward, with a full
    annulus of secondary xylem (graded vessels + medullar rays) behind it.
 
 Stage 2 is produced by monkeypatching ``DicotStemAnatomy._build_cambium`` for
 the duration of that one ``generate_cells()`` call only (see
-``_closed_ring_stem`` below) — no library source is modified, and the
+``_closed_ring_stem`` below) - no library source is modified, and the
 patched-out original is restored immediately after. The bundle spec, count and
 seed are identical throughout.
 
@@ -52,7 +52,7 @@ def _dicot(secondary_growth):
 
 def _closed_ring_stem(data, seed):
     """Build a primary-growth stem, but with the interfascicular cambium
-    closed — ``DicotStemAnatomy._build_cambium``'s own ``secondary=True``
+    closed - ``DicotStemAnatomy._build_cambium``'s own ``secondary=True``
     branch, forced on for this one build via monkeypatch, not by turning on
     ``secondary_growth`` (which would also grow the wood)."""
     original = DicotStemAnatomy._build_cambium
@@ -97,7 +97,7 @@ def main(show=True):
             for txt in leg.get_texts():
                 txt.set_fontsize(6)
 
-    plt.suptitle("Dicot stem growth — the same eustele as the cambium ring "
+    plt.suptitle("Dicot stem growth - the same eustele as the cambium ring "
                  "closes, then grows wood", fontsize=15)
     plt.tight_layout()
     if show:

@@ -1,4 +1,4 @@
-"""Gallery: dicot root — secondary phloem generation."""
+"""Gallery: dicot root - secondary phloem generation."""
 
 import sys
 import os
@@ -62,7 +62,7 @@ def main(show=True):
     for j in range(n, len(axs_flat)):
         axs_flat[j].set_visible(False)
 
-    plt.suptitle("Dicot root — secondary phloem", fontsize=14)
+    plt.suptitle("Dicot root - secondary phloem", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

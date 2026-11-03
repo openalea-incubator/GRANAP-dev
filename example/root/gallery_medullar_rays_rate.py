@@ -2,7 +2,7 @@
 
 ``n_medullar`` rays start at the primary cambium; ``n_medullar_rate`` (rays per mm
 of radius) adds more rays that *appear further out*, so ray density grows toward
-the periphery and the inner wood stays sparse — as in real secondary xylem.
+the periphery and the inner wood stays sparse - as in real secondary xylem.
 """
 
 import sys
@@ -56,7 +56,7 @@ def main(show=True):
         ax.set_xlim(-0.55, 0.55)
         ax.set_ylim(-0.55, 0.55)
 
-    plt.suptitle("Medullar rays — radius-dependent initiation (n_medullar_rate)", fontsize=14)
+    plt.suptitle("Medullar rays - radius-dependent initiation (n_medullar_rate)", fontsize=14)
     plt.tight_layout()
     if show:
         plt.show()

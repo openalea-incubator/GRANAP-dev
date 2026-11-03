@@ -1,10 +1,10 @@
-"""Demo: stem vascular bundle types — TISSUE view (no cells).
+"""Demo: stem vascular bundle types - TISSUE view (no cells).
 
 Same six scenarios as ``stem_bundles.py`` but drawn with ``plot_tissues``: the
 tissue *zones* before any cell is placed.  Layer rings are labelled and
-colour-coded; each bundle shows its internal arrangement — xylem
+colour-coded; each bundle shows its internal arrangement - xylem
 (light-steel-blue, with the vessel outlines in steel-blue on top), phloem
-(goldenrod), cambium (green), sclerenchyma sheath (silver) — and cavities
+(goldenrod), cambium (green), sclerenchyma sheath (silver) - and cavities
 (hollow pith / protoxylem lacuna) read as white voids.
 
 A shared legend (bottom) keys the vascular-zone colours; the layer rings carry
@@ -40,14 +40,14 @@ def _monocot(cavity_radius=0.0):
 
 
 SCENARIOS = [
-    ("dicot — collateral",  _dicot()),
-    ("dicot — bicollateral",        _dicot({"bundle_type": "bicollateral", "inner_phloem_fraction": 0.2})),
-    ("dicot — amphivasal",          _dicot({"bundle_type": "concentric", "concentric_type": "amphivasal",
+    ("dicot - collateral",  _dicot()),
+    ("dicot - bicollateral",        _dicot({"bundle_type": "bicollateral", "inner_phloem_fraction": 0.2})),
+    ("dicot - amphivasal",          _dicot({"bundle_type": "concentric", "concentric_type": "amphivasal",
                                             "shape": "circle", "width": 0.16, "height": 0.16})),
-    ("dicot — amphicribral",        _dicot({"bundle_type": "concentric", "concentric_type": "amphicribral",
+    ("dicot - amphicribral",        _dicot({"bundle_type": "concentric", "concentric_type": "amphicribral",
                                             "shape": "circle", "width": 0.16, "height": 0.16})),
-    ("monocot — face (solid pith)", _monocot()),
-    ("monocot — face (hollow culm)", _monocot(cavity_radius=0.14)),
+    ("monocot - face (solid pith)", _monocot()),
+    ("monocot - face (hollow culm)", _monocot(cavity_radius=0.14)),
 ]
 
 # Keys the vascular-zone colours used by plot_tissues (layer rings are labelled
@@ -76,7 +76,7 @@ def main(show=True):
     handles = [Patch(facecolor=c, edgecolor="gray", label=name) for name, c in _LEGEND]
     fig.legend(handles=handles, loc="lower center", ncol=len(_LEGEND), fontsize=8,
                frameon=True, title="vascular-zone colours")
-    plt.suptitle("Stem vascular bundles — tissue view (zones before cells)", fontsize=15)
+    plt.suptitle("Stem vascular bundles - tissue view (zones before cells)", fontsize=15)
     plt.tight_layout(rect=(0, 0.04, 1, 1))
     if show:
         plt.show()

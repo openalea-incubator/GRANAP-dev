@@ -2,10 +2,10 @@
 
 Two ways a *primary* dicot stem can organise its vascular tissue around the pith:
 
-1. **fascicular** (``for_dicot_stem``) — the textbook eustele: discrete collateral
+1. **fascicular** (``for_dicot_stem``) - the textbook eustele: discrete collateral
    bundles separated by interfascicular parenchyma (Helianthus, most herbaceous
    dicots).
-2. **continuous** (``for_dicot_stem_continuous``) — a non-fascicular cylinder: an
+2. **continuous** (``for_dicot_stem_continuous``) - a non-fascicular cylinder: an
    uninterrupted ring of xylem / cambium / phloem laid down from the start (Linum,
    Ricinus, rapidly-woody dicots). Setting ``vascular_cylinder.xylem_layout`` to
    ``"files"`` forces the xylem vessels into radial files, separated by thin
@@ -13,7 +13,7 @@ Two ways a *primary* dicot stem can organise its vascular tissue around the pith
    continuous.
 
 Three panels: the fascicular eustele, the seamless (packed) cylinder, and the
-file-organised cylinder — same pith / cortex / epidermis and seed throughout.
+file-organised cylinder - same pith / cortex / epidermis and seed throughout.
 
 Run as a script to see them side by side.
 """
@@ -44,9 +44,9 @@ def _continuous(xylem_layout, n_xylem_files=0):
 
 
 SCENARIOS = [
-    ("fascicular eustele — discrete bundles", OrganInputData.for_dicot_stem()),
-    ("continuous cylinder — packed (seamless)", _continuous("packed")),
-    ("continuous cylinder — files (radial poles)", _continuous("files")),
+    ("fascicular eustele - discrete bundles", OrganInputData.for_dicot_stem()),
+    ("continuous cylinder - packed (seamless)", _continuous("packed")),
+    ("continuous cylinder - files (radial poles)", _continuous("files")),
 ]
 
 
@@ -66,7 +66,7 @@ def main(show=True):
             for txt in leg.get_texts():
                 txt.set_fontsize(6)
 
-    plt.suptitle("Dicot stem — fascicular bundles vs a continuous vascular "
+    plt.suptitle("Dicot stem - fascicular bundles vs a continuous vascular "
                  "cylinder", fontsize=15)
     plt.tight_layout()
     if show:

@@ -1,4 +1,4 @@
-"""Snowdrop (*Galanthus*) leaf cross-section — a measured monocot leaf.
+"""Snowdrop (*Galanthus*) leaf cross-section - a measured monocot leaf.
 
 All lengths are in mm.  Built from real measurements:
 
@@ -68,7 +68,7 @@ def build_snowdrop():
         {"name": "planttype", "value": 1, "organ": "leaf",
          "width": LENGTH,
          # Folded, keeled section.  Measured from the straight tip-to-tip chord, at the
-         # midrib the adaxial surface is 0.1 mm below it and the abaxial 1.0 mm below —
+         # midrib the adaxial surface is 0.1 mm below it and the abaxial 1.0 mm below -
          # so the leaf is 0.9 mm thick there (thickness_profile centre) and the mid-line
          # sags fold_sag = (0.1 + 1.0) / 2 = 0.55 mm.  The fold spans the whole width.
          "thickness_profile": [[0.0, 0.8], [0.75, 0.48], [2.5, 0.38], [3, 0.15],[HALF, 0.0]],
@@ -103,7 +103,7 @@ def main(show=True):
         print(f"    {t:14s} {counts[t]}")
 
     fig, ax = plt.subplots(figsize=(15, 3.0))
-    leaf.plot_cells(show=False, ax=ax, title="Snowdrop (Galanthus) leaf — measured monocot")
+    leaf.plot_cells(show=False, ax=ax, title="Snowdrop (Galanthus) leaf - measured monocot")
     leg = ax.get_legend()
     if leg is not None:
         leg.set_title("tissue")

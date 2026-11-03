@@ -9,10 +9,10 @@ vein row, stomata) and reuses the whole cell pipeline (seeding, Voronoi,
 intercellular spaces, gap fusing).  The subclasses supply only the **mesophyll
 stack**:
 
-* **monocot** — ``spongy / palisade / spongy``: concentric peeling of the
+* **monocot** - ``spongy / palisade / spongy``: concentric peeling of the
   wide-thin outline already stacks epidermis / spongy / palisade / spongy /
   epidermis top-to-bottom, so the palisade is just the central fill;
-* **dicot** — dorsiventral ``palisade (adaxial) / spongy (abaxial)``: the core is
+* **dicot** - dorsiventral ``palisade (adaxial) / spongy (abaxial)``: the core is
   split at the mid-plane, palisade filling the top half and spongy the bottom.
 
 Veins are the idealized all-transverse view: every vein is a proper transverse
@@ -53,7 +53,7 @@ def _leaf_planttype(input_data) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Base class — shared slab geometry, acts as factory via __new__
+# Base class - shared slab geometry, acts as factory via __new__
 # ---------------------------------------------------------------------------
 
 class LeafAnatomy(Organ):
@@ -132,7 +132,7 @@ class LeafAnatomy(Organ):
         return sorted(specs, key=lambda s: -float(s.get("width", 0.12)))
 
     def _vein_layout(self) -> List[tuple]:
-        """``(x, spec)`` for every vein along the mid-plane — the single source for
+        """``(x, spec)`` for every vein along the mid-plane - the single source for
         the outline ribs and the vein placement.
 
         Each size-class spec places ``n_bundles`` by its ``placement``:
@@ -174,13 +174,13 @@ class LeafAnatomy(Organ):
         Two optional displacements ride on it (both 0 by default = a flat, straight
         leaf on ``y=0``):
 
-        * **twist** — a gentle sine (``twist_amplitude`` mm depth, ``twist_waves``
+        * **twist** - a gentle sine (``twist_amplitude`` mm depth, ``twist_waves``
           half-bends) so the leaf is not perfectly straight;
-        * **fold** — a smooth central *sag* (``fold_sag`` mm) that drops the whole
+        * **fold** - a smooth central *sag* (``fold_sag`` mm) that drops the whole
           slab below the tip-to-tip chord, deepest at the centre and easing to 0 at
-          ``±fold_width/2`` (default the whole width).  With the thickness centred on
+          ``+/-fold_width/2`` (default the whole width).  With the thickness centred on
           the mid-line this makes the adaxial surface hug the chord while the abaxial
-          swings out into a keel — a folded, keeled leaf (e.g. a snowdrop).
+          swings out into a keel - a folded, keeled leaf (e.g. a snowdrop).
         """
         g = self.global_params
         xg = np.asarray(xg, dtype=float)
@@ -213,7 +213,7 @@ class LeafAnatomy(Organ):
         """World angle of a vein's abaxial (outward, lower-surface) pole at ``x``.
 
         A bundle's local +y points to the abaxial surface; :meth:`build_bundle` then
-        orients the whole vein — xylem->phloem axis, ribs and all — about it.  On a
+        orients the whole vein - xylem->phloem axis, ribs and all - about it.  On a
         flat leaf that pole is straight down (``-pi/2``).  On a folded or twisted leaf
         the slab tilts, so the pole follows the **outward normal of the mid-line**:
         perpendicular to the local tangent ``(1, dy/dx)`` and pointing to the abaxial
@@ -251,7 +251,7 @@ class LeafAnatomy(Organ):
         **independent** raised-cosine bump to the top (adaxial) and bottom (abaxial)
         profile, using **its own size-class's** height and full width
         (``rib_adaxial_height`` / ``rib_adaxial_width`` and the abaxial pair).  The
-        bump has compact support (exactly 0 beyond ±width/2), so a rib can be
+        bump has compact support (exactly 0 beyond +/-width/2), so a rib can be
         one-sided (a height of 0), the two faces can differ, a big midrib and small
         minor veins each get their own rib, and adjacent ribs never overlap.  No rib
         (or no veins) -> a plain lens.
@@ -266,9 +266,9 @@ class LeafAnatomy(Organ):
         mid = self._mid_line(xg)                       # twist: curved mid-line
 
         def cos_bump(x0, height, full_width):
-            """Raised-cosine bump at ``x0``: ``height`` at the vein, 0 beyond ±width/2.
+            """Raised-cosine bump at ``x0``: ``height`` at the vein, 0 beyond +/-width/2.
 
-            A **negative** height dips the surface *inward* instead of out — an
+            A **negative** height dips the surface *inward* instead of out - an
             adaxial groove / sunken channel over a major vein (paired with a positive
             abaxial rib it makes the classic keeled, top-grooved midrib)."""
             if height == 0.0 or full_width <= 0.0:
@@ -299,7 +299,7 @@ class LeafAnatomy(Organ):
         # outline, and since the outline is what limits cell growth (via the ring of
         # "outside" seeds sampled along it), a kink forces the boundary layer to
         # stretch one cell there.  Gaussian-smooth the two surfaces over ~a cell so the
-        # corners become gentle curves the epidermis can tile — without moving the
+        # corners become gentle curves the epidermis can tile - without moving the
         # broad shape.
         top, bot = self._smooth_surfaces(top, bot, width)
         coords = np.vstack([np.column_stack([xg, top]),
@@ -356,7 +356,7 @@ class LeafAnatomy(Organ):
         notched by the palisade band (so a spongy ring splits into a left arm and a
         right arm) or scalloped by the ribs.  The cell seeder traces a *single*
         exterior per layer, so a ``MultiPolygon`` layer has to be resolved into
-        single Polygons — but keeping only the largest piece **deletes a whole side**
+        single Polygons - but keeping only the largest piece **deletes a whole side**
         of the leaf (e.g. the smaller spongy arm), which is what made the two halves
         carry a different number of layers.  Instead, every piece down to about one
         cell is emitted as its own layer (same tissue, same cell sizes), so both
@@ -380,7 +380,7 @@ class LeafAnatomy(Organ):
         return out
 
     def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
-        """Region veins occupy — the innermost mesophyll band at the mid-plane."""
+        """Region veins occupy - the innermost mesophyll band at the mid-plane."""
         real = [l for l in layers_polygons if l["name"] != "outside"]
         return real[-1]["polygon"] if real else self.generate_base_shape()
 
@@ -436,10 +436,10 @@ class LeafAnatomy(Organ):
 
         Each file is a row of tangentially-oriented cells (:func:`fill_along`): along a
         horizontal line the tangent is horizontal, so the cells stand up columnar
-        (tall ``cell_diameter`` × narrow ``cell_width``).  Seeding independent rows —
+        (tall ``cell_diameter`` x narrow ``cell_width``).  Seeding independent rows -
         rather than peeling concentric rings (which shrink inward, so deeper files come
         out shorter) or adjacent slabs (whose shared edges collide into ballooning
-        Voronoi cells) — gives files that are all the same length and stay bounded.  The
+        Voronoi cells) - gives files that are all the same length and stay bounded.  The
         vein envelopes are carved out so a file never runs through a bundle."""
         data = getattr(self, "_palisade_files", None)
         if not data:
@@ -488,7 +488,7 @@ class LeafAnatomy(Organ):
         self._build_bundle_girders(placed, outline)
 
     def _ground_cell_size_for_veins(self):
-        """Ground (mesophyll) cell diameter the veins sit among — turns on the outer
+        """Ground (mesophyll) cell diameter the veins sit among - turns on the outer
         bundle sheath so a ring of intermediate-sized cells wraps each vein, instead
         of the small bundle parenchyma stretching out into the coarse mesophyll as a
         radial sunburst.  Uses the spongy size (the veins sit at the mid-plane in the
@@ -582,12 +582,12 @@ class LeafAnatomy(Organ):
         self._convert_inter_bundle_aerenchyma()
 
     def _add_aerenchyma_to_proportion(self, tol: float = 5e-3, max_iter: int = 20):
-        """Leaf (slab) aerenchyma — replaces the root/stem radial mechanism.
+        """Leaf (slab) aerenchyma - replaces the root/stem radial mechanism.
 
         The base :meth:`Organ._add_aerenchyma_to_proportion` grows aerenchyma in
         *angular sectors* around the origin, which is meaningless on a flat lamina.
         A leaf's aerenchyma is instead **scattered**: irregular air lacunae spread
-        through the ground tissue (dense in a dicot — "almost everywhere" — but
+        through the ground tissue (dense in a dicot - "almost everywhere" - but
         never the monocot's tidy one-lacuna-per-vein-gap).  We convert a target
         area fraction of the ground tissue into air as random blobs, leaving thin
         tissue walls between them, then fuse touching air into organic lacunae.
@@ -631,7 +631,7 @@ class LeafAnatomy(Organ):
 
     def _convert_inter_bundle_aerenchyma(self) -> None:
         """Turn the mesophyll cells inside each stored inter-bundle region into a
-        single fused ``air space`` cell — the root aerenchyma model (convert existing
+        single fused ``air space`` cell - the root aerenchyma model (convert existing
         cells + fuse touching air), so the lacuna outline follows the cell walls."""
         regions = getattr(self, "_inter_bundle_regions", None)
         if not regions:
@@ -677,7 +677,7 @@ class LeafAnatomy(Organ):
         a **triangle** is filled with sclerenchyma between the epidermis and the vein:
         its base (width ``girder_base_width``) sits against the inner edge of that
         face's epidermis, its apex touches the bundle pole.  A pronounced rib raises
-        the surface, so the same mechanism fills the rib — a girder can equally sit
+        the surface, so the same mechanism fills the rib - a girder can equally sit
         on a bump.  The triangle region is registered so the mesophyll under it is
         cleared.  A no-op for bundles without a girder flag.
         """
@@ -742,7 +742,7 @@ class LeafAnatomy(Organ):
         Epidermis cells are seeded along the outline in ``id_group`` order, so
         consecutive groups are boundary neighbours.  We split the boundary into the
         adaxial (upper) and abaxial (lower) runs and place ``n_adaxial`` /
-        ``n_abaxial`` stomata evenly along each — so a monocot leaf is amphistomatous
+        ``n_abaxial`` stomata evenly along each - so a monocot leaf is amphistomatous
         and a dicot carries fewer on the adaxial side.  Each stoma is a
         prev/curr/next triplet, the same input the needle feeds to
         ``create_stomata`` / ``place_stomata``.
@@ -766,7 +766,7 @@ class LeafAnatomy(Organ):
         adaxial = [g for g in ordered if centroid[g][1] > self._mid_at(centroid[g][0])]
         abaxial = [g for g in ordered if centroid[g][1] < self._mid_at(centroid[g][0])]
 
-        # Keep stomata off the undifferentiated-mesophyll bands over a major vein —
+        # Keep stomata off the undifferentiated-mesophyll bands over a major vein -
         # they belong over palisade / spongy tissue, not the vein's mesophyll region.
         # A one-cell margin keeps even a boundary stoma's guard cells off the band.
         meso_x = []
@@ -794,7 +794,7 @@ class LeafAnatomy(Organ):
         """``n`` evenly spaced prev/curr/next triplets along one epidermis run.
 
         ``margin`` is the fraction of the run skipped at *each* end, so no stoma sits
-        near the leaf tips — where the adaxial and abaxial runs meet, which is what
+        near the leaf tips - where the adaxial and abaxial runs meet, which is what
         put two stomata right next to each other at the margin.
         """
         if n <= 0 or len(run) < 3:
@@ -849,7 +849,7 @@ class MonocotLeafAnatomy(LeafAnatomy):
 
 
 # ---------------------------------------------------------------------------
-# Dicot — dorsiventral palisade (adaxial) / spongy (abaxial)
+# Dicot - dorsiventral palisade (adaxial) / spongy (abaxial)
 # ---------------------------------------------------------------------------
 
 class DicotLeafAnatomy(LeafAnatomy):
@@ -865,9 +865,9 @@ class DicotLeafAnatomy(LeafAnatomy):
         of the core with spongy, and stash the palisade file centre-lines for
         :meth:`_build_palisade` to seed.
 
-        The palisade is *only* the band ``n_layers × cell_diameter`` deep measured down
+        The palisade is *only* the band ``n_layers x cell_diameter`` deep measured down
         from the adaxial surface (per abscissa, so it rides the twist/fold); everything
-        below it — the rest of the adaxial side and the whole abaxial side — is spongy.
+        below it - the rest of the adaxial side and the whole abaxial side - is spongy.
         The palisade cells themselves are seeded later as horizontal files (see
         :meth:`_build_palisade`); here we only carve the band out of the spongy region
         and record one centre-line per file across the thick central span (the tapering
@@ -907,7 +907,7 @@ class DicotLeafAnatomy(LeafAnatomy):
 
         # Palisade layers TAPER toward the margins instead of stopping abruptly: at each
         # abscissa we keep as many palisade files as fit under the adaxial surface (up to
-        # ``n_pal``), so a thin margin gets 3, then 2, then 1 layer — but the adaxial side
+        # ``n_pal``), so a thin margin gets 3, then 2, then 1 layer - but the adaxial side
         # stays palisade all the way out, never spongy.  Spongy fills only what is left
         # *below* the (tapering) band.
         n_col = np.clip(np.floor_divide(thickness, d).astype(int), 0, n_pal)

@@ -33,7 +33,7 @@ class Cell:
                track_id=None) -> "Cell":
         """Build a seed cell whose ``angle``/``radius`` are measured from ``center``.
 
-        This is the ubiquitous seeding idiom — a cell placed at ``(x, y)`` with its
+        This is the ubiquitous seeding idiom - a cell placed at ``(x, y)`` with its
         polar attributes relative to a tissue centre ``center`` (a shapely
         ``Point`` or an ``(cx, cy)`` tuple).  ``area`` defaults to a disc of
         ``diameter`` (as everywhere it is used); ``id_cell`` defaults to

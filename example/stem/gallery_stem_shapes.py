@@ -1,16 +1,16 @@
-"""Demo: shaping a dicot stem — stem outline, cambium ring, and bundle pattern.
+"""Demo: shaping a dicot stem - stem outline, cambium ring, and bundle pattern.
 
 Four cross-sections showing how independently the three "shape" knobs can be set,
 plus the non-fascicular alternative:
 
-1. **circle · uniform** — the textbook eustele: a circular stem, a circular cambium
+1. **circle, uniform** - the textbook eustele: a circular stem, a circular cambium
    ring, and one repeated bundle kind (``for_dicot_stem``).
-2. **ellipse · mixed [big, small] x6** — an elliptical stem + elliptical cambium
+2. **ellipse, mixed [big, small] x6** - an elliptical stem + elliptical cambium
    ring carrying two bundle *kinds* alternating around the ring (a ``bundle_pattern``).
-3. **star · [big, small, small] x4 · secondary growth** — a star (lobed) secondary
+3. **star, [big, small, small] x4, secondary growth** - a star (lobed) secondary
    cambium with one big + two small bundles per arm, grown into a woody stem
    (secondary xylem behind each bundle, a closed cambium ring linking them).
-4. **continuous cambium** — the non-fascicular vascular cylinder: an uninterrupted
+4. **continuous cambium** - the non-fascicular vascular cylinder: an uninterrupted
    xylem / cambium / phloem ring with the xylem organised into radial files
    (``for_dicot_stem_continuous``).
 
@@ -64,12 +64,12 @@ def _ellipse_mixed():
 
 # 3. Star (lobed) secondary cambium, one big + two small bundles per arm, secondary
 #    growth grows it into a woody stem.  The primary bundle ring is a 4-arm star and
-#    the secondary cambium is a 4-arm star *aligned with it* — its lobes bulge over
+#    the secondary cambium is a 4-arm star *aligned with it* - its lobes bulge over
 #    the big bundles (peak radius outer), which sit on the arms (align_to_arms).
 def _star_secondary():
     data = OrganInputData.for_dicot_stem()
     data.set_value("secondary_growth", "value", True)
-    # Lobed secondary cambium, peaks (outer, 0.82) over the arms — aligned with the
+    # Lobed secondary cambium, peaks (outer, 0.82) over the arms - aligned with the
     # primary star so each lobe bulges over a big bundle.
     data.set_values("secondary_cambium", shape="star", n_peaks=4,
                     radius_peak_side=0.82, radius_valley_side=0.66,
@@ -94,7 +94,7 @@ def _star_secondary():
     return data
 
 
-# 4. Continuous (non-fascicular) vascular cylinder — the continuous cambium ring.
+# 4. Continuous (non-fascicular) vascular cylinder - the continuous cambium ring.
 def _continuous():
     data = OrganInputData.for_dicot_stem_continuous()
     data.set_value("vascular_cylinder", "xylem_layout", "files")
@@ -102,10 +102,10 @@ def _continuous():
 
 
 SCENARIOS = [
-    ("circle stem · circle cambium · uniform bundles", _circle_uniform()),
-    ("ellipse stem · ellipse cambium · [big, small] x6", _ellipse_mixed()),
-    ("star cambium · [big, small, small] x4 · secondary growth", _star_secondary()),
-    ("continuous cambium — cylinder (radial files)", _continuous()),
+    ("circle stem, circle cambium, uniform bundles", _circle_uniform()),
+    ("ellipse stem, ellipse cambium, [big, small] x6", _ellipse_mixed()),
+    ("star cambium, [big, small, small] x4, secondary growth", _star_secondary()),
+    ("continuous cambium - cylinder (radial files)", _continuous()),
 ]
 
 
@@ -124,7 +124,7 @@ def main(show=True):
             for txt in leg.get_texts():
                 txt.set_fontsize(6)
 
-    plt.suptitle("Dicot stem — stem / cambium / bundle shapes, and a continuous "
+    plt.suptitle("Dicot stem - stem / cambium / bundle shapes, and a continuous "
                  "cylinder", fontsize=15)
     plt.tight_layout()
     if show:

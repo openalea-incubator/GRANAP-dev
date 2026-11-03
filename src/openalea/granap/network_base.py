@@ -76,7 +76,7 @@ class AbstractNetwork(ABC):
         Build the network (if needed) and return the sparse adjacency matrix.
 
         ``air_link_radius`` is forwarded to ``_build_anatnetwork`` (only used
-        the first time the graph is built — it has no effect once cached).
+        the first time the graph is built - it has no effect once cached).
 
         Returns
         -------

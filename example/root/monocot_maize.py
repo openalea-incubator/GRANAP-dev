@@ -1,7 +1,7 @@
 """Build a maize-like monocot root from the ``for_root`` preset and plot it.
 
 Configuration model: an organ is configured through its ``OrganInputData`` and
-then **built once** — construction snapshots the params and parses the vascular
+then **built once** - construction snapshots the params and parses the vascular
 geometry. So all tuning is applied to ``data`` *before* the organ is built, using
 ``data.set_value(...)`` for existing entries and ``data.params.append(...)`` for
 new tissue layers.
@@ -203,7 +203,7 @@ def main(show=True):
     maize_b73.set_value("inter_cellular_spaces", "tissue",
                    ["inner_cortex", "cortex", "outer_cortex"])
 
-    # -- Aerenchyma — lysigenous air spaces across the cortex (B73 only) ----
+    # -- Aerenchyma - lysigenous air spaces across the cortex (B73 only) ----
     # `tissue` accepts a list: the cortex sub-layers are treated as one
     # contiguous band (only its innermost ring is preserved). Runs at
     # generation time, before the inner/outer cortex are retagged to "cortex".

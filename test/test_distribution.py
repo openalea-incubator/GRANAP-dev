@@ -1,7 +1,7 @@
 """Size distributions (openalea.granap.distribution) and their wiring into the params.
 
 The default (no distribution, or 'normal') must reproduce the plain
-``rng.normal`` draw exactly — same values, same RNG consumption — because every
+``rng.normal`` draw exactly - same values, same RNG consumption - because every
 existing preset and golden census depends on it.  Every other family must be
 moment-matched to the (mean, sd) it is given.
 """

@@ -42,7 +42,7 @@ BASE_CAMBIUM = {
 
 scenarios = [
     {"label": "Diarch (2 peaks)",  "kwargs": {**BASE_KWARGS, "n_vascular_peak": 2}, "cambium": BASE_CAMBIUM},
-    {"label": "Tétrarch (4 peaks)", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4}, "cambium": BASE_CAMBIUM},
+    {"label": "Tetrarch (4 peaks)", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 4}, "cambium": BASE_CAMBIUM},
     {"label": "Heptarch (7 peaks)", "kwargs": {**BASE_KWARGS, "n_vascular_peak": 7}, "cambium": BASE_CAMBIUM},
     {"label": "Narrow peaks",
      "kwargs": {**BASE_KWARGS, "arc_valley_side": 0.05, "arc_peak_side": 0.05,

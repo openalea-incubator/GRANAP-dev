@@ -5,9 +5,9 @@ each owning a radial band (``radius_min`` .. ``radius_max`` mm from the centre)
 with its own ``n_bundles`` and placement.  Within its band a spec is laid out
 either:
 
-* ``random`` — bundles scattered through the annulus (kept non-overlapping and
+* ``random`` - bundles scattered through the annulus (kept non-overlapping and
   min-distance spaced, so they never clump); or
-* ``even``   — bundles equally spaced on a ring at the band midpoint radius
+* ``even``   - bundles equally spaced on a ring at the band midpoint radius
   (circumference / ``n_bundles`` apart), rotated by the spec's ``angle`` phase.
 
 The ``angle`` phase lets two close-radius ``even`` bands interleave: give the
@@ -16,10 +16,10 @@ between each of the inner band's.
 
 Three panels, left to right:
 
-1. **1 band** — a single random band filling the whole ground tissue (the
+1. **1 band** - a single random band filling the whole ground tissue (the
    default atactostele).
-2. **2 bands** — a random band near the centre + an ``even`` ring further out.
-3. **3 bands** — a random band at the centre + two ``even`` bands at nearly the
+2. **2 bands** - a random band near the centre + an ``even`` ring further out.
+3. **3 bands** - a random band at the centre + two ``even`` bands at nearly the
    same radius, half-step interleaved so their bundles alternate around the ring.
 
 Run as a script to see them side by side.
@@ -63,14 +63,14 @@ def _monocot_bands(bands):
 
 
 SCENARIOS = [
-    ("1 band — random (whole pith)", _monocot_bands([
+    ("1 band - random (whole pith)", _monocot_bands([
         dict(placement="random", n_bundles=16),          # radius_min/max = 0 -> full span
     ])),
-    ("2 bands — inner random + outer even ring", _monocot_bands([
+    ("2 bands - inner random + outer even ring", _monocot_bands([
         dict(placement="random", radius_min=0.0, radius_max=0.42, n_bundles=6),
         dict(placement="even",   radius=0.70, n_bundles=11),
     ])),
-    ("3 bands — random centre + two interleaved even rings", _monocot_bands([
+    ("3 bands - random centre + two interleaved even rings", _monocot_bands([
         dict(placement="random", radius_min=0.0, radius_max=0.40, n_bundles=5),
         # Two 'even' bands at nearly the same radius; the second is offset half a
         # step (180 / n_bundles = 20 deg) so its bundles sit between the first's.
@@ -100,7 +100,7 @@ def main(show=True):
             for txt in leg.get_texts():
                 txt.set_fontsize(6)
 
-    plt.suptitle("Monocot stem — radius-dependent vascular bundle bands "
+    plt.suptitle("Monocot stem - radius-dependent vascular bundle bands "
                  "(random / even / interleaved)", fontsize=15)
     plt.tight_layout()
     if show:

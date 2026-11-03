@@ -1,8 +1,8 @@
-"""Root developmental series (ROOT_SERIES_PLAN) — Phase 1: prescription plumbing.
+"""Root developmental series (ROOT_SERIES_PLAN) - Phase 1: prescription plumbing.
 
 Phase 1 = a persistent ``track_id`` on cells that survives the pipeline to the gdf,
 plus a RootAnatomy branch that places an *explicit* xylem vessel set (positions +
-radii + ids) instead of packing random ones — the mechanism the apex->collet series
+radii + ids) instead of packing random ones - the mechanism the apex->collet series
 is built on.
 """
 
@@ -24,7 +24,7 @@ def test_normal_root_has_track_id_column_all_null():
 
 def test_prescribed_vessels_land_where_told_and_stably():
     """Prescribed vessels appear as metaxylem cells at their positions, each carrying its
-    track_id through the whole pipeline to the gdf — and the same prescribed set gives the
+    track_id through the whole pipeline to the gdf - and the same prescribed set gives the
     same geometry twice, so identity is stable across sections of a series."""
     vessels = [(-0.06, 0.0, 0.03, 10), (0.06, 0.0, 0.025, 20), (0.0, 0.07, 0.02, 30)]
 
@@ -49,7 +49,7 @@ def test_prescribed_vessels_land_where_told_and_stably():
 
 
 # ---------------------------------------------------------------------------
-# Dicot developmental series (ROOT_SERIES_PLAN Phase 3) — primary growth.
+# Dicot developmental series (ROOT_SERIES_PLAN Phase 3) - primary growth.
 #
 # The pith is a central front that recedes from the apex toward the collet;
 # a vessel appears once the pith clears it (outer protoxylem first, inner
@@ -135,7 +135,7 @@ def test_dicot_series_generates_tracked_metaxylem():
 
 
 # ---------------------------------------------------------------------------
-# Monocot developmental series (ROOT_SERIES_PLAN Phase 1+2) — fusion / migration.
+# Monocot developmental series (ROOT_SERIES_PLAN Phase 1+2) - fusion / migration.
 #
 # Unit tests on the identity + placement machinery (``_active_vessels`` /
 # ``_migrated_vessels``), which is cheap: it never builds an anatomy.  One
@@ -152,7 +152,7 @@ def _series(**kw):
 
 
 def _fuse_2_to_1(length):
-    """2 fused metaxylem from 50 mm up, 1 below — a single fusion between the two."""
+    """2 fused metaxylem from 50 mm up, 1 below - a single fusion between the two."""
     return 2 if length >= 50.0 else 1
 
 
@@ -188,7 +188,7 @@ def test_vessel_count_follows_n_fused():
 
 
 def test_every_primordial_belongs_to_exactly_one_vessel():
-    """At any length the fused groups partition the primordials — none lost, none doubled."""
+    """At any length the fused groups partition the primordials - none lost, none doubled."""
     s = _series(n_fused=_fuse_2_to_1)
     for L in s.lengths:
         members = [m for v in s._active_vessels(L) for m in v["members"]]
@@ -350,7 +350,7 @@ def test_placement_does_not_depend_on_how_densely_you_sample():
 
 def test_migration_is_timed_from_the_event_not_from_the_series_start():
     """``migration_length`` is a distance measured from the fusion, so the survivor moves
-    linearly in depth over the 40 mm below it and arrives exactly there — not already
+    linearly in depth over the 40 mm below it and arrives exactly there - not already
     parked because the series happened to start further up, and not still drifting after."""
     s = RootSeries(OrganInputData.for_root(), seed=0,
                    lengths=[100.0, 75.0, 50.0, 40.0, 30.0, 20.0, 10.0, 0.0],

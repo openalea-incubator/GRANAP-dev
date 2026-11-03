@@ -12,7 +12,7 @@ This approach instead reuses the mature, fast 2D pipeline (``Organ.generate_cell
 as the sole source of cell geometry: generate ONE 2D cross-section, then build
 3D purely by stacking literal copies of each cell's real 2D polygon along Z at
 its own tissue-type height. No 3D Voronoi, no border-point clouds, no
-smoothing needed — extruded polygon prisms are watertight and flat-walled by
+smoothing needed - extruded polygon prisms are watertight and flat-walled by
 construction. Generic across organs (root/stem/leaf/needle): everything used
 here (``rng``, ``generate_layer_polygons()``, ``all_cells``,
 ``intercellular_spaces_params``, ``aerenchyma_params``) lives on the shared
@@ -20,17 +20,17 @@ here (``rng``, ``generate_layer_polygons()``, ``all_cells``,
 
 Axial row height
 ----------------
-Every cell type goes through the same extrusion loop — the only thing that
+Every cell type goes through the same extrusion loop - the only thing that
 differs per type is its axial "row height":
 
   - Ordinary tissue (epidermis, cortex, endodermis, pericycle, stele, ...):
-    its own axial height, repeated along Z — each repeat is a distinct output
+    its own axial height, repeated along Z - each repeat is a distinct output
     cell, with its OWN random Z-phase so neighbouring cells' row boundaries
     don't all land on the same plane (the "height shift inside the same tissue"
     that avoids a barcode-striped look without needing a new 2D tessellation
     per row).
-  - Axially continuous structures (vessels, sieve elements, and — in
-    ``aerenchyma_mode="before"`` — aerenchyma lacunae): row height = the whole
+  - Axially continuous structures (vessels, sieve elements, and - in
+    ``aerenchyma_mode="before"`` - aerenchyma lacunae): row height = the whole
     segment span, so each gets exactly one extrusion covering the full height,
     using its REAL 2D shape (not a synthetic circle), since the 2D vascular
     recipe already merges each vessel's border points into one true polygon in
@@ -38,12 +38,12 @@ differs per type is its axial "row height":
 
 The height of a cell is resolved per cell TYPE, first hit wins:
 
-  1. ``axial_heights[type]`` — so cells sharing one layer can differ (the stele
+  1. ``axial_heights[type]`` - so cells sharing one layer can differ (the stele
      layer holds stele parenchyma, protoxylem, metaxylem and phloem). Given for
      an axially continuous type, it cuts that type into elements in series
      (vessel elements joined by end walls) instead of one full-span prism.
   2. an axially continuous type: the whole segment (it does NOT take the height
-     of the layer it sits in — a vessel is not cut at the stele's cell height);
+     of the layer it sits in - a vessel is not cut at the stele's cell height);
   3. the layer's own ``axial_height`` parameter;
   4. ``default_axial_height``;
   5. ``DEFAULT_AXIAL_HEIGHT_RATIO * cell_diameter``.
@@ -55,14 +55,14 @@ linked back to the 2D walls and junctions (the 3D network).
 "No tissue above/behind a vessel" falls out for free: every extruded row
 reuses the SAME 2D cross-section, which already excludes vascular footprints
 from surrounding tissue (``Organ.generate_cells``' existing vascular-mask
-step) — no separate 3D masking code needed at all.
+step) - no separate 3D masking code needed at all.
 
 Air space: ordinary intercellular vs aerenchyma
 -----------------------------------------------
 These are two different things and are handled differently.
 
 *Ordinary* intercellular space (``Organ.add_intercellular``, driven by
-``intercellular_spaces_params``) is always disabled for the 3D build — at the
+``intercellular_spaces_params``) is always disabled for the 3D build - at the
 source, not generated then filtered. Small interstitial 2D wedges do not
 extrude into anything meaningful, and true 3D intercellular space is a
 separate, later piece of work.
@@ -73,17 +73,17 @@ separate, later piece of work.
 represent the schizogenous lacunae real aerenchyma is. Because the lacuna's
 3D form differs by organ, ``aerenchyma_mode`` selects when it is applied:
 
-  - ``"before"`` (default) — aerenchyma is built in 2D, then its cells are
+  - ``"before"`` (default) - aerenchyma is built in 2D, then its cells are
     extruded as ONE full-span prism each, giving continuous axial lacunae.
     This is the rice-root case: cortical aerenchyma really is a set of long
     uninterrupted channels running the length of the root, so the lacuna
     should be one big file rather than a stack of independent rows.
-  - ``"after"`` — aerenchyma is suppressed during the 2D pass and recreated on
+  - ``"after"`` - aerenchyma is suppressed during the 2D pass and recreated on
     the extruded stack instead, by retyping individual prisms to "air space".
     This is the leaf case: mesophyll air space is a distributed, lobed void
     network, not a set of axial channels, so converting per-prism after
     extrusion gives a much better representation than extruding a 2D lacuna.
-  - ``"none"`` — no aerenchyma at all.
+  - ``"none"`` - no aerenchyma at all.
 
 Note that ``"air space"`` in the 2D output does not *only* mean aerenchyma:
 leaf and needle also produce air space from substomatal chambers and the
@@ -121,7 +121,7 @@ AIR_SPACE_TYPE = "air space"
 AERENCHYMA_MODES = ("before", "after", "none")
 
 # Most non-vascular tissue is axially elongated in real anatomy, not
-# isotropic — when a tissue's own axial_height isn't explicitly configured,
+# isotropic - when a tissue's own axial_height isn't explicitly configured,
 # default it to this multiple of that tissue's own cell_diameter.
 DEFAULT_AXIAL_HEIGHT_RATIO = 5.0
 
@@ -159,7 +159,7 @@ def extrude_polygon(polygon: Polygon, z0: float, z1: float) -> Mesh:
     """A literal-copy prism: the polygon's exterior ring repeated at z0 and
     z1, connected by side quads, capped top and bottom by the polygon itself.
 
-    Holes (interior rings) are not handled — out of scope for ordinary tissue
+    Holes (interior rings) are not handled - out of scope for ordinary tissue
     cells at this stage. Face winding: bottom cap reversed / side quads / top
     cap in the ring's original order, so normals point outward.
     """
@@ -190,7 +190,7 @@ def _resolve_axial_height(cell_type: str, cell_diameter: float,
 
     First configured height wins: ``axial_heights[cell_type]``, the layer's own,
     the caller's default; then a full-span type spans the segment and any other
-    type takes a multiple of its diameter.  Explicit ``is not None`` checks — a
+    type takes a multiple of its diameter.  Explicit ``is not None`` checks - a
     configured height of 0 must not silently fall through."""
     if axial_heights and axial_heights.get(cell_type) is not None:
         return float(axial_heights[cell_type]), "axial_heights"
@@ -214,13 +214,13 @@ def _aerenchyma_tissues(organ) -> List[str]:
 def _apply_aerenchyma_after(cells: List[dict], organ, requested: float, rng) -> None:
     """Recreate aerenchyma on the extruded stack, in place.
 
-    Retypes whole prisms of the target tissue to "air space" — chosen at
-    random, by volume — until the requested air fraction of that tissue band
+    Retypes whole prisms of the target tissue to "air space" - chosen at
+    random, by volume - until the requested air fraction of that tissue band
     is reached. Mirrors ``Organ._measure_air_proportion``'s definition of the
     quantity (air / (air + tissue)), but in 3D volume rather than 2D area.
 
     Deliberately per-prism and independent: unlike the ``"before"`` path this
-    does NOT produce continuous axial channels, which is the point — leaf
+    does NOT produce continuous axial channels, which is the point - leaf
     mesophyll air space is a distributed void network, not a set of files.
     The voids are not connected to each other here; a lacuna-network model is
     a separate piece of work.

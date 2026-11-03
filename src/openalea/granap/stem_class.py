@@ -13,9 +13,9 @@ subclasses supply only the vascular layout.
 
 Botanical model (canonical textbook):
 
-* **Monocot stem** — an *atactostele*: vascular bundles scattered throughout the
+* **Monocot stem** - an *atactostele*: vascular bundles scattered throughout the
   ground tissue, no cambium (built by :class:`MonocotStemAnatomy`).
-* **Dicot stem** — a *eustele*: a ring of discrete collateral bundles (xylem
+* **Dicot stem** - a *eustele*: a ring of discrete collateral bundles (xylem
   inner, phloem outer, cambium between) around a central pith, with cortex and
   epidermis outside (built by :class:`DicotStemAnatomy`).
 
@@ -78,7 +78,7 @@ def _get_arrangement(input_data) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Base class — shared geometry, acts as factory via __new__
+# Base class - shared geometry, acts as factory via __new__
 # ---------------------------------------------------------------------------
 
 class StemAnatomy(Organ):
@@ -120,7 +120,7 @@ class StemAnatomy(Organ):
         return super().__new__(cls)
 
     # ------------------------------------------------------------------
-    # Initialisation — shared across both plant types
+    # Initialisation - shared across both plant types
     # ------------------------------------------------------------------
 
     def __init__(self, input_data=None, seed=None):
@@ -196,7 +196,7 @@ class StemAnatomy(Organ):
         Not needed by the stem subclasses: the bundle cell-level sizes are read
         straight from the raw ``xylem`` / ``phloem`` / ``cambium`` param dicts by
         :func:`vascular_bundle.build_bundle`, and the bundle *count* is the
-        ``vascular_bundle.n_bundles`` field — so there is a single source of truth
+        ``vascular_bundle.n_bundles`` field - so there is a single source of truth
         for each and nothing to pre-parse here.
         """
         pass
@@ -207,7 +207,7 @@ class StemAnatomy(Organ):
             self.layer_manager.add_layer(Layer.from_dict(param))
 
     # ------------------------------------------------------------------
-    # Geometry — shared
+    # Geometry - shared
     # ------------------------------------------------------------------
 
     def _create_base_shape(self) -> Polygon:
@@ -250,7 +250,7 @@ class StemAnatomy(Organ):
 
     def _pith_cell_diameter_at(self, r: float, r_pith: float) -> float:
         """Ground-tissue (pith) cell diameter at radius ``r`` mm from the organ
-        centre, evaluated from the same gradient the central rings use — so a
+        centre, evaluated from the same gradient the central rings use - so a
         bundle's outer sheath is sized against the ground cells it sits among."""
         r_norm = float(np.clip(r / r_pith, 0.0, 1.0)) if r_pith > 0 else 1.0
         return float(self._pith_diameter_fn()(r_norm))
@@ -260,7 +260,7 @@ class StemAnatomy(Organ):
         """Create pith parenchyma rings from the pith edge toward the centre.
 
         Identical machinery to the root centre (``stele``), but the cells are
-        tagged ``pith`` — the stem's central ground tissue.
+        tagged ``pith`` - the stem's central ground tissue.
         """
         central_layers = []
 
@@ -308,8 +308,8 @@ class StemAnatomy(Organ):
         The cavity is a *void*: no cells are placed in it, and its polygon is
         added to ``vascular_tissue_polygons`` so ``Organ.generate_cells`` clears
         any ground-tissue seed inside it (a clean hollow centre) and
-        ``plot_tissues`` draws it as empty.  Hooked here — not in
-        ``allocate_vascular_tissue`` — because the tissue-view dry run calls
+        ``plot_tissues`` draws it as empty.  Hooked here - not in
+        ``allocate_vascular_tissue`` - because the tissue-view dry run calls
         ``_create_vascular_tissue`` directly, so both paths register the cavity.
         """
         super()._create_vascular_tissue(polygon)
@@ -324,7 +324,7 @@ class StemAnatomy(Organ):
         The envelope goes in first (drawn underneath), then each sub-zone under
         its role key so ``plot_tissues`` shows the xylem / phloem / cambium /
         sclerenchyma arrangement.  Sub-zones are subsets of the envelope, so the
-        removal-mask union — hence the cell census — is unchanged by adding them.
+        removal-mask union - hence the cell census - is unchanged by adding them.
         """
         if res.envelope is not None and not res.envelope.is_empty:
             self.vascular_tissue_polygons.setdefault("bundle", []).append(res.envelope)
@@ -337,7 +337,7 @@ class StemAnatomy(Organ):
         """Add cortex air spaces, then tidy the hollow cavity + the lacunae.
 
         The pith itself is left exactly as the plain stele-style parenchyma (same
-        machinery as the root stele — no special central cell).  Run after the
+        machinery as the root stele - no special central cell).  Run after the
         normal intercellular/aerenchyma pass so it has the final say on the centre.
         """
         super().add_intercellular_spaces()
@@ -366,7 +366,7 @@ class StemAnatomy(Organ):
     def _finalize_pith_and_lacunae(self) -> None:
         """Post-Voronoi tidy-up of the pith centre and the protoxylem lacunae.
 
-        The solid pith is left untouched — plain stele-style parenchyma, like the
+        The solid pith is left untouched - plain stele-style parenchyma, like the
         root stele.  Two exceptions to that:
 
         * a hollow (fistular) pith: pith cells are clipped out of the medullary
@@ -395,8 +395,8 @@ class StemAnatomy(Organ):
 
         elif pith_cells and cavity is not None:
             # Hollow culm: clip cells out of the cavity so it stays a void.  Any
-            # type can spill in — pith cells bordering it, or a bundle's outer
-            # sheath cell whose Voronoi region balloons across the empty cavity —
+            # type can spill in - pith cells bordering it, or a bundle's outer
+            # sheath cell whose Voronoi region balloons across the empty cavity -
             # so clip by overlap, not by tissue type.
             kept = []
             for c in self.all_cells.cells:
@@ -430,7 +430,7 @@ class StemAnatomy(Organ):
         """The bundle footprint placed at ``(cx, cy)`` oriented radially at ``theta``.
 
         Reproduces exactly what :func:`vascular_bundle.build_bundle` sets as
-        ``res.envelope`` — but without seeding any cells — so a placement routine
+        ``res.envelope`` - but without seeding any cells - so a placement routine
         can test a *candidate* footprint for overlap before committing to it.
         ``ground_cell_size`` (the local pith cell size) grows the footprint by the
         outer bundle sheath, so overlap tests spend the same clearance the built
@@ -462,7 +462,7 @@ class StemAnatomy(Organ):
         The monocot atactostele places each spec's ``n_bundles`` within its own
         annulus, so bundle *kind* can vary with radius; with a single spec (the
         default) that one kind fills the whole ground tissue.  ``_get_param``
-        still returns just the first entry — this is the multi-spec view.
+        still returns just the first entry - this is the multi-spec view.
         """
         return sorted(
             (p for p in self.params if p["name"] == "vascular_bundle"),
@@ -475,7 +475,7 @@ class StemAnatomy(Organ):
 
         ``radius_max <= 0`` means the band runs out to the pith edge (the default
         ground tissue), so ``r_hi`` falls back to ``r_pith``.  An explicit
-        ``radius_max`` may reach *past* the pith into the cortex/rind — it is clamped
+        ``radius_max`` may reach *past* the pith into the cortex/rind - it is clamped
         only to ``r_section`` (the whole cross-section out to the epidermis) so a band
         can place bundles in any tissue.  ``r_section`` defaults to ``r_pith`` (the
         historical pith-only behaviour) when the caller does not supply it.
@@ -494,7 +494,7 @@ class StemAnatomy(Organ):
         self._invalidate_geometry()
 
     def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
-        """Region the vascular recipe operates within — the (outermost) pith ring.
+        """Region the vascular recipe operates within - the (outermost) pith ring.
 
         For the dicot eustele the bundles form a ring at this region's periphery;
         for the monocot atactostele they scatter across it.  Both subclasses key
@@ -502,7 +502,7 @@ class StemAnatomy(Organ):
         radius a full-span bundle band is capped to.
 
         A bundle band may reach *past* the pith into the cortex/rind, though (a
-        ``vascular_bundle`` spec whose ``radius_max`` exceeds the pith radius) — for
+        ``vascular_bundle`` spec whose ``radius_max`` exceeds the pith radius) - for
         that the whole cross-section (everything inside the epidermis) is stashed on
         ``self._vascular_section_polygon`` for the placement code to test against.
 
@@ -560,7 +560,7 @@ class StemAnatomy(Organ):
         return hit
 
     def _local_ground_cell_size(self, x: float, y: float, r_pith: float) -> float:
-        """Cell diameter of the tissue at ``(x, y)`` — the ground a bundle sits in.
+        """Cell diameter of the tissue at ``(x, y)`` - the ground a bundle sits in.
 
         Inside the pith this follows the pith gradient (as before); past the pith it
         is the cell size of the layer (cortex, hypodermis, ...) whose ring contains
@@ -579,7 +579,7 @@ class StemAnatomy(Organ):
         return self._vascular_layer_sizes[-1][1]
 
     def _local_ground_tissue_name(self, x: float, y: float, r_pith: float) -> str:
-        """Name of the tissue at ``(x, y)`` — the ground a bundle sheath cell sits in.
+        """Name of the tissue at ``(x, y)`` - the ground a bundle sheath cell sits in.
 
         The stem analogue of :meth:`_local_ground_cell_size`: inside the pith
         (r <= ``r_pith``) the ground tissue is the pith parenchyma (tagged
@@ -605,7 +605,7 @@ class StemAnatomy(Organ):
         Samples :meth:`_local_ground_cell_size` at ``k`` points just outside the
         bundle footprint (a ring of radius ~half its larger dimension) and returns
         the median.  Sizing the outer sheath and the removal mask from the
-        neighbouring cells — not only the tissue the bundle *centre* falls in —
+        neighbouring cells - not only the tissue the bundle *centre* falls in -
         keeps a bundle that straddles two tissues from reserving the coarse-tissue
         clearance everywhere: a small bundle in fine tissue no longer clears the
         space a coarse-celled centre would demand, so it stops crowding out its

@@ -135,7 +135,7 @@ def test_inward_cap_fibres_sit_inner():
 
 def test_caps_are_asymmetric_and_scale_with_count():
     # 4 outward vs 2 inward layers: both poles seed fibres, and the footprint
-    # (removal mask) extends farther out than in — depth scales with the count.
+    # (removal mask) extends farther out than in - depth scales with the count.
     cells, res = _build(sheath="none", n_caps_layers_outward=4, n_caps_layers_inward=2)
     fib = [c for c in cells.cells if c.type == "sclerenchyma"]
     assert any(c.x > CX for c in fib) and any(c.x < CX for c in fib), "both poles must be capped"

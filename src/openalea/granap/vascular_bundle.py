@@ -2,8 +2,8 @@
 
 A vascular bundle is built as three things:
 
-1. an **envelope** — an oriented footprint at ``(cx, cy)`` with radial orientation ``theta`` (local +y = radial, pointing toward the organ surface);
-2. an **internal partition** into tissue sub-zones — *the bundle type is the topology of this partition*;
+1. an **envelope** - an oriented footprint at ``(cx, cy)`` with radial orientation ``theta`` (local +y = radial, pointing toward the organ surface);
+2. an **internal partition** into tissue sub-zones - *the bundle type is the topology of this partition*;
 3. a **per-zone fill** with the right cell type via the existing ``fill_*`` primitives.
 
 Two partition families cover the four botanical types:
@@ -16,10 +16,10 @@ Two partition families cover the four botanical types:
 The monocot xylem "face" (``xylem_layout="face"``) is a bespoke fill over the
 whole bundle region: metaxylem vessel(s) at the radial middle, a protoxylem
 bundle (+ optional lacuna void) in the inner half, and the phloem cluster in the
-outer half — all positioned relative to the bundle centre.  Metaxylem and
+outer half - all positioned relative to the bundle centre.  Metaxylem and
 protoxylem are both tagged ``xylem`` (no distinction).
 
-Placement (how many bundles and where — a eustele ring vs a scattered
+Placement (how many bundles and where - a eustele ring vs a scattered
 atactostele) is the caller's job; this module builds one bundle at a time.
 
 Convention for cavities (protoxylem lacuna, and the pith cavity elsewhere): a
@@ -51,7 +51,7 @@ class BundleResult:
     envelope: Optional[Polygon] = None          # whole footprint -> removal mask
     vessel_polygons: List[Polygon] = field(default_factory=list)   # xylem vessels
     cavity_polygons: List[Polygon] = field(default_factory=list)   # lacuna voids
-    # (role, region) per filled sub-zone — for the tissue-polygon view. Each is a
+    # (role, region) per filled sub-zone - for the tissue-polygon view. Each is a
     # subset of the envelope, so registering them never enlarges the removal mask.
     zone_polygons: List[Tuple[str, Polygon]] = field(default_factory=list)
 
@@ -146,11 +146,11 @@ def outer_sheath_mask_pad(bp: dict, ground_cell_size: Optional[float]) -> float:
 
     The real outer bundle sheath is grown cell by cell against the local tissue
     (see :func:`_grow_bundle_sheath`) and its exact reach isn't known until the
-    bundle is built, so placement/overlap tests reserve a fixed, modest pad —
-    about one local tissue cell — around the footprint.  This keeps bundles a
+    bundle is built, so placement/overlap tests reserve a fixed, modest pad -
+    about one local tissue cell - around the footprint.  This keeps bundles a
     tissue-cell apart without the old mean-sized ring's over-reservation.  ``0``
     when the outer sheath is off.  ``ground_cell_size`` may be a scalar (a callable
-    is treated as off here — placement passes the local scalar explicitly).
+    is treated as off here - placement passes the local scalar explicitly).
     """
     if not bp.get("outer_sheath", True):
         return 0.0
@@ -166,7 +166,7 @@ _SHEATH_MIN_RATIO = 4.0
 
 def _place_ring(cells: CellManager, pcx: float, pcy: float, r_draw: float,
                 tag: str, angle_center, n_border: int = 12) -> None:
-    """Seed one round cell as a ring of ``n_border`` (>= 8) border points — one
+    """Seed one round cell as a ring of ``n_border`` (>= 8) border points - one
     Voronoi group.  Analytic (no shapely buffering), so it is cheap for the many
     small cells of a bundle sheath while still reading as a circle."""
     if r_draw <= 0:
@@ -182,18 +182,18 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
                         ground_cell_size, outline, cx: float, cy: float,
                         env=None, ground_tissue_name=None) -> Polygon:
     """Place a single outer bundle-sheath ring and return the removal mask
-    (footprint ∪ placed sheath cells, clipped to ``outline``).
+    (footprint union placed sheath cells, clipped to ``outline``).
 
     One cell thick, sized *per position* to smooth the size jump between the bundle
     and the tissue it sits in.  For each position around the footprint, ``x`` is the
-    bundle's outer cell there — the fibre ``sclerenchyma_cell_diameter`` where the
+    bundle's outer cell there - the fibre ``sclerenchyma_cell_diameter`` where the
     boundary point sits on a fibre cap (outside the envelope ``env``), else the
-    ``parenchyma_diameter`` — and ``y`` is the tissue cell size at that cell's own
+    ``parenchyma_diameter`` - and ``y`` is the tissue cell size at that cell's own
     location (``ground_cell_size(x, y)``):
 
     * if ``max(x, y) / min(x, y) <= _SHEATH_MIN_RATIO`` the neighbours already match
-      — place nothing there;
-    * otherwise place one cell of size ``sqrt(x * y)`` — the *geometric* mean, so the
+      - place nothing there;
+    * otherwise place one cell of size ``sqrt(x * y)`` - the *geometric* mean, so the
       size ratio to each neighbour is the same ``sqrt(y / x)`` (a balanced step,
       unlike the arithmetic mean which skews toward the coarser cell).
 
@@ -201,7 +201,7 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     against them, so the edge fibres have a neighbour to bound their Voronoi region
     instead of stretching across an empty band into the (coarser) parenchyma-sized
     sheath.  Cells are spaced ~their own size tangentially, so a coarse-tissue side
-    carries a few large sheath cells and a fine side many small ones — the ring is
+    carries a few large sheath cells and a fine side many small ones - the ring is
     asymmetric.  Positions outside ``outline`` (the organ's last layer polygon) are
     skipped, so the sheath never leaves the stem.
 
@@ -226,7 +226,7 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     # along it placing cells.  The resolution is tied to the smallest cell that can
     # appear (a fibre), not the coarser parenchyma: a grid tied to the coarse cell
     # cannot reach the tight spacing a fine-tissue side needs, so the spacing floors
-    # out and reads as uniform everywhere — the very thing to avoid here.
+    # out and reads as uniform everywhere - the very thing to avoid here.
     ring = foot.exterior
     step_ref = max(0.25 * min(parench, fibre), 1e-4)
     n = max(16, int(np.ceil(ring.length / step_ref)))
@@ -236,7 +236,7 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
     m = len(pts)
 
     # Walk the boundary accumulating *arc length* since the last placed cell and drop
-    # the next cell once that arc reaches this cell's own diameter — each cell reserves
+    # the next cell once that arc reaches this cell's own diameter - each cell reserves
     # a gap equal to its own size, so a big cell (coarse tissue) leaves a wide gap and a
     # small cell (fine tissue) a tight one, sized and spaced from its own local tissue
     # rather than blended with its neighbour.  The target is recomputed at every step
@@ -290,7 +290,7 @@ def _grow_bundle_sheath(cells: CellManager, foot: Polygon, bp: dict,
 
 
 # ---------------------------------------------------------------------------
-# Layout — the topology per bundle type
+# Layout - the topology per bundle type
 # ---------------------------------------------------------------------------
 
 def bundle_layout(bp: dict):
@@ -426,8 +426,8 @@ def _place_companions(cells, rng, zone, sieve_centers, comp_d, comp_w, voronoi_g
 
     Mirrors the dicot-root secondary phloem: a companion is tried on random sides
     of its sieve and kept on the first free one, so every sieve element is paired.
-    Each companion is an oriented cell — radial extent ``comp_d`` x tangential
-    extent ``comp_w`` — aligned with the radial direction at its location.
+    Each companion is an oriented cell - radial extent ``comp_d`` x tangential
+    extent ``comp_w`` - aligned with the radial direction at its location.
     """
     zone = _largest(zone)
     if zone is None or not sieve_centers:
@@ -506,7 +506,7 @@ def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
     evenly-spaced tangential offset, overshooting the zone radially so it cuts all
     the way across.  ``jitter`` (0 = a rigid grid) perturbs each strip's tangential
     position and angle a little so the files don't read as mechanical rows.  Built
-    *before* the vessels — the medullar-ray idea — so the vessel packer fills the
+    *before* the vessels - the medullar-ray idea - so the vessel packer fills the
     compartments between them instead of one open blob.
     """
     if n_files <= 1:
@@ -526,8 +526,8 @@ def _xylem_file_strips(zone, theta, n_files, half_width, rng, jitter):
         center = np.array([gx, gy]) + tang * t
         strip = LineString([tuple(center - d * reach), tuple(center + d * reach)]).buffer(
             half_width, cap_style=2)
-        # Keep the strip *unclipped*.  It is a cutter — the caller does
-        # ``zone.difference(unary_union(strips))`` — and clipping it to ``zone``
+        # Keep the strip *unclipped*.  It is a cutter - the caller does
+        # ``zone.difference(unary_union(strips))`` - and clipping it to ``zone``
         # first lands its end caps exactly on the zone boundary, so whether the
         # strip severs the zone becomes a collinear-boundary question GEOS
         # resolves at the last bit.  Unclipped the cutter runs clear through the
@@ -544,7 +544,7 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
 
     Thin radial parenchyma strips are placed *before* the vessels and cut the xylem
     zone into ``n_xylem_files`` tangential compartments.  Each compartment is packed
-    with size-graded vessels referenced to the organ centre and graded **endarch** —
+    with size-graded vessels referenced to the organ centre and graded **endarch** -
     small protoxylem at the inner (pith) tip, large metaxylem toward the cambium.
     Parenchyma then fills the strips and the space around the vessels, so the
     vessels sit in natural rows separated by parenchyma instead of one dense clump
@@ -604,10 +604,10 @@ def _fill_xylem_files(cells, rng, zone, cx, cy, theta, xylem, bp, result) -> Non
 def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> None:
     """The monocot 'face' bundle, arranged about the bundle centre along +radial.
 
-    * **metaxylem** — ``n_metaxylem`` single vessels at the radial *middle*
+    * **metaxylem** - ``n_metaxylem`` single vessels at the radial *middle*
       (placed first), spread tangentially; each sized ``metaxylem_diameter`` (+-
       ``_sd``, clipped to ``_diameter_min``) and tagged ``xylem``;
-    * **protoxylem** — ``n_protoxylem`` small bundle region(s) in the *inner*
+    * **protoxylem** - ``n_protoxylem`` small bundle region(s) in the *inner*
       (centre-facing) half at ``protoxylem_relative_distance``, each an ellipse
       (``protoxylem_width`` x ``protoxylem_height``) packed with protoxylem
       vessels, also tagged ``xylem``;
@@ -646,7 +646,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
 
     placed_polys, occupied = [], []
 
-    # 1) Metaxylem — single vessel(s) at the radial middle, spread tangentially.
+    # 1) Metaxylem - single vessel(s) at the radial middle, spread tangentially.
     dm = float(bp.get("metaxylem_diameter", 0.04))
     dm_sd = float(bp.get("metaxylem_diameter_sd", 0.003))
     dm_min = float(bp.get("metaxylem_diameter_min", dm * 0.5))
@@ -698,7 +698,7 @@ def _fill_xylem_face(cells, rng, zone, cx, cy, theta, bp, phloem, result) -> Non
                 gradient_function="normal",
             )
             if not vessels:
-                # Region too small for the packer to fit a vessel — a small
+                # Region too small for the packer to fit a vessel - a small
                 # protoxylem bundle is still a bundle: seed one vessel on its
                 # inscribed circle so it always renders.
                 ix, iy, ir = GeometryProcessor.get_inscribed_circle(region)
@@ -754,7 +754,7 @@ def _place_phloem_cells(cells, rng, sieve_zone, cx, cy, phloem, bp):
     """Pack sieve elements + a companion cell beside each into ``sieve_zone``.
 
     Returns the union of their footprints (or None) so the caller can fill
-    parenchyma around them.  This is the phloem *cluster* — sieve elements +
+    parenchyma around them.  This is the phloem *cluster* - sieve elements +
     companion cells; the parenchyma is a separate fill.
     """
     p_diam = bp.get("parenchyma_diameter", 0.012)
@@ -898,29 +898,29 @@ def _outward_caps(env_local: Polygon, bp: dict):
 
     A cap is ``n_layers`` concentric fibre **files** hugging one pole.  File ``i``
     (``i = 0 .. n-1``) is the pole-side arc of the envelope buffered outward by
-    ``i × sclerenchyma_cell_diameter``: file 0 sits *on* the envelope edge (so the
-    fibres abut the bundle's own tissue — no gap), and each further file stacks one
+    ``i x sclerenchyma_cell_diameter``: file 0 sits *on* the envelope edge (so the
+    fibres abut the bundle's own tissue - no gap), and each further file stacks one
     cell outward.  The outward pole is the ``+y`` (surface-facing) hemisphere, the
-    inward pole the ``−y`` (centre-facing) hemisphere (``env_local`` is centred at
+    inward pole the ``-y`` (centre-facing) hemisphere (``env_local`` is centred at
     the origin, radial axis +y).  Tracing files (rather than ring-filling a tapering
     crescent) keeps every fibre bounded by its neighbours, so cells stay round and no
-    gaps open — and a single-layer cap still renders one clean file.
+    gaps open - and a single-layer cap still renders one clean file.
 
     ``n_caps_layers_outward`` / ``n_caps_layers_inward`` set the per-pole layer count;
-    independent counts give the asymmetry.  Both default 0 → no caps.
+    independent counts give the asymmetry.  Both default 0 -> no caps.
 
     ``n_caps_layers_outward_flank`` tapers the outward cap: the layer count falls
     linearly with the angle around the envelope centre, from
     ``n_caps_layers_outward`` over the pole (90°) to this many at the flanks (0°).
     Each file beyond the flank count is clipped to the sector where it is still
     present (:func:`_cap_layer_threshold`), so the outer files shorten one by one
-    toward the sides.  Unset (``None``), the cap is uniform — exactly the untapered
+    toward the sides.  Unset (``None``), the cap is uniform - exactly the untapered
     geometry.  The inward cap is always uniform.
 
     Returns ``(files, region)``: ``files`` a list of ``(file_line, cell_diameter,
     cell_width)`` (innermost first) that the fibres are seeded along, and ``region``
-    the clean contour-following cap polygon(s) — the envelope grown outward by each
-    layer over the angles that layer covers — so the caller can unify it with the
+    the clean contour-following cap polygon(s) - the envelope grown outward by each
+    layer over the angles that layer covers - so the caller can unify it with the
     envelope for the bundle-sheath wrap / removal mask.  ``region`` is ``None`` when
     there are no caps.
     """
@@ -934,8 +934,8 @@ def _outward_caps(env_local: Polygon, bp: dict):
     span = max(maxx - minx, maxy - miny) + (max(n_out, n_in) + 1) * scl + 1.0
 
     files, regions = [], []
-    # (pole layer count, flank layer count, hemisphere the pole occupies) — +y
-    # outward (optionally tapered), −y inward (uniform).
+    # (pole layer count, flank layer count, hemisphere the pole occupies) - +y
+    # outward (optionally tapered), -y inward (uniform).
     poles = []
     if n_out > 0:
         poles.append((n_out, n_out_flank, box(minx - span, 0.0, maxx + span, maxy + span)))
@@ -976,8 +976,8 @@ def bundle_cambium_anchor(bp: dict) -> float:
     default; anchoring on this value instead puts the bundle's **cambium** on the
     curve, so every fascicular cambium lines up into one continuous ring (the
     contour that becomes the secondary-growth vascular cambium).  Returns 0.0 when
-    the bundle carries no cambium band — a concentric bundle, or ``has_cambium``
-    False — so an un-anchored bundle stays centred on the curve as before.
+    the bundle carries no cambium band - a concentric bundle, or ``has_cambium``
+    False - so an un-anchored bundle stays centred on the curve as before.
     """
     env = _local_envelope(bp["width"], bp["height"], bp.get("shape", "ellipse"),
                           focus_exponent=bp.get("focus_exponent", 4.0),
@@ -997,7 +997,7 @@ def _anchor_shift(geoms, anchor: float):
     """Translate local-frame geometries by ``-anchor`` along +y (radial).
 
     Applied before :meth:`GeometryProcessor.place_local` so the local point
-    ``(0, anchor)`` — the cambium band centre — lands on the placement point.
+    ``(0, anchor)`` - the cambium band centre - lands on the placement point.
     """
     if not anchor:
         return geoms
@@ -1016,9 +1016,9 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
 
     ``bp`` is the ``vascular_bundle`` param dict; ``xylem``/``phloem``/``cambium``
     are the reused cell-level param dicts.  Each tissue zone is filled with its
-    proper component cells — vessels + xylem parenchyma; sieve elements +
+    proper component cells - vessels + xylem parenchyma; sieve elements +
     companion cells + phloem parenchyma; cambium; a sclerenchyma or parenchyma
-    bundle sheath — so no cell is tagged with a bare tissue name.  Cells are
+    bundle sheath - so no cell is tagged with a bare tissue name.  Cells are
     appended to ``cells`` (disjoint Voronoi-group ids).  Returns a
     :class:`BundleResult` (envelope for the mask, vessel + cavity + zone polygons).
 
@@ -1026,24 +1026,24 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     the organ knows) turns on an *outer bundle sheath*: one extra file of
     ``bundle sheath`` cells wrapping the whole bundle, sized at the mean of the
     inner sheath cell and that ground cell (see :func:`outer_sheath_ring_diameter`).
-    It sits just outside the envelope, so the returned envelope — hence the removal
-    mask — grows to cover it.  Left ``None`` (the organ-agnostic default), no outer
+    It sits just outside the envelope, so the returned envelope - hence the removal
+    mask - grows to cover it.  Left ``None`` (the organ-agnostic default), no outer
     sheath is added and the bundle is unchanged.
 
     ``ground_tissue_name`` (a callable ``f(x, y) -> tissue name``, again organ-only
-    knowledge) names each outer-sheath cell after the tissue it is fitted into — the
-    majority tissue over the cell's footprint — instead of the generic
+    knowledge) names each outer-sheath cell after the tissue it is fitted into - the
+    majority tissue over the cell's footprint - instead of the generic
     ``bundle sheath`` tag; left ``None`` the cells stay ``bundle sheath``.
 
     ``anchor`` (local +y, radial) shifts the whole bundle so that the local point
     ``(0, anchor)`` lands on ``(cx, cy)`` instead of the envelope centre.  Passing
-    :func:`bundle_cambium_anchor` puts the bundle's cambium — not its centre — on
+    :func:`bundle_cambium_anchor` puts the bundle's cambium - not its centre - on
     the placement point, so a ring of bundles shares one cambium contour (default
     0.0 keeps the envelope centred, as before).
 
     ``fill_cambium`` False leaves the cambium band *unfilled* (the zone is still
     partitioned and registered, so xylem and phloem stay separated by the gap): the
-    caller then lays the cambium down itself — e.g. the dicot stem draws the
+    caller then lays the cambium down itself - e.g. the dicot stem draws the
     fascicular and interfascicular cambium in one pass along a shared contour so
     they share the same number of cell files.
     """
@@ -1067,7 +1067,7 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
     mode, spec = bundle_layout(bp)
     is_face = mode == "banded" and bp.get("xylem_layout", "packed") == "face"
     if is_face:
-        # Monocot face bundle: the whole envelope is one region — metaxylem,
+        # Monocot face bundle: the whole envelope is one region - metaxylem,
         # protoxylem+lacunae and the phloem ellipse are placed explicitly inside it
         # (so the phloem's relative distance spans the bundle, not a thin band).
         zones_local = [("xylem", working)]
@@ -1078,7 +1078,7 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
         zones_local = partition_concentric(working, core_role, ring_role,
                                            bp.get("core_width", 0.05), bp.get("core_height", 0.05))
 
-    # Footprint (envelope + fibre caps) and the bare envelope in the world frame —
+    # Footprint (envelope + fibre caps) and the bare envelope in the world frame -
     # the outer bundle sheath is grown against the local tissue from the footprint at
     # the end of the build; the envelope tells it which boundary points sit on caps.
     foot_world, env_world = GeometryProcessor.place_local(
@@ -1151,7 +1151,7 @@ def build_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float,
 
 
 # ---------------------------------------------------------------------------
-# Arc bundle — a pie slice of a continuous vascular cylinder
+# Arc bundle - a pie slice of a continuous vascular cylinder
 # ---------------------------------------------------------------------------
 
 def _radius_range(zone: Polygon, ox: float, oy: float) -> Tuple[float, float]:
@@ -1169,9 +1169,9 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
                      bp: dict, xylem: dict, phloem: dict, cambium: dict,
                      ground_cell_size=None, sheath_outline=None,
                      ground_tissue_name=None) -> BundleResult:
-    """Build one vein as a **slice of a vascular cylinder** — concentric xylem /
+    """Build one vein as a **slice of a vascular cylinder** - concentric xylem /
     cambium / phloem *arcs* spanning ``arc_degrees`` of a circle of radius
-    ``arc_radius`` — the continuous dicot-stem cylinder kept to one pie slice.
+    ``arc_radius`` - the continuous dicot-stem cylinder kept to one pie slice.
 
     The slice is oriented like every other leaf vein: ``theta`` points to the abaxial
     (lower) surface, so the curvature centre sits on the adaxial side and the arcs run,
@@ -1185,7 +1185,7 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
 
     An optional fourth arc, ``arc_sclerenchyma_thickness`` thick, is laid just
     outside the phloem over the same span and ring-filled with ``sclerenchyma``
-    fibres (``arc_sclerenchyma_cell_diameter`` / ``_width``) — the fibre sheath
+    fibres (``arc_sclerenchyma_cell_diameter`` / ``_width``) - the fibre sheath
     capping the phloem of a major vein.  It is part of the vein for centring and
     for the envelope, so the surrounding mesophyll is cleared for it.
 
@@ -1227,8 +1227,8 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
         return (ox, oy, b0, b1, xa.intersection(wdg), pa.intersection(wdg),
                 ca.intersection(wdg), sa.intersection(wdg))
 
-    # Anchoring the arc by its abaxial (cambium-bottom) edge puts the whole bundle —
-    # its thick xylem especially — above the placement point, pushing the vein into the
+    # Anchoring the arc by its abaxial (cambium-bottom) edge puts the whole bundle -
+    # its thick xylem especially - above the placement point, pushing the vein into the
     # top (adaxial) side of the leaf.  Instead, build the (unclipped) bundle once, then
     # slide it along the radial axis so its centre of mass lands on (cx, cy): the vein
     # is then vertically centred on its placement point regardless of the arc span or
@@ -1327,7 +1327,7 @@ def build_arc_bundle(cells: CellManager, rng, cx: float, cy: float, theta: float
     # --- phloem: sieve + companion cells, parenchyma around them --------------
     # Packed in angular sectors: pack_circles is superlinear in the cell count, so a
     # wide arc packed as one region is far slower than the same cells packed
-    # sector-by-sector.  The seams are invisible — filled by the parenchyma pass.
+    # sector-by-sector.  The seams are invisible - filled by the parenchyma pass.
     if phloem_zone is not None and not phloem_zone.is_empty:
         ph_arc = (r0 + half_cam + pt) * span
         sieve_d = float(phloem.get("sieve_diameter", 0.012))
