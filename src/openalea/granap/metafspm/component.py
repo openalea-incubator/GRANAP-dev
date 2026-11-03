@@ -142,6 +142,21 @@ def _segments(g, plant, labels_handled=("RootSegment",), kind=None):
     return [v for v in candidates if kind(g, v) in labels_handled]
 
 
+def _basal_with_anatomy(g, elements, anatomy_class):
+    """The basal element of an organ's *elements* among those with an anatomy (*anatomy_class*'s): none of its
+    ancestors within the organ has one (an element without one, e.g. not grown yet, holds no Compartment)."""
+    inside = set(elements)
+    with_anatomy = [e for e in elements if e in anatomy_class] or elements
+    owned = set(with_anatomy)
+    for element in with_anatomy:
+        parent = g.parent(element)
+        while parent in inside and parent not in owned:
+            parent = g.parent(parent)
+        if parent not in inside:
+            return element
+    return with_anatomy[0]
+
+
 def distance_from_junction(g, segment, length="length") -> float:
     """The length of the segments from *segment* up to the root-shoot junction (its own length excluded)."""
     lengths, total = g.property(length), 0.
@@ -713,17 +728,24 @@ class GranapAnatomy(StructuralComponent):
         cls.update_leaf_surfaces(g, segments)
 
     @classmethod
-    def update_anatomies(cls, g, segments) -> dict:
+    def update_anatomies(cls, g, segments, lengths=None) -> dict:
         """
         Give each segment the anatomy of its current class (Q12): a segment without one (just emerged) gets its
         class's copy; a segment whose class changed has its anatomy replaced. Returns {"emerged", "replaced"}.
+        A segment without length (an Adel internode or sheath before it grows: 0, or none given) gets none until it
+        has one: it is a pass-through meanwhile, as a hidden element, the junctions spanning it (a section of zero
+        height would have no radial conductance, its nodes cut off from the network). *lengths*: {segment: length},
+        by default the MPG's property.
         """
         anatomy_class = g.properties().setdefault("anatomy_class", {})
         template_of = g.properties().setdefault("anatomy_template", {})
+        lengths = g.property("length") if lengths is None else lengths
         done = {"emerged": [], "replaced": []}
         for segment in segments:
-            key = cls.segment_class(g, segment)
             current = anatomy_class.get(segment)
+            if current is None and not float(lengths.get(segment, 0.) or 0.) > 0.:
+                continue
+            key = cls.segment_class(g, segment)
             if current == key:
                 continue
             if current is not None:
@@ -759,9 +781,10 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def update_leaf_surfaces(cls, g, segments) -> None:
         """
-        The leaf organs of *segments* get (again) their surface: one Compartment of kind 3 (tissue
-        "leaf surface"), owned by the organ's basal leaf element, and one Connection (network_path 6) from every
-        stomatal pore of each of the organ's sections to it, anchored to the pore's section. The pores get their
+        The leaf organs of *segments* get (again) their surface: one Compartment of kind 3 (tissue "leaf surface"),
+        owned by the organ's basal leaf element with an anatomy (one without, e.g. not grown yet, owns none), and one
+        Connection (network_path 6) from every stomatal pore of each of the organ's sections to it, anchored to the
+        pore's section. The pores get their
         aperture's width and depth (pore_width, pore_depth: the short and long sides of their polygon's minimum
         rotated rectangle). The organ's previous surface and stomatal Connections are removed first, so that none
         dangles when a section was replaced.
@@ -773,6 +796,7 @@ class GranapAnatomy(StructuralComponent):
         if not organs:
             return
         surfaces = g.properties().setdefault("leaf_surface", {})
+        anatomy_class = g.properties().get("anatomy_class", {})
         path, tissue = g.view("network_path"), g.view("tissue")
         template_row = g.view("template_row")
         for organ in organs:
@@ -787,8 +811,7 @@ class GranapAnatomy(StructuralComponent):
             pores = {e: [int(c) for c in _protoplasts(g, e) if tissue.get(c) == "pore"] for e in elements}
             if not any(pores.values()):
                 continue
-            inside = set(elements)
-            basal = next((e for e in elements if g.parent(e) not in inside), elements[0])
+            basal = _basal_with_anatomy(g, elements, anatomy_class)
             surface = g.add_components_bulk(s.anchors[s.Compartment], 1, topo_parents=[basal], **_build_props(
                 s.Compartment, label=L.Compartment.Apoplastic, kind=float(LEAF_SURFACE)))[0]
             g.set_values("tissue", [surface], ["leaf surface"])
@@ -848,28 +871,33 @@ class GranapAnatomy(StructuralComponent):
         anatomy_class = g.properties().get("anatomy_class", {})
         for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
             del anatomy_class[gone]
-        done = self.update_anatomies(g, segments)
+        done = self.update_anatomies(g, segments, _suborgan_lengths(self.data_structure))
         self.update_leaf_surfaces(g, done["emerged"] + done["replaced"])
-        self._wire_pass_through(done["replaced"])
+        self._wire_pass_through(done["emerged"] + done["replaced"])
         template_of = g.properties()["anatomy_template"]
         for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
             template_of.setdefault(int(segment), -1.)
         self.data_structure.inheritance.fresh = set(done["replaced"])
         self.last_update = done
 
-    def _wire_pass_through(self, replaced) -> None:
+    def _wire_pass_through(self, sections) -> None:
         """
-        The pass-through junctions of the *replaced* anatomies: those from each to its nearest descendants with an
-        anatomy across SubOrgans without one. The DataStructure rewires a replaced section's children only, not these
-        descendants (their linked parent, without anatomy, unchanged): they are wired here, with the DataStructure's
-        wiring rules, before its rewiring removes their old junctions (on the replaced Compartments).
+        The pass-through junctions of the *sections* given an anatomy (emerged, replaced): those from each to its
+        nearest descendants with an anatomy across SubOrgans without one. The DataStructure rewires a section's
+        children only, not these descendants (their linked parent, without anatomy, unchanged): their upstream
+        junctions (to the ancestor they had, an emerged section having been a pass-through) are removed and wired
+        again here, with the DataStructure's wiring rules.
         """
         rules = getattr(self.data_structure, "_wiring", None)
-        if not replaced or not rules:
+        if not sections or not rules:
             return
         g = self.mtg
-        descendants = anatomy_descendants(g, replaced)
+        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        descendants = anatomy_descendants(g, sections, owners)
         if descendants:
+            heads = {int(c) for v in descendants for c in owners.get(v, [])}
+            n_id_b = g.property("n_id_b")
+            g.remove_connections([int(e) for e in g.junction_vids() if int(n_id_b[e]) in heads])
             g.wire_junctions(g.scales.SubOrgan, rules, children=descendants)
 
     def _pass_through_spans(self, network_path) -> tuple:

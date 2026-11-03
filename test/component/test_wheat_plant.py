@@ -43,6 +43,8 @@ class WheatSeedling(SegmentArchitecture):
     HiddenElement, then two LeafElements, on the sheath's), a seminal root of two segments on the seed and a nodal
     root of one on the crown's StemElement. The plant's elements by role in the property "role". Its segments'
     variables (SegmentArchitecture's: their length among them) held at the SubOrgans, the hidden elements' too."""
+    sheath_length = ELEMENT                        # the sheath's StemElement's
+    leaf_lengths = (ELEMENT, ELEMENT)              # the blade's LeafElements'
 
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
@@ -60,10 +62,10 @@ class WheatSeedling(SegmentArchitecture):
         (crown,) = _following(g, internode, L.StemElement, [ELEMENT], internode_hidden)
         sheath = organ("Sheath")
         (sheath_hidden,) = _following(g, sheath, L.HiddenElement, [HIDDEN], crown, edge="+")
-        (sheath_element,) = _following(g, sheath, L.StemElement, [ELEMENT], sheath_hidden)
+        (sheath_element,) = _following(g, sheath, L.StemElement, [cls.sheath_length], sheath_hidden)
         blade = organ("Blade")
         (blade_hidden,) = _following(g, blade, L.HiddenElement, [HIDDEN], sheath_element)
-        leaf = _following(g, blade, L.LeafElement, [ELEMENT, ELEMENT], blade_hidden)
+        leaf = _following(g, blade, L.LeafElement, list(cls.leaf_lengths), blade_hidden)
         seminal = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
                                 [(ROOT_RADIUS, ELEMENT, ELEMENT), (ROOT_RADIUS, ELEMENT, 0.)], bearer=seed)
         nodal = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
@@ -232,3 +234,77 @@ def test_a_replaced_ancestor_is_joined_again_across_the_hidden_elements():
     assert across.any() and np.allclose(edge_length[across], (0.5 * (ELEMENT + ELEMENT) + HIDDEN) * 1e3)
     anatomy()                                                                    # a step more: kept
     assert np.allclose(ds.get("edge_length")[across], (0.5 * (ELEMENT + ELEMENT) + HIDDEN) * 1e3)
+
+
+class UngrownSheathSeedling(WheatSeedling):
+    """The seedling, its sheath's StemElement not grown yet (length 0, as Adel's before it elongates)."""
+    sheath_length = 0.
+
+
+def test_a_section_without_length_gets_its_anatomy_when_it_grows():
+    """A section of zero length has no anatomy (its section would have no radial conductance): a pass-through, the
+    junctions spanning it, as a hidden element. Once it has a length, it gets its anatomy, joined to its nearest
+    ancestor and descendant with one; the junctions across it are gone; the conduits stay one network."""
+    Choregrapher().set_simulation_time_step(3600.)
+    table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
+    ds = initiated(table, UngrownSheathSeedling, GranapAnatomy).data_structure
+    g = ds.structure
+    plant = int(ds.entity_ids("Plant")[0])
+    roles = _roles(g, plant)
+    sheath, crown, leaf = roles["sheath"][0], roles["crown"][0], roles["leaf"][0]
+    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    assert not owners.get(sheath) and g.property("anatomy_template").get(sheath, -1.) == -1.
+    sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
+    actual = _actual_junctions(g, ds, set(sections))
+    assert all(actual[(crown, leaf, family)] for family in (0, 1))                  # across the ungrown sheath
+    UngrownSheathSeedling(data_structure=ds)
+    anatomy = GranapAnatomy(data_structure=ds)
+    lengths = ds.get("length").copy()
+    lengths[ds.entity_ids("SubOrgan") == sheath] = ELEMENT                           # it grows
+    ds.set("length", lengths)
+    anatomy()
+    assert anatomy.last_update == {"emerged": [sheath], "replaced": []}
+    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
+    assert sheath in sections
+    expected, actual = _expected_junctions(g, sections), _actual_junctions(g, ds, set(sections))
+    assert actual == {key: pairs for key, pairs in expected.items() if pairs}       # each pair once, nothing else
+    assert all(actual[(crown, sheath, family)] and actual[(sheath, leaf, family)] for family in (0, 1))
+    assert not any(key[:2] == (crown, leaf) for key in actual)
+    a, b = g.property("n_id_a"), g.property("n_id_b")
+    assert all(g.has_vertex(int(a[e])) and g.has_vertex(int(b[e])) for e in g.junction_vids())
+
+
+class UngrownBladeBaseSeedling(WheatSeedling):
+    """The seedling, its blade's basal LeafElement not grown yet (length 0)."""
+    leaf_lengths = (0., ELEMENT)
+
+
+def test_the_leaf_surface_is_on_the_basal_element_with_an_anatomy():
+    """A leaf organ's surface is owned by its basal element with an anatomy: not by an element without length (it has
+    no anatomy, MECHA no height for it); once that element grows, the surface moves to it, nothing dangling."""
+    Choregrapher().set_simulation_time_step(3600.)
+    table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
+    ds = initiated(table, UngrownBladeBaseSeedling, GranapAnatomy).data_structure
+    g = ds.structure
+    plant = int(ds.entity_ids("Plant")[0])
+    first, second = _roles(g, plant)["leaf"]
+    organ = int(g.complex_at_scale(first, g.scales.Organ))
+
+    def surface_owner():
+        surface = g.property("leaf_surface")[organ]
+        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        return [v for v in (first, second) if surface in owners.get(v, [])]
+
+    assert not g.compartments_by_owner(g.scales.SubOrgan).get(first) and surface_owner() == [second]
+    UngrownBladeBaseSeedling(data_structure=ds)
+    anatomy = GranapAnatomy(data_structure=ds)
+    lengths = ds.get("length").copy()
+    lengths[ds.entity_ids("SubOrgan") == first] = ELEMENT                            # it grows
+    ds.set("length", lengths)
+    anatomy()
+    assert anatomy.last_update["emerged"] == [first] and surface_owner() == [first]
+    assert len(g.property("leaf_surface")) == 2                                      # the blade's and the sheath's
+    a, b = g.property("n_id_a"), g.property("n_id_b")
+    stomatal = [c for c, path in g.property("network_path").items() if path == 6 and g.has_vertex(int(c))]
+    assert all(g.has_vertex(int(a[c])) and g.has_vertex(int(b[c])) for c in stomatal)

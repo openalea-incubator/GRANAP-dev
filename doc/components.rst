@@ -40,8 +40,11 @@ nearest ancestor with one (``anatomy_ancestor``), by the same pairing (``vessel_
 element through the hidden elements to the next element. The junction's length spans the elements between: half of
 each section plus the lengths of the SubOrgans without anatomy (read where the architecture holds ``length``, at the
 SubOrgans). The roots on the seed and on the crown's stem elements are joined root to stem, as any root on a stem.
-The DataStructure rewires a replaced section's children only: the component joins a replaced section to its
-descendants across the hidden elements itself (``_wire_pass_through``), before that rewiring.
+A segment without length (Adel's internodes and sheaths before they grow) gets no anatomy until it has one: a
+pass-through meanwhile, as a hidden element (a section of zero height would conduct nothing radially, its nodes cut
+off from the network; MECHA refuses one); a leaf organ's surface is on its basal element with an anatomy. The
+DataStructure rewires a new or replaced section's children only: the component joins it to its descendants across
+the SubOrgans without anatomy itself (``_wire_pass_through``), their junctions to the ancestor they had removed.
 
 .. metafspm-component:: openalea.granap.metafspm.component.GranapAnatomy
 
