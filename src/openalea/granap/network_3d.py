@@ -70,9 +70,13 @@ class Network3D(AbstractNetwork):
             ``None`` = the same as ``cell_wall_thickness``.
     """
 
+    # Read by consumers (MECHA) to switch to their 3D path; a 2D network has none.
+    dimension = 3
+
     def __init__(self, result, cell_wall_thickness: Optional[Thickness] = None,
                  end_wall_thickness: Optional[Thickness] = None):
         super().__init__()
+        self._cells_table = None
         from openalea.granap.anatomy_writer import DEFAULT_CELL_WALL_THICKNESS
         if result.section is None:
             raise ValueError("Network3D needs a Cells3DResult built with its 2D section "
@@ -277,6 +281,26 @@ class Network3D(AbstractNetwork):
                      ", ".join(sorted(missing)))
 
     # ------------------------------------------------------------------
+    @property
+    def _cells_gdf(self):
+        """One row per 3D cell, in cell-node order (row k = node
+        ``n_walls + n_junctions + k``): its 2D cell's polygon and centroid
+        (``geometry``, ``x``, ``y``, ``area``), its own ``type``, and
+        ``id_cell`` = k, ``cell_2d``, ``row``, ``z0``, ``z1``.  The same table
+        the 2D organ exposes, so consumers that read it work on both."""
+        if self._cells_table is None:
+            import geopandas as gpd
+            section = self.result.section
+            records = []
+            for k, c in enumerate(self.result.cells):
+                geom = section.loc[c["cell_2d"], "geometry"]
+                centre = geom.centroid
+                records.append(dict(id_cell=k, type=c["type"], x=centre.x, y=centre.y,
+                                    area=geom.area, cell_2d=c["cell_2d"], row=c["row"],
+                                    z0=c["z0"], z1=c["z1"], geometry=geom))
+            self._cells_table = gpd.GeoDataFrame(records, geometry="geometry")
+        return self._cells_table
+
     def nodes_of(self, kind: str) -> List[int]:
         """Node ids of one ``kind``: side / end / face (walls), vertical / rim
         (junctions)."""
