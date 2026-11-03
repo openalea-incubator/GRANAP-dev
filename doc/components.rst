@@ -13,6 +13,36 @@ fspm-TF export writes them as a mesh of their own, which ParaView colours by any
 potential, ...). Light models keep the architecture's triangles. They are computed when asked (a frame written), not
 at each step.
 
+**The kinds of sections.** Each kind is a scenario key, a Plant parameter with GRANAP's sections and fields on top
+of its preset; the kinds other than the roots are generated when their key is given:
+
+============== ===================================================== ===================== ================
+key            sections                                              default preset        class input
+============== ===================================================== ===================== ================
+root_anatomy   root segments                                         ``for_root``          ``radius``
+stem_anatomy   stem elements                                         ``for_monocot_stem``  ``stem_radius``
+leaf_anatomy   leaf elements                                         ``for_monocot_leaf``  (one class)
+sheath_anatomy the stem elements of a Sheath organ (Adel's)          ``for_monocot_leaf``, (one class)
+                                                                     bent round the stem
+seed_anatomy   the seed (label ``Seed``: the seminal roots' bearer)  ``for_monocot_stem``  ``stem_radius``
+============== ===================================================== ===================== ================
+
+The seed is, for now, a conducting node of the stem's anatomy: its preset is the stems', and its class input theirs,
+``stem_radius``, which the model building the seed writes on it (one input, one translator link, for the stems and
+the seed). A wheat root has its own preset, ``for_wheat_root`` (``{"root_anatomy": {"preset": "for_wheat_root"}}``):
+the monocot root with the cell and vessel sizes of GRANAP's wheat example (the cultivar Salmone's section, 0.41 mm in
+radius); its docstring lists the values and those to calibrate (the nodal roots' among them).
+
+**Junctions across sections without anatomy (a pass-through).** A SubOrgan without anatomy (Adel's
+``HiddenElement``, the part of an organ hidden in the sheaths' tube; a kind the scenario does not give, e.g. a sheath
+without ``sheath_anatomy``) does not cut the vessels. A section whose linked parent has no anatomy is joined to its
+nearest ancestor with one (``anatomy_ancestor``), by the same pairing (``vessel_pairs``): the water goes from a stem
+element through the hidden elements to the next element. The junction's length spans the elements between: half of
+each section plus the lengths of the SubOrgans without anatomy (read where the architecture holds ``length``, at the
+SubOrgans). The roots on the seed and on the crown's stem elements are joined root to stem, as any root on a stem.
+The DataStructure rewires a replaced section's children only: the component joins a replaced section to its
+descendants across the hidden elements itself (``_wire_pass_through``), before that rewiring.
+
 .. metafspm-component:: openalea.granap.metafspm.component.GranapAnatomy
 
 **The stand-in architectures** (``architectures.py``) declare the segments' variables GRANAP reads (``radius``,

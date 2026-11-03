@@ -11,6 +11,11 @@ from the tip, distance from the root-shoot junction), from the library: one temp
 segment (its own vertices and state, the template's geometry). junction_rules pairs the conducting cells of
 successive sections (xylem with xylem, phloem with phloem): by track_id where both have one, else the nearest in
 (angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions.
+
+A SubOrgan without anatomy (an Adel HiddenElement, the part of an organ hidden in the sheaths' tube; a kind the
+scenario does not give, e.g. a sheath without sheath_anatomy) is a pass-through: a section whose linked parent has no
+anatomy is joined to its nearest ancestor with one (anatomy_ancestor), the junctions' length spanning the elements
+between, so that the water goes from a stem element through the hidden elements to the next element.
 """
 from dataclasses import dataclass, fields
 from functools import partial
@@ -34,11 +39,13 @@ MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's length
 # The scenario keys of the anatomies, by SubOrgan label: each a dict {"preset": ..., "seed": ..., section: {field: value}}
 # on top of its preset (GRANAP's OrganInputData), read from each plant's scenario when the plant is built
 ANATOMY_KEYS = {"RootSegment": "root_anatomy", "StemElement": "stem_anatomy", "LeafElement": "leaf_anatomy",
-                "Sheath": "sheath_anatomy"}
+                "Sheath": "sheath_anatomy", "Seed": "seed_anatomy"}
 DEFAULT_PRESETS = {"root_anatomy": "for_root", "stem_anatomy": "for_monocot_stem", "leaf_anatomy": "for_monocot_leaf",
-                   "sheath_anatomy": "for_monocot_leaf"}
+                   "sheath_anatomy": "for_monocot_leaf", "seed_anatomy": "for_monocot_stem"}
+# The class's size input. A seed is, for now, a conducting node of the stem's anatomy (a grass's seed: the bearer of
+# the seminal roots and of the subcrown internode): its size input is the stems', stem_radius, its section's radius
 SIZES = {"root_anatomy": "radius", "stem_anatomy": "stem_radius", "leaf_anatomy": None,
-         "sheath_anatomy": None}                                                      # the class's size input
+         "sheath_anatomy": None, "seed_anatomy": "stem_radius"}
 # Kinds named by their organ: {Organ label name: the SubOrgan label of its elements} (a sheath's elements are stem
 # elements, Adel's, with an anatomy of their own)
 ORGAN_KINDS = {"Sheath": "StemElement"}
@@ -370,6 +377,11 @@ class GranapAnatomy(StructuralComponent):
       root_anatomy   root segments (default preset for_root; always generated)
       stem_anatomy   stem elements (default for_monocot_stem; generated when the key is given)
       leaf_anatomy   leaf elements (default for_monocot_leaf; generated when the key is given)
+      sheath_anatomy the stem elements of a Sheath organ (default for_monocot_leaf bent round the stem; generated
+                     when the key is given, else a sheath has no anatomy)
+      seed_anatomy   the seed (SubOrgan label Seed: the seminal roots' bearer; default for_monocot_stem, the seed a
+                     conducting node of the stem's anatomy for now, classed by stem_radius as the stems; generated
+                     when the key is given)
       Each: "preset" (an OrganInputData preset: its organ class follows, e.g. for_needle → NeedleAnatomy), "seed",
       and GRANAP's sections and fields ({section: {field: value}}), among them the cells' wall thickness by tissue
       (the optional section cell_wall_thickness, µm: "root_anatomy.cell_wall_thickness.endodermis": 3.). Within a
@@ -391,8 +403,9 @@ class GranapAnatomy(StructuralComponent):
     radius: float = input_variable(unit="m", description="the segment's radius (the diameter class input)",
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
                                    kind="intensive")
-    stem_radius: float = input_variable(unit="m", description="a stem element's radius (the stems' diameter class "
-                                        "input; e.g. linked from an architecture's organ diameter)",
+    stem_radius: float = input_variable(unit="m", description="a stem element's (or the seed's) radius (the stems' "
+                                        "and the seed's diameter class input; e.g. linked from an architecture's "
+                                        "organ diameter)",
                                         references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
                                         kind="descriptor")
     distance_from_tip: float = input_variable(unit="m", description="the segment's distance from its axis' tip",
@@ -443,6 +456,10 @@ class GranapAnatomy(StructuralComponent):
                                        "none; given: by default a monocot leaf bent round the stem)", default=None,
                                        dtype="object", scale=SCALES.Plant, references="GRANAP",
                                        sections=lambda: section_fields("sheath_anatomy"))
+    seed_anatomy: object = parameter(unit="", description="the plant's seed anatomy, as root_anatomy (None: none; "
+                                     "given: by default the monocot stem's, the seed a conducting node, classed by "
+                                     "its stem_radius)", default=None, dtype="object", scale=SCALES.Plant,
+                                     references="GRANAP", sections=lambda: section_fields("seed_anatomy"))
     soil_node: bool = parameter(unit="", description="True: each root segment's anatomy has one soil node (kind 4), "
                                 "joined to its border walls and junctions (network_path 7): the section's one soil "
                                 "boundary", default=False, scale=SCALES.Plant, references="GRANAP")
@@ -833,11 +850,55 @@ class GranapAnatomy(StructuralComponent):
             del anatomy_class[gone]
         done = self.update_anatomies(g, segments)
         self.update_leaf_surfaces(g, done["emerged"] + done["replaced"])
+        self._wire_pass_through(done["replaced"])
         template_of = g.properties()["anatomy_template"]
         for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
             template_of.setdefault(int(segment), -1.)
         self.data_structure.inheritance.fresh = set(done["replaced"])
         self.last_update = done
+
+    def _wire_pass_through(self, replaced) -> None:
+        """
+        The pass-through junctions of the *replaced* anatomies: those from each to its nearest descendants with an
+        anatomy across SubOrgans without one. The DataStructure rewires a replaced section's children only, not these
+        descendants (their linked parent, without anatomy, unchanged): they are wired here, with the DataStructure's
+        wiring rules, before its rewiring removes their old junctions (on the replaced Compartments).
+        """
+        rules = getattr(self.data_structure, "_wiring", None)
+        if not replaced or not rules:
+            return
+        g = self.mtg
+        descendants = anatomy_descendants(g, replaced)
+        if descendants:
+            g.wire_junctions(g.scales.SubOrgan, rules, children=descendants)
+
+    def _pass_through_spans(self, network_path) -> tuple:
+        """(the junctions across SubOrgans without anatomy, as edge indices; for each, those SubOrgans), the
+        pass-through junctions whose length (_wall_surface) spans them; None when there is none. Cached until the
+        topology changes."""
+        ds = self.data_structure
+        key = (ds.topology_version, ds.n_edges())
+        cached = self.__dict__.get("_pass_through")
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        g = ds.mtg
+        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        spans = None
+        if not all(owners.get(int(v)) for v in ds.entity_ids("SubOrgan")):
+            edges = np.asarray(ds.edges(), dtype=np.int64).reshape(-1, 2)
+            rows = np.flatnonzero(np.asarray(network_path) == columns.JUNCTION_PATH)
+            parents, children = ds.sections_of(edges[rows, 0]), ds.sections_of(edges[rows, 1])
+            found_rows, hidden = [], []
+            for child in np.unique(children).tolist():
+                ancestor, between = anatomy_ancestor(g, child, owners)
+                if between:
+                    here = rows[(children == child) & (parents == ancestor)]
+                    found_rows.extend(here.tolist())
+                    hidden.extend([between] * here.size)
+            if found_rows:
+                spans = (np.asarray(found_rows, dtype=np.int64), hidden)
+        self.__dict__["_pass_through"] = (key, spans)
+        return spans
 
     def display_triangles(self, where=None):
         """
@@ -860,7 +921,7 @@ class GranapAnatomy(StructuralComponent):
         wanted = set(node_ids[kept].tolist())
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
-        frame_values = {name: _per_segment(ds, name) for name in SEGMENT_ENDS + ("length",)}
+        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + ("length",)}
         vertices, owners = [], []
         for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
@@ -888,15 +949,24 @@ class GranapAnatomy(StructuralComponent):
         """
         The 3D quantities, as the segments elongate: the walls' surfaces, the protoplasts' volumes, the membranes'
         surfaces (2D values times the segment's length), and the axial junctions' lengths (between the two sections'
-        centres, the mean of the segments' lengths).
+        centres, the mean of the segments' lengths, plus, across a pass-through, the lengths of the SubOrgans without
+        anatomy between).
         """
         length_mm = np.asarray(length, dtype=float) * self.mm_per_unit
         edge_mm = self.data_structure.map_to(length_mm, "node", "edge", "mean")      # the mean of the edge's two nodes
         path = np.asarray(network_path)
         membranes = (path == columns.PATH_CODES["membrane"]) | (path == columns.PATH_CODES["wall_air"])
+        junction_mm = edge_mm
+        spans = self._pass_through_spans(path)
+        if spans is not None:                   # a pass-through junction: plus the SubOrgans without anatomy between
+            rows, hidden = spans
+            lengths = _suborgan_lengths(self.data_structure)
+            junction_mm = np.array(edge_mm, dtype=float)
+            junction_mm[rows] += np.array([sum(lengths.get(v, 0.) for v in between) for between in hidden]) * \
+                self.mm_per_unit
         return {"wall_surface": wall_length * length_mm, "cell_volume": cell_area * length_mm,
                 "membrane_surface": np.where(membranes, edge_length * edge_mm, 0.),
-                "edge_length": np.where(path == columns.JUNCTION_PATH, edge_mm, edge_length)}
+                "edge_length": np.where(path == columns.JUNCTION_PATH, junction_mm, edge_length)}
 
 
 _TEMPLATE_TRIANGLES = {}                  # {template index: (triangles (T, 3, 2) in mm, the cell row of each)}
@@ -922,14 +992,25 @@ def _template_triangles(template) -> tuple:
 SEGMENT_ENDS = ("x1", "y1", "z1", "x2", "y2", "z2")
 
 
-def _per_segment(ds, name):
-    """{segment: value} of the declared variable *name* (a SubOrgan-scale input), or None when it is not on the
-    DataStructure (an optional input nothing gives)."""
-    if not ds.has(name):
-        return None
-    location, values = ds.location(name), np.asarray(ds.get(name), dtype=float)
-    if location != "SubOrgan":                        # held at the nodes: the segment's (broadcast) value
+def _suborgan_lengths(ds) -> dict:
+    """{SubOrgan: length} of every SubOrgan, those without anatomy (no Compartment, so no node value) included: the
+    DataStructure's when the architecture holds length at the SubOrgans, else the MPG's property."""
+    if ds.has("length") and ds.location("length") == "SubOrgan":
+        return dict(zip(ds.entity_ids("SubOrgan").tolist(), np.asarray(ds.get("length"), dtype=float).tolist()))
+    return {int(v): float(value) for v, value in ds.mtg.property("length").items()}
+
+
+def _per_segment(component, name):
+    """{segment: value} of the component's declared SubOrgan-scale input *name*, read at its own place
+    (component.read: mapped when another component holds it elsewhere, e.g. broadcast to the nodes), or None when
+    nothing gives it (an optional input: its default, NaN)."""
+    ds = component.data_structure
+    values = np.asarray(component.read(name), dtype=float)
+    location = component.variable_specs[name].location
+    if location != "SubOrgan":                        # declared at the nodes: the segment's (broadcast) value
         values = ds.map_to(values, location, "SubOrgan", "mean")
+    if np.isnan(values).all():
+        return None
     return dict(zip(ds.entity_ids("SubOrgan").tolist(), np.asarray(values, dtype=float).tolist()))
 
 
@@ -940,7 +1021,7 @@ def _segment_frame(g, segment, plant_position, frame_values) -> tuple:
     ends and lengths (_per_segment)."""
     properties = g.properties()                       # read only: g.property() would create a missing property
     ends = [(frame_values[name] or {}).get(segment) for name in SEGMENT_ENDS]
-    if all(value is not None for value in ends):
+    if all(value is not None and not np.isnan(value) for value in ends):
         start, end = np.asarray(ends[:3], dtype=float), np.asarray(ends[3:], dtype=float)
         length = np.linalg.norm(end - start)
         if length > 0:
@@ -1044,11 +1125,57 @@ def _values_at(g, name, vids, default) -> np.ndarray:
     return out
 
 
+def anatomy_ancestor(g, section, owners=None) -> tuple:
+    """
+    (the nearest ancestor of *section* with an anatomy, [the SubOrgans without one in between, nearest first]): its
+    linked parent when that has an anatomy (Compartments), else the first with one up the linked parents, through
+    the SubOrgans without (a pass-through: an Adel HiddenElement, a kind the scenario does not give). (None, [...]):
+    no ancestor has one. *owners*: g.compartments_by_owner of the sections' scale (default: read).
+    """
+    scale = g.scale(section)
+    owners = g.compartments_by_owner(scale) if owners is None else owners
+    between, vertex = [], g.linked_parent(section, scale)
+    while vertex is not None and not owners.get(vertex):
+        between.append(int(vertex))
+        vertex = g.linked_parent(vertex, scale)
+    return (None if vertex is None else int(vertex)), between
+
+
+def anatomy_descendants(g, sections, owners=None) -> list:
+    """The sections with an anatomy whose nearest ancestor with one (anatomy_ancestor) is in *sections* across at
+    least one SubOrgan without anatomy: the other ends of *sections*' pass-through junctions."""
+    sections = {int(v) for v in sections}
+    if not sections:
+        return []
+    scale = g.scale(next(iter(sections)))
+    owners = g.compartments_by_owner(scale) if owners is None else owners
+    every = [int(v) for v in g.components_at_scale(g.root, scale=scale)]
+    if all(owners.get(v) for v in every):                  # every section has an anatomy: no pass-through
+        return []
+    out = []
+    for vertex in sorted(every):
+        if owners.get(vertex):
+            parent = g.linked_parent(vertex, scale)
+            if parent is not None and not owners.get(parent):
+                ancestor, _ = anatomy_ancestor(g, vertex, owners)
+                if ancestor in sections:
+                    out.append(int(vertex))
+    return out
+
+
 def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
-    """The properties of the axial junctions *pairs* between the sections of *parent* and *child* (junction_geometry)."""
+    """The properties of the axial junctions *pairs* between the sections of *parent* and *child* (junction_geometry);
+    across SubOrgans without anatomy (a pass-through), between *child* and its nearest ancestor with one, their
+    length spanning the SubOrgans in between."""
     n = len(pairs)
     lengths = g.property("length")
-    between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
+    owners = g.compartments_by_owner(g.scale(child))
+    if owners.get(parent):
+        between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
+    else:
+        ancestor, hidden = anatomy_ancestor(g, child, owners)
+        between = (0.5 * (float(lengths.get(ancestor, 0.)) + float(lengths.get(child, 0.))) +
+                   sum(float(lengths.get(v, 0.)) for v in hidden)) * mm_per_unit
     x, y = g.view("section_x"), g.view("section_y")
     out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
     out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
@@ -1060,7 +1187,8 @@ def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
 def junction_geometry(mm_per_unit=MM_PER_M):
     """
     The geometry of the axial junctions a wiring rule creates (Q-C1a): their length between the two sections' centres
-    (the mean of the segments' lengths), the in-plane offset between the two vessels, the path code of an axial
+    (the mean of the segments' lengths, plus the lengths of the SubOrgans without anatomy between: a pass-through),
+    the in-plane offset between the two vessels, the path code of an axial
     junction (5); the other network columns NaN, the membrane surface 0. A function (g, parent, child, pairs) ->
     {property: values}, picklable (the Scene's checkpoints keep the wiring).
     """
@@ -1068,14 +1196,23 @@ def junction_geometry(mm_per_unit=MM_PER_M):
 
 
 def _family_pairs(family, g, parent, child, parent_compartments, child_compartments) -> list:
-    """A wiring rule: the junctions of one family of conducting cells between two sections (vessel_pairs)."""
+    """A wiring rule: the junctions of one family of conducting cells between two sections (vessel_pairs). When the
+    child's linked parent has no anatomy (a pass-through), between the child and its nearest ancestor with one
+    (anatomy_ancestor); a child without anatomy has none."""
+    if not parent_compartments and child_compartments:
+        owners = g.compartments_by_owner(g.scale(child))
+        ancestor, _ = anatomy_ancestor(g, child, owners)
+        if ancestor is None:
+            return []
+        parent_compartments = owners[ancestor]
     return vessel_pairs(g, parent_compartments, child_compartments, family)
 
 
 def junction_rules(g, mm_per_unit=MM_PER_M) -> list:
     """
     The wiring rules of anatomy mode: axial xylem junctions (apoplastic) and phloem junctions (symplastic), with their
-    geometry (junction_geometry); functions, not closures, so that the Scene's checkpoints keep them.
+    geometry (junction_geometry); functions, not closures, so that the Scene's checkpoints keep them. A section whose
+    linked parent has no anatomy is joined to its nearest ancestor with one (a pass-through, anatomy_ancestor).
     """
     geometry = junction_geometry(mm_per_unit)
     return [

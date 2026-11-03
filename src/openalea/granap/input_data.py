@@ -268,6 +268,10 @@ class AerenchymaParams(BaseParams):
 EpidermisParams  = _layer_params("EpidermisParams",  "epidermis",  "epidermal",  cell_diameter=0.015, cell_width=0.015, n_layers=1, shift=0.5, order=6)
 ExodermisParams  = _layer_params("ExodermisParams",  "exodermis",  "exodermal",  cell_diameter=0.03,  cell_width=0.03,  n_layers=1, shift=0.0, order=5)
 CortexParams     = _layer_params("CortexParams",     "cortex",     "cortical",   cell_diameter=0.04,  cell_width=0.04,  n_layers=5, shift=0.0, order=4)
+# A cortex in three bands (a wheat root's, for_wheat_root): smaller cells inside, larger outside; MECHA's cortex
+# tissues (innercortex, cortex, outercortex), MECHA's cell group 4 as the cortex
+InnerCortexParams = _layer_params("InnerCortexParams", "innercortex", "inner cortical", cell_diameter=0.018, cell_width=0.036, n_layers=2, shift=0.5, order=4)
+OuterCortexParams = _layer_params("OuterCortexParams", "outercortex", "outer cortical", cell_diameter=0.053, cell_width=0.071, n_layers=2, shift=0.5, order=6)
 EndodermisParams = _layer_params("EndodermisParams", "endodermis", "endodermal", cell_diameter=0.02,  cell_width=0.03,  n_layers=1, shift=0.0, order=3)
 PericycleParams  = _layer_params("PericycleParams",  "pericycle",  "pericycle",  cell_diameter=0.01,  cell_width=0.009, n_layers=1, shift=0.0, order=2)
 PhellemParams    = _layer_params("PhellemParams",    "phellem",    "phellem",    cell_diameter=0.015, cell_width=0.025, n_layers=3, shift=0.0, order=4)
@@ -1769,6 +1773,50 @@ class OrganInputData(BaseModel):
             PericycleParams(),
         ])
     
+    @classmethod
+    def for_wheat_root(cls) -> "OrganInputData":
+        """Wheat (Triticum aestivum) root preset: GRANAP's monocot root (for_root) with a wheat seminal root's
+        cross section: a section of 0.41 mm in radius (0.82 mm in diameter), its stele 0.28 mm in diameter. In
+        metafspm: {"root_anatomy": {"preset": "for_wheat_root"}}, the seminal and nodal roots alike.
+
+        Source: the cell and vessel sizes of GRANAP's wheat example (example/root/monocot_wheat.py, the cultivar
+        Salmone's cross section; its measurements' publication is not cited in GRANAP: to cite once given):
+
+          stele          thickness 0.283 mm, cells 0.013 mm (edge) to 0.018 mm (centre)
+          xylem          3 metaxylem vessels of 0.0945 mm (sd 0.0065), 9 protoxylem poles of 0.022 mm (clusters
+                         0.023 x 0.025 mm)
+          phloem         sieve elements of 0.014 mm (clusters 0.014 x 0.0249 mm)
+          endodermis     0.0162 x 0.0281 mm; pericycle 0.0183 x 0.013 mm
+          cortex         three bands, inside out: innercortex 2 layers of 0.018 x 0.036 mm, cortex 1 layer of
+                         0.049 x 0.056 mm, outercortex 2 layers of 0.053 x 0.071 mm (the intercellular spaces in
+                         the three)
+          exodermis      0.028 x 0.033 mm; epidermis 0.017 x 0.034 mm
+
+        To calibrate (no source in GRANAP): the aerenchyma (for_root's 1 %), the intercellular spaces' proportion
+        and the other fields for_root's; the nodal roots, thicker than the seminal ones, by the scenario (e.g. more
+        cortex layers and metaxylem vessels: {"cortex": {"n_layers": ...}, "xylem": {"n_vascular_bundles": ...}}).
+        The layers' order is renumbered so that the cortex's three bands lie between the endodermis and the
+        exodermis.
+        """
+        data = cls.for_root()
+        data.params.extend([InnerCortexParams(), OuterCortexParams()])
+        for section, values in {
+                "stele": {"thickness": 0.283, "cell_diameter": 0.013, "cell_diameter_center": 0.018},
+                "xylem": {"xylem_shape": "default", "n_vascular_bundles": 3, "vessel_diameter": 0.0945,
+                          "vessel_diameter_sd": 0.0065, "n_protoxylem": 9, "protoxylem_diameter": 0.022,
+                          "protoxylem_cluster_width": 0.023, "protoxylem_cluster_height": 0.025},
+                "phloem": {"sieve_diameter": 0.014, "cluster_width": 0.014, "cluster_height": 0.0249},
+                "endodermis": {"cell_diameter": 0.0162, "cell_width": 0.0281, "order": 3},
+                "pericycle": {"cell_diameter": 0.0183, "cell_width": 0.013},
+                "cortex": {"cell_diameter": 0.049, "cell_width": 0.056, "n_layers": 1, "order": 5},
+                "exodermis": {"cell_diameter": 0.028, "cell_width": 0.033, "order": 7},
+                "epidermis": {"cell_diameter": 0.017, "cell_width": 0.034, "order": 8},
+                "inter_cellular_spaces": {"smoothness": 0.05, "tissue": ["innercortex", "cortex", "outercortex"]},
+        }.items():
+            for name, value in values.items():
+                data.set_value(section, name, value)
+        return data
+
     @classmethod
     def for_dicot_root(cls) -> "OrganInputData":
         """Return OrganInputData pre-loaded with default dicot root anatomy parameters.
