@@ -13,7 +13,7 @@ display mesh (GranapAnatomy.display_triangles). Each frame is then checked with 
 A second, filtered export shows logging: the segment and its compartments only, with their tissue, kind and area
 (and the cells' polygons), in ./outputs/log/<preset>/frames (outputs only: such frames are not reimported).
 
-Open a frame in ParaView with encoding3d's reader plugin (encoding3d/paraview/encoding3d_reader.py), colour by
+Open a frame in ParaView with encoding3d's reader plugin (encoding3d/paraview/plugin_encoding3d.py), colour by
 Compartment.tissue_code (or cell_area); import_frames.py reads the files back.
 """
 import argparse

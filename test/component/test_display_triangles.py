@@ -72,3 +72,31 @@ def test_written_in_a_frame(section):
     meshes = {mesh.name: mesh for mesh in to_frame({"root": ds}, components={"root": [anatomy]}).data_structures[0].meshes}
     assert set(meshes) == {"GranapAnatomy"}
     assert len(meshes["GranapAnatomy"].positions) == 3 * len(anatomy.display_triangles())
+
+
+def test_a_scene_resumed_from_its_checkpoint_draws_its_sections(tmp_path, monkeypatch):
+    """A Scene's checkpoint keeps the anatomy templates (GranapAnatomy.checkpoint_state): resumed in a new process,
+    whose templates are only those its construction made (other ids), the segments' anatomy_template resolve to the
+    checkpoint's templates, the first frame draws the sections as the saved scene did, and the library gives a
+    segment of the checkpoint's class its template, a new class an id after theirs."""
+    from openalea.granap.metafspm import component, library
+    saved = simulate().scene
+    anatomy = next(c for c in saved.components if isinstance(c, GranapAnatomy))
+    index = int(saved.populations[0].data_structure.get("anatomy_template")[0])
+    drawn = anatomy.display_triangles()
+    saved.checkpoint(str(tmp_path / "checkpoint"))
+    monkeypatch.setattr(library, "TEMPLATES", {})                  # a new process: no template of the saved one's,
+    monkeypatch.setattr(library, "_NEXT_TEMPLATE_ID", [index + 1000])        # its own ids
+    monkeypatch.setattr(component, "_LIBRARIES", {})
+    resumed = simulate().scene
+    assert int(resumed.populations[0].data_structure.get("anatomy_template")[0]) == index + 1000
+    resumed.load_checkpoint(str(tmp_path / "checkpoint"))
+    ds = resumed.populations[0].data_structure
+    assert int(ds.get("anatomy_template")[0]) == index
+    redrawn = next(c for c in resumed.components if isinstance(c, GranapAnatomy)).display_triangles()
+    np.testing.assert_array_equal(redrawn.owner, drawn.owner)
+    np.testing.assert_allclose(redrawn.vertices, drawn.vertices)
+    root_library = component._LIBRARIES[("for_root", 0)]           # simulate's (every preset saved is restored)
+    assert [template.index for template in root_library.templates.values()] == [index]
+    assert library.template_by_index(index).organ is None              # restored: its tables, not its organ
+    assert library._new_template_id() > max(index + 1000, *library.TEMPLATES)   # after the restored ids

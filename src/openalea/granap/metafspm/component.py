@@ -17,6 +17,7 @@ scenario does not give, e.g. a sheath without sheath_anatomy) is a pass-through:
 anatomy is joined to its nearest ancestor with one (anatomy_ancestor), the junctions' length spanning the elements
 between, so that the water goes from a stem element through the hidden elements to the next element.
 """
+import dataclasses
 from dataclasses import dataclass, fields
 from functools import partial
 
@@ -29,8 +30,8 @@ from openalea.metafspm.solve.decorator import postsegmentation, state
 
 from openalea.granap.metafspm import columns
 from openalea.granap.metafspm.build import JUNCTION, LEAF_SURFACE, SOIL_NODE, WALL, _props as _build_props
-from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_targets, merged,
-                                              preset_parameters, template_by_index)
+from openalea.granap.metafspm.library import (TEMPLATES, AnatomyLibrary, ClassInput, class_key, class_targets,
+                                              merged, preset_parameters, restore_templates, template_by_index)
 
 SCALES = ScalesConfig()
 MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's lengths in m
@@ -857,6 +858,53 @@ class GranapAnatomy(StructuralComponent):
             template_of[segment] = -1.
         super().__post_init__()
         self.data_structure.inheritance = GranapInheritance()
+
+    @classmethod
+    def _libraries(cls) -> dict:
+        """{name: AnatomyLibrary} of the libraries the segments' templates come from, by names a new process gives
+        the same libraries (the class's library, root and shoot; the presets' by (preset, seed))."""
+        found = {("library",): cls.library}
+        if cls.root is not None:
+            found[("root",)] = cls.root.library
+        found.update({("shoot", label): organ.library for label, organ in cls.shoot.items()})
+        found.update({("preset", preset, seed): library for (preset, seed), library in _LIBRARIES.items()})
+        return found
+
+    def checkpoint_state(self) -> dict:
+        """The kept state, and the anatomy templates (restore_state): the libraries' and those the segments'
+        anatomy_template give, which a new process does not have (its own made at the scene's construction)."""
+        state = super().checkpoint_state()
+        libraries = self._libraries()
+        templates = {template.index: template for library in libraries.values()
+                     for template in library.templates.values()}
+        given = self.data_structure.structure.properties().get("anatomy_template", {}).values()
+        templates.update({int(index): TEMPLATES[int(index)] for index in set(given)
+                          if index is not None and index >= 0 and int(index) in TEMPLATES})
+        templates = {index: dataclasses.replace(template, organ=None)       # its generated organ, for inspection
+                     for index, template in templates.items()}               # only, not saved
+        state["anatomy_templates"] = {"templates": templates,
+                                      "libraries": {name: {entry: template.index for entry, template in
+                                                           library.templates.items()}
+                                                    for name, library in libraries.items()}}
+        return state
+
+    def restore_state(self, state: dict) -> None:
+        """The kept state, and the checkpoint's anatomy templates registered again (library.restore_templates): the
+        segments' anatomy_template resolvable (template_by_index: drawing their sections, their pores), each
+        library's classes given back their templates."""
+        super().restore_state(state)
+        saved = state.get("anatomy_templates")
+        if saved is None:
+            return
+        libraries = self._libraries()
+        resolved = {}
+        for name, entries in saved["libraries"].items():
+            library = libraries.get(name)
+            if library is None and name[0] == "preset":
+                library = preset_library(name[1], name[2])            # not made yet in this process
+            if library is not None:
+                resolved[library] = entries
+        restore_templates(saved["templates"], resolved)
 
     @postsegmentation
     def _anatomies(self):

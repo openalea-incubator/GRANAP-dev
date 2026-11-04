@@ -13,7 +13,6 @@ and properties (its state), but not the geometry: its Cells point to the templat
 (template, template_row), stored once per class.
 """
 import copy
-import itertools
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -23,8 +22,9 @@ from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL, _props
 from openalea.granap.metafspm.vessels import vessel_ids
 
 GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
-_TEMPLATE_IDS = itertools.count()                 # template ids, unique across libraries (roots, stems, leaves)
-TEMPLATES = {}                                    # {template id: Template}, every library's
+TEMPLATES = {}                                    # {template id: Template}, every library's (and restored ones)
+_NEXT_TEMPLATE_ID = [0]                           # the next template id: unique across libraries (roots, stems,
+                                                  # leaves), after the restored ones (restore_templates)
 LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
 SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
@@ -298,12 +298,37 @@ class AnatomyLibrary:
         if entry not in self.templates:
             overrides = merged(plant, self.overrides(key), targets)
             organ = self.organ_class(self.parameters(key, overrides=overrides), seed=self.seed)
-            template = self.templates[entry] = Template.from_organ(organ, key, next(_TEMPLATE_IDS))
+            template = self.templates[entry] = Template.from_organ(organ, key, _new_template_id())
             TEMPLATES[template.index] = template
         return self.templates[entry]
 
     def by_index(self, index) -> Template:
         return next(t for t in self.templates.values() if t.index == index)
+
+
+def _new_template_id() -> int:
+    """A new template id, after every id given or restored in this process."""
+    index = _NEXT_TEMPLATE_ID[0]
+    _NEXT_TEMPLATE_ID[0] += 1
+    return index
+
+
+def restore_templates(templates: dict, libraries: dict) -> None:
+    """
+    The templates of a Scene's checkpoint registered again (GranapAnatomy.restore_state): *templates* ({template id:
+    Template}) resolvable by template_by_index, as their segments' anatomy_template gives them, and *libraries*
+    ({AnatomyLibrary: {entry: template id}}) given back their classes' templates, so that a segment of a class the
+    checkpoint has gets its template, not a new one; the next ids come after theirs. A template this process made
+    before loading (the scene's construction) under one of these ids, or for one of these classes, is replaced: the
+    loaded state does not refer to it.
+    """
+    TEMPLATES.update({int(index): template for index, template in templates.items()})
+    for library, entries in libraries.items():
+        library.templates.update({entry: TEMPLATES[int(index)] for entry, index in entries.items()})
+        for entry in [e for e, template in library.templates.items() if TEMPLATES.get(template.index) is not template]:
+            del library.templates[entry]                 # its id now a restored template's: made again if needed
+    if templates:
+        _NEXT_TEMPLATE_ID[0] = max(_NEXT_TEMPLATE_ID[0], max(int(index) for index in templates) + 1)
 
 
 def template_by_index(index) -> Template:

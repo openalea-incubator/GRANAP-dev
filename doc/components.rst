@@ -13,6 +13,11 @@ encoding3d export writes them as a mesh of their own, which ParaView colours by 
 potential, ...). Light models keep the architecture's triangles. They are computed when asked (a frame written), not
 at each step.
 
+**Checkpoints.** A Scene's checkpoint keeps the anatomy templates (``GranapAnatomy.checkpoint_state``: the libraries'
+and those the segments' ``anatomy_template`` give, without their generated organ). A run resumed in a new process
+(``Scene.load_checkpoint``) registers them again: the segments' sections are drawn from them, a segment of a class the
+checkpoint has gets its template, and a new class's template an id after theirs.
+
 **The kinds of sections.** Each kind is a scenario key, a Plant parameter with GRANAP's sections and fields on top
 of its preset; the kinds other than the roots are generated when their key is given:
 
