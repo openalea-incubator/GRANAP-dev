@@ -32,11 +32,11 @@ dependencies:
   - numba
   - pyyaml
   - pytest
-  - jsonschema                    # openalea.fspm_tf's (metafspm's fspm-TF exchange)
+  - jsonschema                    # openalea.encoding3d's (metafspm's encoding3d exchange)
   - pip:
     # cv2.fitEllipse in geometry_collection. From pip rather than conda: every conda opencv 4.13 build needs
     # icu 78, while openalea.plantgl (required by openalea.mtg) is built on Qt 5 / icu 75, so the solve never ends.
     - "opencv-python-headless==4.13.0.*"
     - "-e ..[doc]"
-    - "-e ../../fspm-TF"            # openalea.fspm_tf, a dependency of metafspm
+    - "-e ../../encoding3d"            # openalea.encoding3d, a dependency of metafspm
     - "-e ../../metafspm"

@@ -66,8 +66,8 @@ def test_a_mask_and_the_light_geometry(section):
 
 
 def test_written_in_a_frame(section):
-    pytest.importorskip("openalea.fspm_tf")
-    from openalea.metafspm.io.fspm_tf import to_frame
+    pytest.importorskip("openalea.encoding3d")
+    from openalea.metafspm.io.encoding3d import to_frame
     ds, anatomy = section
     meshes = {mesh.name: mesh for mesh in to_frame({"root": ds}, components={"root": [anatomy]}).data_structures[0].meshes}
     assert set(meshes) == {"GranapAnatomy"}

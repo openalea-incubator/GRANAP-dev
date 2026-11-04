@@ -930,7 +930,7 @@ class GranapAnatomy(StructuralComponent):
 
     def display_triangles(self, where=None):
         """
-        The sections drawn for display (fspm-TF frames, viewers), not for light models (triangles() stays the
+        The sections drawn for display (encoding3d frames, viewers), not for light models (triangles() stays the
         architecture's): each segment's section, flat, across the middle of the segment, perpendicular to it; each
         protoplast its cell's polygon, triangulated (coupling.geometry.Triangles, each triangle its node index). A
         segment is placed by its ends (x1 ... z2) when the architecture gives them, else along a straight axis from its

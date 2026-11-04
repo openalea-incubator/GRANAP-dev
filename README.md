@@ -18,12 +18,12 @@ from source (`pip install -e`) in one environment.
 ```bash
 mkdir fspm && cd fspm                       # any folder: the repositories side by side
 git clone -b data_structure_api https://github.com/openalea/metafspm.git metafspm
-git clone https://github.com/openalea/fspm-TF.git fspm-TF
+git clone https://github.com/openalea/encoding3d.git encoding3d
 git clone -b to_metafspm https://github.com/openalea-incubator/GRANAP-dev.git GRANAP
 
 mamba env create -f GRANAP/conda/environment.yaml        # GRANAP's dependencies and metafspm's
 mamba activate granap
-pip install -e fspm-TF
+pip install -e encoding3d
 pip install -e metafspm
 pip install -e GRANAP
 ```

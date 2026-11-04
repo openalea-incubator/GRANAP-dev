@@ -1,12 +1,12 @@
 """
-Importing fspm-TF files: the sections export_frames.py wrote (run first when missing), read two ways.
+Importing encoding3d files: the sections export_frames.py wrote (run first when missing), read two ways.
 
     python import_frames.py [--show]          figure in ./outputs/tissues.png
 
-1. As any platform reads them, with openalea.fspm_tf alone: the Compartment table (one row per protoplast, wall or
+1. As any platform reads them, with openalea.encoding3d alone: the Compartment table (one row per protoplast, wall or
    junction) gives each tissue's number of cells and its area, in the unit its declaration gives; the Connection
    relation, the section's network.
-2. Back into metafspm, with openalea.metafspm.io.fspm_tf.import_frame: each frame rebuilds the section's
+2. Back into metafspm, with openalea.metafspm.io.encoding3d.import_frame: each frame rebuilds the section's
    DataStructure (its MPG, its variables, bit for bit), with the same cells.
 """
 import argparse
@@ -16,8 +16,8 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-from openalea import fspm_tf
-from openalea.metafspm.io.fspm_tf import import_frame
+from openalea import encoding3d
+from openalea.metafspm.io.encoding3d import import_frame
 
 from export_frames import OUTPUTS, PRESETS, export
 
@@ -25,8 +25,8 @@ PROTOPLAST = 0                                                       # GRANAP's 
 
 
 def tissues(path: str) -> pd.DataFrame:
-    """Each tissue's protoplasts: their number and their total area (mm2), read with openalea.fspm_tf."""
-    section = fspm_tf.read(path).data_structures[0]
+    """Each tissue's protoplasts: their number and their total area (mm2), read with openalea.encoding3d."""
+    section = encoding3d.read(path).data_structures[0]
     compartments = section.entity_set("Compartment")
     assert compartments.variables["cell_area"].unit == "mm2", compartments.variables["cell_area"].unit
     protoplasts = compartments.columns["kind"] == PROTOPLAST
@@ -40,7 +40,7 @@ def tissues(path: str) -> pd.DataFrame:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="GRANAP's fspm-TF sections read back")
+    parser = argparse.ArgumentParser(description="GRANAP's encoding3d sections read back")
     parser.add_argument("--show", action="store_true")
     show = parser.parse_args().show
     paths = [os.path.join(OUTPUTS, preset, "frames", "frame_000000.glb") for preset in PRESETS]
@@ -64,7 +64,7 @@ def main():
         axis.set_xlabel("protoplasts' area (mm²)")
         axis.set_ylabel("")
         axis.set_title(preset)
-    figure.suptitle("GRANAP's sections, read back from their fspm-TF frames")
+    figure.suptitle("GRANAP's sections, read back from their encoding3d frames")
     figure.tight_layout()
     path = os.path.join(OUTPUTS, "tissues.png")
     figure.savefig(path, dpi=120)
