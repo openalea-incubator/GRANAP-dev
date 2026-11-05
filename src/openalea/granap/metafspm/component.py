@@ -13,9 +13,10 @@ successive sections (xylem with xylem, phloem with phloem): by track_id where bo
 (angle, relative radius) in both directions, so that a fusion or a split gives one-to-many junctions.
 
 A SubOrgan without anatomy (an Adel HiddenElement, the part of an organ hidden in the sheaths' tube; a kind the
-scenario does not give, e.g. a sheath without sheath_anatomy) is a pass-through: a section whose linked parent has no
-anatomy is joined to its nearest ancestor with one (anatomy_ancestor), the junctions' length spanning the elements
-between, so that the water goes from a stem element through the hidden elements to the next element.
+scenario does not give, e.g. a sheath without sheath_anatomy; a section without length) is a pass-through: a section
+whose linked parent has no anatomy is joined to its nearest ancestor with one (anatomy_ancestor), the junctions'
+length spanning the elements between, so that the water goes from a stem element through the hidden elements to the
+next element.
 """
 import dataclasses
 from dataclasses import dataclass, fields
@@ -39,14 +40,23 @@ MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's length
 
 # The scenario keys of the anatomies, by SubOrgan label: each a dict {"preset": ..., "seed": ..., section: {field: value}}
 # on top of its preset (GRANAP's OrganInputData), read from each plant's scenario when the plant is built
-ANATOMY_KEYS = {"RootSegment": "root_anatomy", "StemElement": "stem_anatomy", "LeafElement": "leaf_anatomy",
-                "Sheath": "sheath_anatomy", "Seed": "seed_anatomy"}
-DEFAULT_PRESETS = {"root_anatomy": "for_root", "stem_anatomy": "for_monocot_stem", "leaf_anatomy": "for_monocot_leaf",
-                   "sheath_anatomy": "for_monocot_leaf", "seed_anatomy": "for_monocot_stem"}
+ANATOMY_KEYS = {"RootSegment": "root_anatomy", "RootApex": "root_apex_anatomy", "StemElement": "stem_anatomy",
+                "LeafElement": "leaf_anatomy", "Sheath": "sheath_anatomy", "Seed": "seed_anatomy"}
+DEFAULT_PRESETS = {"root_anatomy": "for_root", "root_apex_anatomy": "for_root", "stem_anatomy": "for_monocot_stem",
+                   "leaf_anatomy": "for_monocot_leaf", "sheath_anatomy": "for_monocot_leaf",
+                   "seed_anatomy": "for_monocot_stem"}
 # The class's size input. A seed is, for now, a conducting node of the stem's anatomy (a grass's seed: the bearer of
 # the seminal roots and of the subcrown internode): its size input is the stems', stem_radius, its section's radius
-SIZES = {"root_anatomy": "radius", "stem_anatomy": "stem_radius", "leaf_anatomy": None,
-         "sheath_anatomy": None, "seed_anatomy": "stem_radius"}
+SIZES = {"root_anatomy": "radius", "root_apex_anatomy": "radius", "stem_anatomy": "stem_radius",
+         "leaf_anatomy": None, "sheath_anatomy": None, "seed_anatomy": "stem_radius"}
+# The kinds taking another kind's anatomy when their own key is not given: {kind: the kind whose anatomy it takes}. A
+# root apex (an architecture's axis tip, ArchiSimple's RootApex: the part of the root beyond its last segment) is,
+# by default, a root segment of its class: the root's anatomy, its scenario dict and its explicit OrganAnatomy
+# (root). Its tip's tissues are the root's: the meristem is not represented; its maturity is its barriers' (MECHA's
+# Development by its distance from the tip: at barrier 0, MECHA's xylem immature, without xylem junction)
+KIND_DEFAULTS = {"RootApex": "RootSegment"}
+# The root kinds (SubOrgan labels): the sections with a soil node, drawn downwards
+ROOT_KINDS = ("RootSegment", "RootApex")
 # Kinds named by their organ: {Organ label name: the SubOrgan label of its elements} (a sheath's elements are stem
 # elements, Adel's, with an anatomy of their own)
 ORGAN_KINDS = {"Sheath": "StemElement"}
@@ -141,6 +151,48 @@ def _segments(g, plant, labels_handled=("RootSegment",), kind=None):
     if kind is None:
         return candidates
     return [v for v in candidates if kind(g, v) in labels_handled]
+
+
+def _label_codes(g, names) -> set:
+    """The SubOrgan label codes of the label *names* the MPG has."""
+    return {getattr(g.labels.SubOrgan, name) for name in names if hasattr(g.labels.SubOrgan, name)}
+
+
+def _on_top(base: dict, own: dict) -> dict:
+    """A scenario dict *own* on top of *base*: its sections' fields over theirs, its preset and seed over theirs."""
+    out = {key: dict(value) if isinstance(value, dict) else value for key, value in base.items()}
+    for key, value in own.items():
+        out[key] = {**out[key], **value} if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
+_CHECKED_REDUCTIONS = set()                        # the (labels, check) GRANAP has warned of, once each
+
+
+def check_reduced_labels(reduction, kinds=()) -> None:
+    """
+    Warns, once per set of labels, when a plant model's reduction (solve.reduction) lists a label that is no GRANAP
+    anatomy kind (ANATOMY_KEYS: RootSegment, RootApex, StemElement, LeafElement, Sheath, Seed), and, when sections of
+    a kind named by its organ are among *kinds* (ORGAN_KINDS: a sheath's StemElements are the kind "Sheath"), when it
+    lists their elements' label without that kind: the reduction asks GRANAP's kinds (Reduction.reduces), so those
+    sections are not reduced.
+    """
+    import warnings
+    labels = tuple(reduction.labels)
+    if not labels:
+        return
+    if (labels, None) not in _CHECKED_REDUCTIONS:
+        _CHECKED_REDUCTIONS.add((labels, None))
+        unknown = [label for label in labels if label not in ANATOMY_KEYS]
+        if unknown:
+            warnings.warn(f"the reduction's labels {unknown} are no GRANAP anatomy kind ({', '.join(ANATOMY_KEYS)}): "
+                          "nothing is reduced for them", stacklevel=3)
+    for organ, element in ORGAN_KINDS.items():
+        if organ in kinds and element in labels and organ not in labels and (labels, organ) not in _CHECKED_REDUCTIONS:
+            _CHECKED_REDUCTIONS.add((labels, organ))
+            warnings.warn(f"the reduction's labels give {element} and not {organ}: a {organ}'s elements (labelled "
+                          f"{element}) are the anatomy kind \"{organ}\", not reduced; add \"{organ}\" to reduce "
+                          "them", stacklevel=3)
 
 
 def _basal_with_anatomy(g, elements, anatomy_class):
@@ -391,6 +443,11 @@ class GranapAnatomy(StructuralComponent):
                     "leaf_anatomy": {"preset": "for_needle", "seed": 42}}
 
       root_anatomy   root segments (default preset for_root; always generated)
+      root_apex_anatomy
+                     root apices (SubOrgan label RootApex: an axis' tip, ArchiSimple's), on top of root_anatomy
+                     (default: the root segments' anatomy, of their class; always generated, as the segments', once
+                     the apex has a length); its meristem is not represented, its maturity is its barriers' (MECHA's
+                     Development, by its distance from the tip)
       stem_anatomy   stem elements (default for_monocot_stem; generated when the key is given)
       leaf_anatomy   leaf elements (default for_monocot_leaf; generated when the key is given)
       sheath_anatomy the stem elements of a Sheath organ (default for_monocot_leaf bent round the stem; generated
@@ -461,6 +518,11 @@ class GranapAnatomy(StructuralComponent):
                                      "{field: value}} on top of its preset (None: the library's)", default=None,
                                      dtype="object", scale=SCALES.Plant, references="GRANAP",
                                      sections=lambda: section_fields("root_anatomy"))
+    root_apex_anatomy: object = parameter(unit="", description="the plant's root apex anatomy (an axis' tip, a "
+                                          "RootApex), as root_anatomy and on top of it (None: the root segments' "
+                                          "anatomy, root_anatomy's)", default=None, dtype="object",
+                                          scale=SCALES.Plant, references="GRANAP",
+                                          sections=lambda: section_fields("root_apex_anatomy"))
     stem_anatomy: object = parameter(unit="", description="the plant's stem anatomy, as root_anatomy (None: no stem "
                                      "anatomy unless shoot gives one)", default=None, dtype="object",
                                      scale=SCALES.Plant, references="GRANAP",
@@ -476,7 +538,8 @@ class GranapAnatomy(StructuralComponent):
                                      "given: by default the monocot stem's, the seed a conducting node, classed by "
                                      "its stem_radius)", default=None, dtype="object", scale=SCALES.Plant,
                                      references="GRANAP", sections=lambda: section_fields("seed_anatomy"))
-    soil_node: bool = parameter(unit="", description="True: each root segment's anatomy has one soil node (kind 4), "
+    soil_node: bool = parameter(unit="", description="True: each root section's anatomy (a root segment's, a root "
+                                "apex's) has one soil node (kind 4), "
                                 "joined to its border walls and junctions (network_path 7): the section's one soil "
                                 "boundary", default=False, scale=SCALES.Plant, references="GRANAP")
     instanced_anatomy: bool = parameter(unit="", description="True: each segment's anatomy an instance of its template "
@@ -589,10 +652,16 @@ class GranapAnatomy(StructuralComponent):
 
     @classmethod
     def anatomy_settings(cls, g, segment) -> dict:
-        """The segment's plant's scenario dict for the segment's kind (root_anatomy...), {} if not given."""
+        """The segment's plant's scenario dict for the segment's kind (root_anatomy...), {} if not given; a kind of
+        KIND_DEFAULTS (a root apex) on top of its default kind's (root_anatomy)."""
         plant = g.complex_at_scale(segment, g.scales.Plant)
-        key = ANATOMY_KEYS.get(cls._label_name(g, segment))
-        return dict(cls._plant_value(g, plant, key) or {}) if key is not None else {}
+        name = cls._label_name(g, segment)
+        settings = {}
+        for kind in (KIND_DEFAULTS.get(name), name):
+            key = ANATOMY_KEYS.get(kind)
+            if key is not None:
+                settings = _on_top(settings, cls._plant_value(g, plant, key) or {})
+        return settings
 
     @classmethod
     def _plant_value(cls, g, plant, name):
@@ -604,30 +673,36 @@ class GranapAnatomy(StructuralComponent):
     def handled_labels(cls, g, plant) -> tuple:
         """The SubOrgan labels the plant's anatomies are generated for: roots, the explicit shoot, the kinds its
         scenario gives."""
-        return tuple(name for name, key in ANATOMY_KEYS.items()
-                     if name == "RootSegment" or name in cls.shoot or cls._plant_value(g, plant, key) is not None)
+        handled = {name for name, key in ANATOMY_KEYS.items()
+                   if name == "RootSegment" or name in cls.shoot or cls._plant_value(g, plant, key) is not None}
+        handled |= {name for name, default in KIND_DEFAULTS.items() if default in handled}     # a root apex
+        return tuple(name for name in ANATOMY_KEYS if name in handled)
 
     @classmethod
     def organ_of(cls, g, segment) -> OrganAnatomy:
-        """The segment's library and class inputs: the explicit ones (root, shoot), else its scenario's preset."""
+        """The segment's library and class inputs: the explicit ones (root, shoot), else its scenario's preset. A kind
+        of KIND_DEFAULTS (a root apex) without an explicit one of its own takes its default kind's (the root's)."""
         name = cls._label_name(g, segment)
-        explicit = cls.root if name == "RootSegment" else cls.shoot.get(name)
+        base = name if name in cls.shoot else KIND_DEFAULTS.get(name, name)
+        explicit = cls.shoot.get(name) if name in cls.shoot else cls.root if base == "RootSegment" else \
+            cls.shoot.get(base)
         settings = cls.anatomy_settings(g, segment)
         if explicit is not None:
             if "preset" in settings:
                 raise ValueError(f"{cls.__name__}: {ANATOMY_KEYS[name]} gives a preset, but {name} has an explicit "
                                  "OrganAnatomy (root / shoot): give its sections and fields only")
             return explicit
-        key = ANATOMY_KEYS[name]
-        if name == "RootSegment" and not set(RESERVED) & set(settings):
+        key = ANATOMY_KEYS[base]
+        if base == "RootSegment" and not set(RESERVED) & set(settings):
             return OrganAnatomy(cls.library, "radius")
         return OrganAnatomy(preset_library(settings.get("preset", DEFAULT_PRESETS[key]), settings.get("seed", 0)),
                             SIZES[key])
 
     @classmethod
     def has_soil_node(cls, g, segment) -> bool:
-        """Whether the segment is a root segment whose plant has soil nodes (its scenario's soil_node)."""
-        if g.property("label").get(segment) != g.labels.SubOrgan.RootSegment:
+        """Whether the segment is a root section (a root segment or apex, ROOT_KINDS) whose plant has soil nodes (its
+        scenario's soil_node)."""
+        if g.property("label").get(segment) not in _label_codes(g, ROOT_KINDS):
             return False
         plant = g.complex_at_scale(segment, g.scales.Plant)
         return bool(cls._plant_value(g, plant, "soil_node"))
@@ -736,31 +811,38 @@ class GranapAnatomy(StructuralComponent):
         A segment without length (an Adel internode or sheath before it grows: 0, or none given) gets none until it
         has one: it is a pass-through meanwhile, as a hidden element, the junctions spanning it (a section of zero
         height would have no radial conductance, its nodes cut off from the network). *lengths*: {segment: length},
-        by default the MPG's property.
+        by default the MPG's property. A segment whose kind changed (anatomy_kind: a root apex the architecture
+        relabels a segment as it cuts it off its tip, ArchiSimple's) keeps its anatomy when its new kind gives it the
+        same (the same template, reduced or not as before), else has it replaced.
         """
         anatomy_class = g.properties().setdefault("anatomy_class", {})
         template_of = g.properties().setdefault("anatomy_template", {})
+        kind_of = g.properties().setdefault("anatomy_kind", {})
         lengths = g.property("length") if lengths is None else lengths
+        reduction = g.reduction                                 # the plant model's (solve.reduction)
+        if reduction is not None:
+            check_reduced_labels(reduction)
         done = {"emerged": [], "replaced": []}
         for segment in segments:
             current = anatomy_class.get(segment)
             if current is None and not float(lengths.get(segment, 0.) or 0.) > 0.:
                 continue
             key = cls.segment_class(g, segment)
-            if current == key:
+            name = cls._label_name(g, segment)
+            if reduction is not None and name in ORGAN_KINDS:
+                check_reduced_labels(reduction, (name,))
+            previous = kind_of.get(segment, name)
+            if current == key and (previous == name or cls._same_anatomy(g, segment, key, previous, name)):
+                kind_of[segment] = name
                 continue
             if current is not None:
                 remove_anatomy(g, segment)
                 done["replaced"].append(segment)
             else:
                 done["emerged"].append(segment)
-            organ = cls.organ_of(g, segment)
-            own = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED}
-            plant = merged(DEFAULT_OVERRIDES.get(ANATOMY_KEYS.get(cls._label_name(g, segment)), {}), own) or None
-            template = organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
+            template = cls._template(g, segment, key)
             instanced, soil = cls.is_instanced(g, segment), cls.has_soil_node(g, segment)
-            reduction = g.reduction                             # the plant model's (solve.reduction)
-            if reduction is not None and reduction.reduces(cls._label_name(g, segment)):
+            if reduction is not None and reduction.reduces(name):
                 instanced = True
                 full = template.section_template(cls.add_soil_node if soil else None, "soil" if soil else "")
                 written = template.instance_of(g, segment, reduction.template_for(full))
@@ -777,7 +859,26 @@ class GranapAnatomy(StructuralComponent):
                 g.set_values("pore_depth", nodes, [np.nan] * len(nodes))
             anatomy_class[segment] = key
             template_of[segment] = float(template.index)
+            kind_of[segment] = name
         return done
+
+    @classmethod
+    def _template(cls, g, segment, key):
+        """The template of the segment's class *key*: its organ's library's, with its plant's overrides (its kind's
+        defaults, DEFAULT_OVERRIDES, under its scenario dict) and its class inputs' targets."""
+        organ = cls.organ_of(g, segment)
+        own = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED}
+        plant = merged(DEFAULT_OVERRIDES.get(ANATOMY_KEYS.get(cls._label_name(g, segment)), {}), own) or None
+        return organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
+
+    @classmethod
+    def _same_anatomy(cls, g, segment, key, previous, name) -> bool:
+        """Whether the segment, of class *key*, its kind changed from *previous* to *name*, would get the anatomy it
+        has: the same template, reduced (the plant model's reduction) as before or not reduced as before."""
+        if float(g.property("anatomy_template").get(segment, -1.)) != float(cls._template(g, segment, key).index):
+            return False
+        reduction = g.reduction
+        return reduction is None or reduction.reduces(previous) == reduction.reduces(name)
 
     @classmethod
     def update_leaf_surfaces(cls, g, segments) -> None:
@@ -916,9 +1017,10 @@ class GranapAnatomy(StructuralComponent):
         emerged = set(self.active_ids("Plant").tolist())
         segments = [s for plant, these in by_plant.items() if plant in emerged for s in these]
         alive = {s for these in by_plant.values() for s in these}
-        anatomy_class = g.properties().get("anatomy_class", {})
-        for gone in [s for s in list(anatomy_class) if s not in alive]:      # pruned segments: their record only
-            del anatomy_class[gone]
+        for record in ("anatomy_class", "anatomy_kind"):
+            records = g.properties().get(record, {})
+            for gone in [s for s in list(records) if s not in alive]:          # pruned segments: their record only
+                del records[gone]
         done = self.update_anatomies(g, segments, _suborgan_lengths(self.data_structure))
         self.update_leaf_surfaces(g, done["emerged"] + done["replaced"])
         self._wire_pass_through(done["emerged"] + done["replaced"])
@@ -984,6 +1086,11 @@ class GranapAnatomy(StructuralComponent):
         segment is placed by its ends (x1 ... z2) when the architecture gives them, else along a straight axis from its
         plant's position (roots down, the shoot up), at its distance from the axis' base. *where*: a node mask.
         Computed when asked (a frame written): each template's polygons are triangulated once.
+
+        A reduced section (the plant model's reduction: its kept nodes only in the DataStructure) is drawn whole: its
+        interior's protoplasts too, owned by no node (owner -1) but by their display ids (owner_ids:
+        solve.reduction.display_ids), which metafspm's encoding3d frames write as display rows with the reduced
+        system's unknown recovered (MECHA's psi); with *where*, when one of its kept nodes is wanted.
         """
         from openalea.metafspm.coupling.geometry import Triangles
         ds = self.data_structure
@@ -998,7 +1105,10 @@ class GranapAnatomy(StructuralComponent):
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
         frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + ("length",)}
-        vertices, owners = [], []
+        reduction = getattr(g, "reduction", None)              # the plant model's: its reduced sections drawn whole
+        reduced = ({int(owner): key for owner, key in reduction.reduced_groups(ds).values()}
+                   if reduction is not None and g._instanced() else {})
+        vertices, owners, owner_ids = [], [], []
         for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
             if index is None or index < 0:
@@ -1008,16 +1118,33 @@ class GranapAnatomy(StructuralComponent):
                       if int(c) in wanted and c in template_row and scale[int(c)] == g.scales.Compartment
                       and complex_[int(c)] >= 0 and scale[complex_[int(c)]] == g.scales.Cell}
             drawn = np.array([row in row_of for row in rows], dtype=bool)
-            if not drawn.any():
+            interior = {}
+            if segment in reduced and (where is None or row_of):      # its interior's protoplasts, by display id
+                from openalea.metafspm.solve.reduction import display_ids
+                cell_rows, full_rows = _interior_protoplasts(reduction, reduced[segment])
+                interior = dict(zip(cell_rows.tolist(), display_ids(segment, full_rows).tolist()))
+            shown = np.array([row in interior and row not in row_of for row in rows], dtype=bool)
+            if not drawn.any() and not shown.any():
                 continue
             centre, axis = _segment_frame(g, segment, plant_position, frame_values)
             u, v = _perpendiculars(axis)
-            xy = local[drawn] / self.mm_per_unit                                   # (T, 3, 2), in m
-            vertices.append(centre + xy[..., :1] * u + xy[..., 1:] * v)
-            owners.append(ds.index_of([row_of[row] for row in rows[drawn]], "node"))
+            for mask, own in ((drawn, True), (shown, False)):
+                if not mask.any():
+                    continue
+                xy = local[mask] / self.mm_per_unit                                # (T, 3, 2), in m
+                vertices.append(centre + xy[..., :1] * u + xy[..., 1:] * v)
+                if own:
+                    vids = [row_of[row] for row in rows[mask]]
+                    owners.append(ds.index_of(vids, "node"))
+                    owner_ids.append(np.asarray(vids, dtype=np.int64))
+                else:
+                    owners.append(np.full(int(mask.sum()), -1, dtype=np.int64))
+                    owner_ids.append(np.array([interior[row] for row in rows[mask]], dtype=np.int64))
         if not vertices:
             return Triangles(np.zeros((0, 3, 3)), np.zeros(0, dtype=np.int64))
-        return Triangles(np.concatenate(vertices), np.concatenate(owners))
+        owners = np.concatenate(owners)
+        return Triangles(np.concatenate(vertices), owners,
+                         np.concatenate(owner_ids) if (owners < 0).any() else None)
 
     @state(include_inactive=True)        # the sections' geometry, emerged or not
     def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
@@ -1046,6 +1173,26 @@ class GranapAnatomy(StructuralComponent):
 
 
 _TEMPLATE_TRIANGLES = {}                  # {template index: (triangles (T, 3, 2) in mm, the cell row of each)}
+_INTERIOR_PROTOPLASTS = {}                # {(id of a Reduction, reduced key): (cell rows, full template rows)}
+
+
+def _interior_protoplasts(reduction, key) -> tuple:
+    """(their cell rows in GRANAP's template, their rows in the full SectionTemplate) of the protoplasts a reduced
+    template of key *key* eliminates (the full template's Compartments in a Cell that the reduced one does not hold):
+    the interior cells a reduced section's drawing adds; once per reduced template."""
+    cache_key = (id(reduction), key)
+    if cache_key not in _INTERIOR_PROTOPLASTS:
+        from openalea.metafspm.data_structure.configs import ScalesConfig
+        full = reduction.full_template(key)
+        held = np.zeros(full.size, dtype=bool)
+        held[reduction.full_rows(key)] = True
+        where, values = full.properties.get("template_row", (np.zeros(0, dtype=np.int64), np.zeros(0)))
+        where = np.asarray(where, dtype=np.int64)
+        complex_ = full.complex[where]
+        in_cell = (complex_ >= 0) & (full.scale[np.maximum(complex_, 0)] == ScalesConfig.Cell)
+        keep = (full.scale[where] == ScalesConfig.Compartment) & in_cell & ~held[where]
+        _INTERIOR_PROTOPLASTS[cache_key] = (np.asarray(values, dtype=float)[keep].astype(np.int64), where[keep])
+    return _INTERIOR_PROTOPLASTS[cache_key]
 
 
 def _template_triangles(template) -> tuple:
@@ -1109,7 +1256,7 @@ def _segment_frame(g, segment, plant_position, frame_values) -> tuple:
         parent = g.parent(parent)
     plant = g.complex_at_scale(segment, g.scales.Plant)
     base = np.asarray(plant_position[int(plant)], dtype=float)
-    direction = -1. if properties.get("label", {}).get(segment) == g.labels.SubOrgan.RootSegment else 1.
+    direction = -1. if properties.get("label", {}).get(segment) in _label_codes(g, ROOT_KINDS) else 1.
     middle = below + float(lengths.get(segment, 0.)) / 2.
     return base + np.array([0., 0., direction * middle]), np.array([0., 0., direction])
 

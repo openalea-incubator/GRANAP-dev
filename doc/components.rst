@@ -11,7 +11,12 @@ segment is placed by its ends (``x1`` ... ``z2``, optional inputs: on the DataSt
 gives them); otherwise, as with ``RootAxis`` and ``Needle``, along a straight axis from the plant's position. These shapes are for display only: metafspm's
 encoding3d export writes them as a mesh of their own, which ParaView colours by any Compartment variable (tissue, water
 potential, ...). Light models keep the architecture's triangles. They are computed when asked (a frame written), not
-at each step.
+at each step. A reduced section (the plant model's reduction, e.g. MECHA's ``scenario_reduction``: only its conduits,
+its soil node and a blade's vapour path in the DataStructure) is drawn whole: its interior's protoplasts owned by
+their display ids (metafspm's ``solve.reduction.display_ids``), which the frame writes as display rows of the
+Compartments (``metafspm_display_only``), their values the reduced system's unknown recovered (MECHA's ``psi``) and
+their template's properties (tissue, cell area, ...), NaN otherwise. The DataStructure stays reduced; such a frame is
+as large as the full anatomy's.
 
 **Checkpoints.** A Scene's checkpoint keeps the anatomy templates (``GranapAnatomy.checkpoint_state``: the libraries'
 and those the segments' ``anatomy_template`` give, without their generated organ). A run resumed in a new process
@@ -19,24 +24,42 @@ and those the segments' ``anatomy_template`` give, without their generated organ
 checkpoint has gets its template, and a new class's template an id after theirs.
 
 **The kinds of sections.** Each kind is a scenario key, a Plant parameter with GRANAP's sections and fields on top
-of its preset; the kinds other than the roots are generated when their key is given:
+of its preset; the kinds other than the roots (segments and apices) are generated when their key is given:
 
-============== ===================================================== ===================== ================
-key            sections                                              default preset        class input
-============== ===================================================== ===================== ================
-root_anatomy   root segments                                         ``for_root``          ``radius``
-stem_anatomy   stem elements                                         ``for_monocot_stem``  ``stem_radius``
-leaf_anatomy   leaf elements                                         ``for_monocot_leaf``  (one class)
-sheath_anatomy the stem elements of a Sheath organ (Adel's)          ``for_monocot_leaf``, (one class)
-                                                                     bent round the stem
-seed_anatomy   the seed (label ``Seed``: the seminal roots' bearer)  ``for_monocot_stem``  ``stem_radius``
-============== ===================================================== ===================== ================
+================= ===================================================== ===================== ================
+key               sections                                              default preset        class input
+================= ===================================================== ===================== ================
+root_anatomy      root segments                                         ``for_root``          ``radius``
+root_apex_anatomy root apices (label ``RootApex``: an axis' tip,        root_anatomy's        ``radius``
+                  ArchiSimple's), on top of ``root_anatomy``
+stem_anatomy      stem elements                                         ``for_monocot_stem``  ``stem_radius``
+leaf_anatomy      leaf elements                                         ``for_monocot_leaf``  (one class)
+sheath_anatomy    the stem elements of a Sheath organ (Adel's)          ``for_monocot_leaf``, (one class)
+                                                                        bent round the stem
+seed_anatomy      the seed (label ``Seed``: the seminal roots' bearer)  ``for_monocot_stem``  ``stem_radius``
+================= ===================================================== ===================== ================
 
 The seed is, for now, a conducting node of the stem's anatomy: its preset is the stems', and its class input theirs,
 ``stem_radius``, which the model building the seed writes on it (one input, one translator link, for the stems and
 the seed). A wheat root has its own preset, ``for_wheat_root`` (``{"root_anatomy": {"preset": "for_wheat_root"}}``):
 the monocot root with the cell and vessel sizes of GRANAP's wheat example (the cultivar Salmone's section, 0.41 mm in
 radius); its docstring lists the values and those to calibrate (the nodal roots' among them).
+
+**Root apices.** An architecture's axis tip (``RootApex``, ArchiSimple's: the part of the root beyond its last
+segment, which ArchiSimple cuts into segments as it grows) is a root section: by default it gets the root segments'
+anatomy of its class (``root_anatomy``, the explicit ``root``), its own scenario key, ``root_apex_anatomy``, on top of
+it; its soil node with the segments' (``soil_node``); it is joined to its parent segment as a segment is. An apex
+without length (a primordium, a new tip) has none until it grows. When the architecture relabels an apex a segment
+(ArchiSimple cutting it off the tip), its anatomy is kept if the segments' kind gives it the same (the same template,
+reduced or not as before), else replaced. The meristem is not represented: an apex is a root section of its
+class, its maturity its barriers' (MECHA's ``Development``, by its distance from the tip; at barrier 0 MECHA's xylem is
+immature, without xylem junction: an apex there takes up almost nothing, its only axial path the protophloem's).
+
+**A reduction's labels are the kinds.** A plant model's reduction (metafspm's ``solve.reduction``) is asked by kind
+(``Reduction.reduces``): ``RootSegment``, ``RootApex``, ``StemElement``, ``LeafElement``, ``Sheath``, ``Seed``. A
+sheath's elements are labelled ``StemElement`` but are the kind ``Sheath``: list both to reduce the stems and the
+sheaths. GRANAP warns (once) of a label that is no kind, and, when the plant has sheaths, of ``StemElement`` listed without
+``Sheath``.
 
 **Junctions across sections without anatomy (a pass-through).** A SubOrgan without anatomy (Adel's
 ``HiddenElement``, the part of an organ hidden in the sheaths' tube; a kind the scenario does not give, e.g. a sheath

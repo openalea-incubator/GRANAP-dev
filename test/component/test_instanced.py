@@ -190,3 +190,41 @@ def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
         return sorted((place[a], place[b]) for a, b in zip(view.tail[edges].tolist(), view.head[edges].tolist()))
 
     assert junctions(full) == junctions(reduced) and len(junctions(full)) > 0
+
+
+def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
+    """A reduced section's drawing (display_triangles) is its full anatomy's: its kept protoplasts by node, its
+    interior's by display id (owner -1, owner_ids), the same triangles as the unreduced plant's; metafspm's frame
+    writes the interior as display rows (its Cells, Layers and Compartments, linked to the section), the mesh's
+    triangles on them; from_frame gives the reduced plant back."""
+    from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
+    from openalea.metafspm.solve.reduction import Reduction, is_display_id
+    from openalea.granap.metafspm.component import GranapAnatomy
+    Choregrapher().set_simulation_time_step(3600.)
+    full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
+                     Anatomy).data_structure
+    reduction = Reduction(labels=("RootSegment",), ports=GranapAnatomy.conduits, keep=_soil_nodes)
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    drawn_full = Anatomy(data_structure=full).display_triangles()
+    anatomy = Anatomy(data_structure=reduced)
+    drawn = anatomy.display_triangles()
+    assert len(drawn) == len(drawn_full) and (drawn.owner < 0).any()
+    np.testing.assert_allclose(np.sort(drawn.vertices.reshape(-1)), np.sort(drawn_full.vertices.reshape(-1)))
+    assert is_display_id(drawn.owner_ids[drawn.owner < 0]).all()
+    np.testing.assert_array_equal(drawn.owner_ids[drawn.owner >= 0],
+                                  reduced.entity_ids("node")[drawn.owner[drawn.owner >= 0]])
+    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]})
+    plant = frame.data_structures[0]
+    compartments = plant.entity_set("Compartment").columns
+    shown = np.asarray(compartments[DISPLAY_ONLY], dtype=bool)
+    assert shown.sum() + reduced.n_nodes() == full.n_nodes()
+    mesh = next(mesh for mesh in plant.meshes if mesh.name == type(anatomy).__name__)
+    np.testing.assert_array_equal(compartments["id"][mesh.feature_rows["Compartment"][::3]], drawn.owner_ids)
+    sections = plant.entity_set("SubOrgan").columns["id"][mesh.feature_rows["SubOrgan"][::3]]
+    owner_of_node = reduced.entity_ids("SubOrgan")[reduced.owner("SubOrgan")]
+    expected = np.where(drawn.owner >= 0, owner_of_node[np.maximum(drawn.owner, 0)],
+                        (drawn.owner_ids - 2 ** 52) // 2 ** 24)
+    np.testing.assert_array_equal(sections, expected)
+    assert (mesh.feature_rows["Cell"][::3] >= 0).all()                  # every protoplast in its Cell
+    assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()

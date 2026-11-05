@@ -84,7 +84,7 @@ In `example/tutorials/developer/`, after the first user tutorial:
 0. [Overview](example/tutorials/developer/00_overview.ipynb): the modules, the original code, the validation;
 1. [Cross sections as a metafspm component](example/tutorials/developer/01_cross_sections_in_metafspm.ipynb):
    - GRANAP's anatomy component in a plant model, its outputs in the DataStructure;
-   - the parametrization by the plants' scenarios (`root_anatomy`, `stem_anatomy`, `leaf_anatomy`);
+   - the parametrization by the plants' scenarios (`root_anatomy`, `root_apex_anatomy`, `stem_anatomy`, `leaf_anatomy`, `sheath_anatomy`, `seed_anatomy`);
    - classes within a plant;
    - how the sections are joined axially (the multiscale traversal);
    - growth;
