@@ -59,3 +59,10 @@ def test_draw(default):
     matplotlib.use("Agg")
     ax = default.draw()
     assert ax.collections and ax.get_legend() is not None
+
+
+def test_the_run_configuration_is_the_scenes():
+    """compute= (metafspm's Compute) is the Scene's run configuration."""
+    from openalea.metafspm.compute import Compute
+    compute = Compute(threads=1, memory="keep")
+    assert simulate(compute=compute).scene.compute is compute
