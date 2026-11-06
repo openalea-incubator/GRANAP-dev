@@ -150,23 +150,17 @@ def test_a_state_changed_in_the_data_structure_survives_the_next_anatomy_step():
     _same(copied, instanced)
 
 
-def _soil_nodes(template):
-    rows, values = template.properties["kind"]
-    out = np.zeros(template.size, dtype=bool)
-    out[rows] = np.asarray(values, dtype=float) == 4.
-    return out
-
-
 def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
     """A plant model's Reduction (solve.reduction) on the root segments: each an instance of its reduced template,
-    its conduits (GranapAnatomy.conduits, families 0 and 1) and its soil node only, the conduits joined to the
-    neighbouring sections' by the junctions as in the full anatomy."""
+    its conduits and its soil node only (GranapAnatomy's entity sets conduits, families 0 and 1, and soil_nodes), the
+    conduits joined to the neighbouring sections' by the junctions as in the full anatomy."""
     from openalea.metafspm.solve.reduction import Reduction
     from openalea.granap.metafspm.component import GranapAnatomy
     Choregrapher().set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
-    reduction = Reduction(labels=("RootSegment",), ports=GranapAnatomy.conduits, keep=_soil_nodes)
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
     reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
                         reduction=reduction).data_structure
     for ds in (full, reduced):
@@ -178,6 +172,9 @@ def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
 
     kind = reduced.get("kind")
     assert ((kind == 4) | np.isin(family(reduced), (0., 1.))).all()
+    assert GranapAnatomy.entity_sets["soil_nodes"] == {"kind": 4.}                 # the published sets, by name
+    reduced.define_mask("soil_nodes", entities="GranapAnatomy.soil_nodes")
+    np.testing.assert_array_equal(reduced.mask("soil_nodes"), kind == 4)
     full_kept = (full.get("kind") == 4) | np.isin(family(full), (0., 1.))
     assert reduced.n_nodes() == int(full_kept.sum())
 
@@ -199,11 +196,11 @@ def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
     triangles on them; from_frame gives the reduced plant back."""
     from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
     from openalea.metafspm.solve.reduction import Reduction, is_display_id
-    from openalea.granap.metafspm.component import GranapAnatomy
     Choregrapher().set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
-    reduction = Reduction(labels=("RootSegment",), ports=GranapAnatomy.conduits, keep=_soil_nodes)
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
     reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
                         reduction=reduction).data_structure
     drawn_full = Anatomy(data_structure=full).display_triangles()

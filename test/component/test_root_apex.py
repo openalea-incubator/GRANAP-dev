@@ -3,9 +3,9 @@ Root apices (SubOrgan label RootApex, ArchiSimple's axis tips: the part of the r
 section of their own, root_apex_anatomy, by default the root segments' anatomy of their class. An apex with a length
 gets it, its soil node with the segments', joined to its parent segment as a segment is; an apex without length
 (a primordium) has none until it grows. An apex the architecture relabels a segment (ArchiSimple cutting it off the
-tip) keeps its anatomy when the segments' kind gives the same, else has it replaced. A reduction's labels are
-GRANAP's kinds: a sheath's StemElements are the kind "Sheath", reduced when it is listed; GRANAP warns of a label
-that is no kind and of StemElement listed without Sheath.
+tip) keeps its anatomy when the segments' kind gives the same, else has it replaced. A reduction selects its
+sections by a filter of the SubOrgans (where=): a sheath's elements are StemElements, reduced with the stems, or
+apart from them by their organ's label ("Organ.label"); GRANAP warns of a label it gives no anatomy.
 """
 import warnings
 
@@ -146,8 +146,8 @@ def test_an_apex_relabelled_a_segment_keeps_or_replaces_its_anatomy(apex_anatomy
                for family in (0, 1))
 
 
-def _reduction(labels):
-    return Reduction(labels=labels, ports=GranapAnatomy.conduits)
+def _reduction(where):
+    return Reduction(where=where, ports="GranapAnatomy.conduits")
 
 
 def _reduced_sections(g):
@@ -155,28 +155,29 @@ def _reduced_sections(g):
     return set() if instances is None else {int(owner) for owner in instances.owner.tolist()}
 
 
-def test_a_sheath_is_reduced_when_its_kind_is_listed():
+def test_the_stem_elements_are_reduced_with_their_sheaths():
+    """where={"label": "StemElement"}: every stem element, a sheath's too (no organ label trick); no warning."""
     granap_component._CHECKED_REDUCTIONS.clear()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction(("StemElement", "Sheath")))
-    assert not [w for w in caught if "reduction's labels" in str(w.message)]   # the kinds are GRANAP's
+        ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction({"label": "StemElement"}))
+    assert not [w for w in caught if "reduction's labels" in str(w.message)]
     roles = _roles(g)
     reduced = _reduced_sections(g)
     assert set(roles["sheath"]) <= reduced and set(roles["crown"]) <= reduced
     assert not set(roles["leaf"]) & reduced
 
 
-def test_a_sheath_is_not_reduced_without_its_kind_and_granap_warns():
+def test_the_sheaths_apart_from_the_stems_by_their_organ():
+    """where= filters across scales: the stem elements of the internodes (Organ.label), not the sheaths'."""
     granap_component._CHECKED_REDUCTIONS.clear()
-    with pytest.warns(UserWarning, match="StemElement and not Sheath"):
-        ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction(("StemElement",)))
+    ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction({"label": "StemElement", "Organ.label": "StemInternode"}))
     roles = _roles(g)
     reduced = _reduced_sections(g)
     assert set(roles["crown"]) <= reduced and not set(roles["sheath"]) & reduced
 
 
-def test_a_label_that_is_no_kind_warns():
+def test_a_label_without_anatomy_warns():
     granap_component._CHECKED_REDUCTIONS.clear()
-    with pytest.warns(UserWarning, match="no GRANAP anatomy kind"):
-        _built({}, RootWithApices, _reduction(("RootSegment", "RootTip")))
+    with pytest.warns(UserWarning, match="no SubOrgan label with a GRANAP anatomy"):
+        _built({}, RootWithApices, _reduction({"label": ("RootSegment", "HiddenElement")}))

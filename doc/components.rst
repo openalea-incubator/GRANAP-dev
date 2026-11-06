@@ -55,11 +55,20 @@ reduced or not as before), else replaced. The meristem is not represented: an ap
 class, its maturity its barriers' (MECHA's ``Development``, by its distance from the tip; at barrier 0 MECHA's xylem is
 immature, without xylem junction: an apex there takes up almost nothing, its only axial path the protophloem's).
 
-**A reduction's labels are the kinds.** A plant model's reduction (metafspm's ``solve.reduction``) is asked by kind
-(``Reduction.reduces``): ``RootSegment``, ``RootApex``, ``StemElement``, ``LeafElement``, ``Sheath``, ``Seed``. A
-sheath's elements are labelled ``StemElement`` but are the kind ``Sheath``: list both to reduce the stems and the
-sheaths. GRANAP warns (once) of a label that is no kind, and, when the plant has sheaths, of ``StemElement`` listed without
-``Sheath``.
+**A reduction selects its sections by their labels.** A plant model's reduction (metafspm's ``solve.reduction``)
+asks of each section its filter, ``Reduction(where=)`` (``Reduction.reduces(g, segment)``): its SubOrgan label
+(``RootSegment``, ``RootApex``, ``StemElement``, ``LeafElement``, ``Seed``: the labels GRANAP gives an anatomy,
+``REDUCIBLE_LABELS``) and its organ's (``"Organ.label"``): a sheath's elements are ``StemElement``\ s, reduced with the
+stems, or apart from them, ``{"label": "StemElement", "Organ.label": "StemInternode"}``. GRANAP warns (once) of a
+label it gives no anatomy. A section whose kind changes keeps its anatomy when it would be reduced as its instance
+is (``Reduction.is_reduced``).
+
+**Its named entity sets.** ``GranapAnatomy.entity_sets``: ``soil_nodes`` (a root section's soil node, its one soil
+boundary), ``conduits`` (the protoplasts of families 0 and 1, which the junctions join) and ``leaf_surfaces``.
+Assemblies select by these names, not by the codes: a plant model's mask of the roots' soil nodes,
+``ds.define_mask("root_surface", entities="GranapAnatomy.soil_nodes")``, a reduction's ports and kept nodes,
+``Reduction(ports="GranapAnatomy.conduits", keep="GranapAnatomy.soil_nodes")`` (evaluated on the section templates'
+properties).
 
 **Junctions across sections without anatomy (a pass-through).** A SubOrgan without anatomy (Adel's
 ``HiddenElement``, the part of an organ hidden in the sheaths' tube; a kind the scenario does not give, e.g. a sheath

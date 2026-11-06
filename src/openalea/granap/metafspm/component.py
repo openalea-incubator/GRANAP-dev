@@ -167,34 +167,29 @@ def _on_top(base: dict, own: dict) -> dict:
     return out
 
 
-_CHECKED_REDUCTIONS = set()                        # the (labels, check) GRANAP has warned of, once each
+_CHECKED_REDUCTIONS = set()                        # the reductions' labels GRANAP has warned of, once each
+# The SubOrgan labels GRANAP gives an anatomy (a reduction's where= names them; a sheath's elements are StemElements)
+REDUCIBLE_LABELS = ("RootSegment", "RootApex", "StemElement", "LeafElement", "Seed")
 _CHECKPOINTED = {}                                 # {template index: (template, sections known, its copy saved)}
 
 
-def check_reduced_labels(reduction, kinds=()) -> None:
+def check_reduced_labels(reduction) -> None:
     """
-    Warns, once per set of labels, when a plant model's reduction (solve.reduction) lists a label that is no GRANAP
-    anatomy kind (ANATOMY_KEYS: RootSegment, RootApex, StemElement, LeafElement, Sheath, Seed), and, when sections of
-    a kind named by its organ are among *kinds* (ORGAN_KINDS: a sheath's StemElements are the kind "Sheath"), when it
-    lists their elements' label without that kind: the reduction asks GRANAP's kinds (Reduction.reduces), so those
-    sections are not reduced.
+    Warns, once per filter, when a plant model's reduction (solve.reduction: its where=, a filter of the SubOrgans)
+    names a SubOrgan label that GRANAP gives no anatomy (REDUCIBLE_LABELS: RootSegment, RootApex, StemElement,
+    LeafElement, Seed; a sheath's elements are StemElements of a Sheath organ, "Organ.label"): nothing is reduced
+    for it.
     """
     import warnings
-    labels = tuple(reduction.labels)
-    if not labels:
+    labels = tuple(reduction.labels())
+    if not labels or labels in _CHECKED_REDUCTIONS:
         return
-    if (labels, None) not in _CHECKED_REDUCTIONS:
-        _CHECKED_REDUCTIONS.add((labels, None))
-        unknown = [label for label in labels if label not in ANATOMY_KEYS]
-        if unknown:
-            warnings.warn(f"the reduction's labels {unknown} are no GRANAP anatomy kind ({', '.join(ANATOMY_KEYS)}): "
-                          "nothing is reduced for them", stacklevel=3)
-    for organ, element in ORGAN_KINDS.items():
-        if organ in kinds and element in labels and organ not in labels and (labels, organ) not in _CHECKED_REDUCTIONS:
-            _CHECKED_REDUCTIONS.add((labels, organ))
-            warnings.warn(f"the reduction's labels give {element} and not {organ}: a {organ}'s elements (labelled "
-                          f"{element}) are the anatomy kind \"{organ}\", not reduced; add \"{organ}\" to reduce "
-                          "them", stacklevel=3)
+    _CHECKED_REDUCTIONS.add(labels)
+    unknown = [label for label in labels if label not in REDUCIBLE_LABELS]
+    if unknown:
+        warnings.warn(f"the reduction's labels {unknown} are no SubOrgan label with a GRANAP anatomy "
+                      f"({', '.join(REDUCIBLE_LABELS)}; a sheath's elements: StemElement): nothing is reduced for "
+                      "them", stacklevel=3)
 
 
 def _basal_with_anatomy(g, elements, anatomy_class):
@@ -484,7 +479,16 @@ class GranapAnatomy(StructuralComponent):
     planting's positions, and the state variables a coupled model (e.g. MECHA's) reads: the network of every section
     (Compartments and Connections, quantities in mm, mm2, mm3), its codes, and the 3D quantities recomputed as the
     segments elongate.
+
+    The named entity sets it publishes (entity_sets: assemblies select by these names, not by the codes), on the
+    plant's DataStructure (define_mask(entities="GranapAnatomy.soil_nodes")) and on the section templates (a
+    reduction's ports and keep): soil_nodes (each root section's soil node, its one soil boundary), conduits (the
+    protoplasts of families 0 and 1, which the junctions join: a reduction's ports), leaf_surfaces (a leaf organ's
+    surface node).
     """
+    entity_sets = {"soil_nodes": {"kind": float(SOIL_NODE)}, "conduits": {"family": [0., 1.]},
+                   "leaf_surfaces": {"kind": float(LEAF_SURFACE)}}
+
     # ── Inputs: the segments' architecture ──
     radius: float = input_variable(unit="m", description="the segment's radius (the diameter class input)",
                                    references="GRANAP", by="Architecture", scale=SCALES.SubOrgan,
@@ -770,15 +774,6 @@ class GranapAnatomy(StructuralComponent):
         written["connections"] = list(written["connections"]) + list(links)
         return soil, links
 
-    @staticmethod
-    def conduits(template) -> np.ndarray:
-        """The conduits of a SectionTemplate (the protoplasts of families 0 and 1, which the junctions join): a
-        reduction's ports (solve.reduction: the nodes a section keeps for its neighbours)."""
-        out = np.zeros(template.size, dtype=bool)
-        rows, values = template.properties.get("family", (np.zeros(0, dtype=np.int64), np.zeros(0)))
-        out[rows] = np.isin(np.asarray(values, dtype=float), (0., 1.))
-        return out
-
     @classmethod
     def is_instanced(cls, g, segment) -> bool:
         """Whether the segment's plant has instanced anatomies (its scenario's instanced_anatomy)."""
@@ -842,8 +837,6 @@ class GranapAnatomy(StructuralComponent):
                 continue
             key = cls.segment_class(g, segment)
             name = cls._label_name(g, segment)
-            if reduction is not None and name in ORGAN_KINDS:
-                check_reduced_labels(reduction, (name,))
             previous = kind_of.get(segment, name)
             if current == key and (previous == name or cls._same_anatomy(g, segment, key, previous, name)):
                 kind_of[segment] = name
@@ -855,7 +848,7 @@ class GranapAnatomy(StructuralComponent):
                 done["emerged"].append(segment)
             template = cls._template(g, segment, key)
             instanced, soil = cls.is_instanced(g, segment), cls.has_soil_node(g, segment)
-            if reduction is not None and reduction.reduces(name):
+            if reduction is not None and reduction.reduces(g, segment):
                 instanced = True
                 full = template.section_template(cls.add_soil_node if soil else None, "soil" if soil else "")
                 written = template.instance_of(g, segment, reduction.template_for(full))
@@ -887,11 +880,15 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def _same_anatomy(cls, g, segment, key, previous, name) -> bool:
         """Whether the segment, of class *key*, its kind changed from *previous* to *name*, would get the anatomy it
-        has: the same template, reduced (the plant model's reduction) as before or not reduced as before."""
+        has: the same template, reduced (the plant model's reduction, its where= on the segment as it is now) as its
+        instance is or not reduced as it is."""
         if float(g.property("anatomy_template").get(segment, -1.)) != float(cls._template(g, segment, key).index):
             return False
         reduction = g.reduction
-        return reduction is None or reduction.reduces(previous) == reduction.reduces(name)
+        if reduction is None:
+            return True
+        current = g.instances.template_of(segment)
+        return reduction.reduces(g, segment) == (current is not None and reduction.is_reduced(current))
 
     @classmethod
     def update_leaf_surfaces(cls, g, segments) -> None:
