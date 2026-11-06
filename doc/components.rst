@@ -74,6 +74,9 @@ Assemblies select by these names, not by the codes: a plant model's mask of the 
 ``ds.define_mask("root_surface", entities="GranapAnatomy.soil_nodes")``, a reduction's ports and kept nodes,
 ``Reduction(ports="GranapAnatomy.conduits", keep="GranapAnatomy.soil_nodes")`` (evaluated on the section templates'
 properties).
+A reduction lumping kept nodes (``Reduction(merge=)``, MECHA's ``leaf_ports="bundles"``: a shoot section's conduits
+per vascular bundle, by their ``pole_id`` and ``family``) keeps one conduit per group: the junctions (``vessel_pairs``,
+by track id, then by position) then join the merged conduits, the bundles, of two sections.
 
 **Junctions across sections without anatomy (a pass-through).** A SubOrgan without anatomy (Adel's
 ``HiddenElement``, the part of an organ hidden in the sheaths' tube; a kind the scenario does not give, e.g. a sheath
