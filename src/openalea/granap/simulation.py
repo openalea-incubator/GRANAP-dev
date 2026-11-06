@@ -158,7 +158,8 @@ def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, o
     (run.json, the run's status and versions; scenario.json, what it was built with; Plant/<model>/summaries.csv;
     frames/, the section as an encoding3d frame), None for none. *recorder*: instead, a metafspm SceneRecorder of your
     own (e.g. frames only, filtered by its frame_options).
-    *compute*: the Scene's run configuration (metafspm's Compute: its threads, its memory trim; None: Compute())."""
+    *compute*: the Scene's run configuration (metafspm's Compute: its threads, its process pool and sparse solver,
+    its memory trim; None: Compute())."""
     from openalea.metafspm.scene.population import Planting, planting
     from openalea.metafspm.scene.recorder import SceneRecorder
     from openalea.metafspm.scene.scene import Scene
