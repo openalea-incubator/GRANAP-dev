@@ -220,11 +220,12 @@ def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
     shown = np.asarray(compartments[DISPLAY_ONLY], dtype=bool)
     assert shown.sum() + reduced.n_nodes() == full.n_nodes()
     mesh = next(mesh for mesh in plant.meshes if mesh.name == type(anatomy).__name__)
-    np.testing.assert_array_equal(compartments["id"][mesh.feature_rows["Compartment"][::3]], drawn.owner_ids)
-    sections = plant.entity_set("SubOrgan").columns["id"][mesh.feature_rows["SubOrgan"][::3]]
+    corner = mesh.indices[::3]                                          # each triangle's first vertex (shared ones)
+    np.testing.assert_array_equal(compartments["id"][mesh.feature_rows["Compartment"][corner]], drawn.owner_ids)
+    sections = plant.entity_set("SubOrgan").columns["id"][mesh.feature_rows["SubOrgan"][corner]]
     owner_of_node = reduced.entity_ids("SubOrgan")[reduced.owner("SubOrgan")]
     expected = np.where(drawn.owner >= 0, owner_of_node[np.maximum(drawn.owner, 0)],
                         (drawn.owner_ids - 2 ** 52) // 2 ** 24)
     np.testing.assert_array_equal(sections, expected)
-    assert (mesh.feature_rows["Cell"][::3] >= 0).all()                  # every protoplast in its Cell
+    assert (mesh.feature_rows["Cell"][corner] >= 0).all()               # every protoplast in its Cell
     assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()
