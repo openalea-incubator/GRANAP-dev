@@ -1038,7 +1038,7 @@ class GranapAnatomy(StructuralComponent):
         owners = g.compartments_by_owner(g.scales.SubOrgan)
         spans = None
         if not all(owners.get(int(v)) for v in ds.entity_ids("SubOrgan")):
-            edges = np.asarray(ds.edges(), dtype=np.int64).reshape(-1, 2)
+            edges = ds.edge_endpoints()
             rows = np.flatnonzero(np.asarray(network_path) == columns.JUNCTION_PATH)
             parents, children = ds.sections_of(edges[rows, 0]), ds.sections_of(edges[rows, 1])
             found_rows, hidden = [], []

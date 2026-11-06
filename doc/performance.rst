@@ -201,6 +201,11 @@ properties in bulk took the replacement of a section's stored network from 301 s
 section's MPG writes went from 0.25 to 0.07 s with ``ArrayDict.update`` in bulk (metafspm ``add82ba``, recorded in
 ``bc54752``); bulk creation takes 0.17 s for a section of 45.7 k vertices (``80e8643``).
 
+In use case 1 at 8 plants (day 10 to 11, 110 k nodes, from a checkpoint), metafspm's incremental topology updates
+(its devplan's O-14: the structure-derived arrays patched from what an update removed and added, the instances'
+tables gathered per template) and the pass-through spans read as an array (``ds.edge_endpoints()``) took this
+component from 1.15 to 0.88 s per step, the step from 4.51 to 3.95 s, every result identical.
+
 
 Options that change the time
 ============================
