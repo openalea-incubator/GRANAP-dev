@@ -18,10 +18,15 @@ Compartments (``metafspm_display_only``), their values the reduced system's unkn
 their template's properties (tissue, cell area, ...), NaN otherwise. The DataStructure stays reduced; such a frame is
 as large as the full anatomy's.
 
-**Checkpoints.** A Scene's checkpoint keeps the anatomy templates (``GranapAnatomy.checkpoint_state``: the libraries'
-and those the segments' ``anatomy_template`` give, without their generated organ). A run resumed in a new process
-(``Scene.load_checkpoint``) registers them again: the segments' sections are drawn from them, a segment of a class the
-checkpoint has gets its template, and a new class's template an id after theirs.
+**Templates and checkpoints.** The anatomy templates are the population's (metafspm's registry of its MPG,
+``g.objects("anatomy_templates")``, ``ds.objects`` on its DataStructure: no module-level registry, two Scenes in one
+process have their own): each keyed by its index, a number of its content (``library.template_index``: the organ
+class, its parameters, the seed and the class key, the same in every population and process), resolved by
+``template_by_index(g, index)``. A Scene's checkpoint saves them with the MPG, each once (a shared part, without its
+generated organ: ``saved_template``); a run resumed in a new process (``Scene.load_checkpoint``) has them back: the
+segments' sections are drawn from them and a segment of a class the checkpoint has gets its template. The presets'
+libraries and the derived tables (the vessels' pairs, a reduced section's interior protoplasts) are the MPG's caches
+(``saved=False``), a template's triangles kept on it.
 
 **The kinds of sections.** Each kind is a scenario key, a Plant parameter with GRANAP's sections and fields on top
 of its preset; the kinds other than the roots (segments and apices) are generated when their key is given:
