@@ -74,8 +74,8 @@ def test_a_segment_changing_class_is_replaced_and_starts_from_the_defaults(plant
     assert anatomy.last_update == {"emerged": [], "replaced": [lateral]}
     new = g.compartments_by_owner(g.scales.SubOrgan)[lateral]
     assert not set(old) & set(new) and not any(g.has_vertex(v) for v in old)       # the old anatomy is gone
-    assert len(new) == len(Anatomy.library.template((1.1, 0., 0.)).cell_layer) + \
-        len(Anatomy.library.template((1.1, 0., 0.)).apoplast["kind"][0])
+    assert len(new) == len(Anatomy.library.template(g, (1.1, 0., 0.)).cell_layer) + \
+        len(Anatomy.library.template(g, (1.1, 0., 0.)).apoplast["kind"][0])
     np.testing.assert_array_equal(ds.get("solute")[_index(ds, new)], -1.)        # defaults, nothing carried (Q-G2)
     assert lateral in ds.rewired
 

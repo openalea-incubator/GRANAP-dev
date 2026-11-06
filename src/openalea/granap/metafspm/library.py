@@ -4,15 +4,23 @@ segment of the class.
 
     key = class_key(class_inputs, g, segment)                   a class: its class inputs' binned values
     library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
-    template = library.template(key, plant=overrides)           generated at the first request (per plant overrides)
+    template = library.template(g, key, plant=overrides)        generated at the first request (per plant overrides),
+                                                                kept in g's registry (g.objects("anatomy_templates"))
+    template = template_by_index(g, index)                      a segment's (its anatomy_template)
     written = template.instantiate(g, segment)                   the segment's own Layers, Cells, protoplasts,
                                                                  walls, junctions and Connections, in bulk
 
 A template keeps the section as tables (one row per vertex, its properties); a segment's copy holds its own vertices
 and properties (its state), but not the geometry: its Cells point to the template's polygons and rings
 (template, template_row), stored once per class.
+
+The templates are the MPG's objects (metafspm's ds.objects / g.objects: one registry per DataStructure, no
+module-level one): keyed by their index, a number of their content (template_index: the organ class, its parameters,
+the seed and the class key), so that a template has the same index in every population and process; checkpointed with
+the MPG, each once (a shared part, without its generated organ: saved_template).
 """
 import copy
+import dataclasses
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -22,9 +30,7 @@ from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL, _props
 from openalea.granap.metafspm.vessels import vessel_ids
 
 GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
-TEMPLATES = {}                                    # {template id: Template}, every library's (and restored ones)
-_NEXT_TEMPLATE_ID = [0]                           # the next template id: unique across libraries (roots, stems,
-                                                  # leaves), after the restored ones (restore_templates)
+TEMPLATES = "anatomy_templates"                   # the name of the MPG's registry of templates (g.objects)
 LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
 SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
@@ -165,6 +171,10 @@ class Template:
     organ: object = field(repr=False, default=None)
     _sections: dict = field(repr=False, default_factory=dict, compare=False)
 
+    def __getstate__(self) -> dict:
+        """Its fields: the caches made from them (its triangles, its checkpoint copy) are rebuilt."""
+        return {name: value for name, value in self.__dict__.items() if not name.startswith("_cache_")}
+
     @classmethod
     def from_organ(cls, organ, key, index) -> "Template":
         """The section of a generated MPG-backed organ (its stored network included), with vessel ids."""
@@ -286,62 +296,63 @@ class AnatomyLibrary:
         from openalea.granap.root_class import RootAnatomy
         self.parameters, self.class_parameters, self.seed = parameters, class_parameters or {}, seed
         self.organ_class = organ_class or RootAnatomy
-        self.templates = {}
+        self._indices = {}               # {entry: its template's index}: what an entry's parameters give (a memo)
 
     def overrides(self, key) -> dict:
         source = self.class_parameters
         return (source(key) if callable(source) else source.get(key)) or {}
 
-    def template(self, key, plant: dict = None, targets: dict = None) -> Template:
-        """The template of class *key* for a plant with overrides *plant*, the class inputs' *targets* applied."""
+    def template(self, g, key, plant: dict = None, targets: dict = None) -> Template:
+        """The template of class *key* for a plant with overrides *plant*, the class inputs' *targets* applied: the
+        MPG *g*'s (its registry, g.objects: a template of that content generated once per population), generated at
+        its first request."""
         entry = key if not plant else (key, _frozen(plant))
-        if entry not in self.templates:
-            overrides = merged(plant, self.overrides(key), targets)
-            organ = self.organ_class(self.parameters(key, overrides=overrides), seed=self.seed)
-            template = self.templates[entry] = Template.from_organ(organ, key, _new_template_id())
-            TEMPLATES[template.index] = template
-        return self.templates[entry]
-
-    def by_index(self, index) -> Template:
-        return next(t for t in self.templates.values() if t.index == index)
-
-
-def _new_template_id() -> int:
-    """A new template id, after every id given or restored in this process."""
-    index = _NEXT_TEMPLATE_ID[0]
-    _NEXT_TEMPLATE_ID[0] += 1
-    return index
-
-
-def restore_templates(templates: dict, libraries: dict) -> None:
-    """
-    The templates of a Scene's checkpoint registered again (GranapAnatomy.restore_state): *templates* ({template id:
-    Template}) resolvable by template_by_index, as their segments' anatomy_template gives them, and *libraries*
-    ({AnatomyLibrary: {entry: template id}}) given back their classes' templates, so that a segment of a class the
-    checkpoint has gets its template, not a new one; the next ids come after theirs. A template this process made
-    before loading (the scene's construction) under one of these ids, or for one of these classes, is replaced: the
-    loaded state does not refer to it.
-    """
-    TEMPLATES.update({int(index): template for index, template in templates.items()})
-    for library, entries in libraries.items():
-        library.templates.update({entry: TEMPLATES[int(index)] for entry, index in entries.items()})
-        for entry in [e for e, template in library.templates.items() if TEMPLATES.get(template.index) is not template]:
-            del library.templates[entry]                 # its id now a restored template's: made again if needed
-    if templates:
-        _NEXT_TEMPLATE_ID[0] = max(_NEXT_TEMPLATE_ID[0], max(int(index) for index in templates) + 1)
+        templates = template_registry(g)
+        index = self._indices.get(entry)
+        if index is None:
+            parameters = self.parameters(key, overrides=merged(plant, self.overrides(key), targets))
+            index = self._indices[entry] = template_index(self.organ_class, parameters, self.seed, key)
+        else:
+            parameters = None
+        template = templates.get(index)
+        if template is None:
+            if parameters is None:
+                parameters = self.parameters(key, overrides=merged(plant, self.overrides(key), targets))
+            organ = self.organ_class(parameters, seed=self.seed)
+            template = Template.from_organ(organ, key, index)
+            templates.add(index, template)
+        return template
 
 
-def template_by_index(index) -> Template:
-    """The template of id *index* (its segments' anatomy_template), whichever library generated it."""
-    return TEMPLATES[int(index)]
+def template_index(organ_class, parameters, seed, key) -> int:
+    """The index of a template: a number of its content (the organ class, its parameters, the seed, the class key),
+    the same in every population and process, below 2**52 (a segment's anatomy_template holds it exactly)."""
+    from openalea.metafspm.solve.memo import content_key
+    content = parameters.model_dump() if hasattr(parameters, "model_dump") else parameters
+    digest = content_key(f"{organ_class.__module__}.{organ_class.__qualname__}", content, int(seed), key)
+    return int(digest[:13], 16)
 
 
-def find_template(libraries, index) -> Template:
-    """The template of id *index* among several libraries (any library: template_by_index)."""
-    if int(index) in TEMPLATES:
-        return TEMPLATES[int(index)]
-    for library in libraries:
-        for template in library.templates.values():
-            if template.index == index:
-                return template
-    raise KeyError(f"no template {index}")
+def saved_template(template) -> Template:
+    """The copy of *template* a checkpoint saves: without its generated organ (for inspection only), its sections'
+    templates as known now; the same copy while its sections are the same (a shared part is not pickled again)."""
+    known = template.__dict__.get("_cache_saved")
+    if known is None or known[0] != len(template._sections):
+        copy = dataclasses.replace(template, organ=None, _sections=dict(template._sections))
+        known = template.__dict__["_cache_saved"] = (len(template._sections), copy)
+    return known[1]
+
+
+def template_registry(g):
+    """The MPG *g*'s registry of templates ({index: Template}, metafspm's g.objects / ds.objects)."""
+    return g.objects(TEMPLATES, saved=saved_template)
+
+
+def template_by_index(holder, index) -> Template:
+    """The template of index *index* (a segment's anatomy_template), of *holder*'s registry (an MPG or its
+    DataStructure)."""
+    template = holder.objects(TEMPLATES, saved=saved_template).get(int(index))
+    if template is None:
+        raise KeyError(f"no anatomy template of index {int(index)} in this population (its MPG's g.objects"
+                       f"('{TEMPLATES}'))")
+    return template

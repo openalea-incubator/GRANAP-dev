@@ -9,7 +9,7 @@ from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.leaf_class import LeafAnatomy
 from openalea.granap.metafspm.architectures import new_organ, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy
-from openalea.granap.metafspm.library import AnatomyLibrary, preset_parameters
+from openalea.granap.metafspm.library import AnatomyLibrary, preset_parameters, template_by_index
 
 from roots import initiated
 
@@ -58,7 +58,7 @@ def test_stems_leaves_and_roots_get_their_kinds_anatomy_and_are_joined():
     libraries = {L.StemElement: ShootAnatomy.shoot["StemElement"].library,
                  L.LeafElement: ShootAnatomy.shoot["LeafElement"].library, L.RootSegment: ShootAnatomy.library}
     for kind, ids in by_kind.items():                                   # each kind from its own library
-        assert ids == {t.index for t in libraries[kind].templates.values()}
+        assert all(isinstance(template_by_index(g, index).organ, libraries[kind].organ_class) for index in ids)
     a, b = g.property("n_id_a"), g.property("n_id_b")
     section_of = {v: s for s in segments for v in owners[s]}
     linked = {(kinds[section_of[int(a[e])]], kinds[section_of[int(b[e])]]) for e in g.junction_vids()}

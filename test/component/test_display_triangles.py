@@ -75,32 +75,29 @@ def test_written_in_a_frame(section):
     assert mesh.indices.size == 3 * len(anatomy.display_triangles()) and len(mesh.positions) < mesh.indices.size / 1.5
 
 
-def test_a_scene_resumed_from_its_checkpoint_draws_its_sections(tmp_path, monkeypatch):
-    """A Scene's checkpoint keeps the anatomy templates (GranapAnatomy.checkpoint_state): resumed in a new process,
-    whose templates are only those its construction made (other ids), the segments' anatomy_template resolve to the
-    checkpoint's templates, the first frame draws the sections as the saved scene did, and the library gives a
-    segment of the checkpoint's class its template, a new class an id after theirs."""
-    from openalea.granap.metafspm import component, library
+def test_a_scene_resumed_from_its_checkpoint_draws_its_sections(tmp_path):
+    """A Scene's checkpoint keeps the anatomy templates (the MPG's registry, g.objects("anatomy_templates"), saved
+    with it): a scene built again has its own templates (no module-level registry: the saved scene's are not
+    shared), of the same indices (numbers of their content); loaded, the segments' anatomy_template resolve to the
+    checkpoint's templates (their tables, not their organs) and the first frame draws the sections as the saved scene
+    did."""
+    from openalea.granap.metafspm.library import template_by_index
     saved = simulate().scene
     anatomy = next(c for c in saved.components if isinstance(c, GranapAnatomy))
-    index = int(saved.populations[0].data_structure.get("anatomy_template")[0])
+    saved_ds = saved.populations[0].data_structure
+    index = int(saved_ds.get("anatomy_template")[0])
     drawn = anatomy.display_triangles()
     saved.checkpoint(str(tmp_path / "checkpoint"))
-    monkeypatch.setattr(library, "TEMPLATES", {})                  # a new process: no template of the saved one's,
-    monkeypatch.setattr(library, "_NEXT_TEMPLATE_ID", [index + 1000])        # its own ids
-    monkeypatch.setattr(component, "_LIBRARIES", {})
     resumed = simulate().scene
-    assert int(resumed.populations[0].data_structure.get("anatomy_template")[0]) == index + 1000
-    resumed.load_checkpoint(str(tmp_path / "checkpoint"))
     ds = resumed.populations[0].data_structure
+    assert int(ds.get("anatomy_template")[0]) == index                             # an index of its content
+    assert template_by_index(ds, index) is not template_by_index(saved_ds, index)  # its own
+    resumed.load_checkpoint(str(tmp_path / "checkpoint"))
     assert int(ds.get("anatomy_template")[0]) == index
     redrawn = next(c for c in resumed.components if isinstance(c, GranapAnatomy)).display_triangles()
     np.testing.assert_array_equal(redrawn.owner, drawn.owner)
     np.testing.assert_allclose(redrawn.vertices, drawn.vertices)
-    root_library = component._LIBRARIES[("for_root", 0)]           # simulate's (every preset saved is restored)
-    assert [template.index for template in root_library.templates.values()] == [index]
-    assert library.template_by_index(index).organ is None              # restored: its tables, not its organ
-    assert library._new_template_id() > max(index + 1000, *library.TEMPLATES)   # after the restored ids
+    assert template_by_index(ds, index).organ is None                   # restored: its tables, not its organ
 
 
 def test_the_templates_are_saved_once_by_the_checkpoints(tmp_path):
@@ -114,7 +111,7 @@ def test_the_templates_are_saved_once_by_the_checkpoints(tmp_path):
     parts = sorted(os.listdir(shared))
     times = {name: os.path.getmtime(shared / name) for name in parts}
     scene.checkpoint(str(tmp_path / "second"), shared=str(shared))
-    assert sorted(os.listdir(shared)) == parts and any(name.startswith("granap_template") for name in parts)
+    assert sorted(os.listdir(shared)) == parts and any(name.startswith("anatomy_templates") for name in parts)
     assert all(os.path.getmtime(shared / name) == times[name] for name in parts)
     assert references(str(tmp_path / "first"))[1] == references(str(tmp_path / "second"))[1]
     assert os.path.getsize(tmp_path / "second" / "states.pkl") < 10_000            # the templates referred to only

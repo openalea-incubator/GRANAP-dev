@@ -8,10 +8,11 @@ import numpy as np
 import pytest
 
 from openalea.metafspm.coupling.component import FunctionalComponent, state_variable
+from openalea.metafspm.data_structure.mpg import MPG
 from openalea.metafspm.solve.decorator import boundary_set, edge_law, graph_system, node_balance
 
 from openalea.granap.metafspm.component import GranapAnatomy
-from openalea.granap.metafspm.library import AnatomyLibrary
+from openalea.granap.metafspm.library import AnatomyLibrary, template_registry
 from openalea.granap.metafspm.vessels import CONDUCTING
 
 from roots import SmallRootSystem, initiated, planting
@@ -43,23 +44,23 @@ def _segments(g):
 def test_each_class_has_one_template_and_each_segment_its_own_copy(plant):
     g, _, ds = plant
     segments = _segments(g)
-    assert len(segments) == 6 and len(Anatomy.library.templates) == 2
+    assert len(segments) == 6 and len(template_registry(g)) == 2
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     by_class = {}
     for segment in segments:
         by_class.setdefault(g.property("anatomy_class")[segment], []).append(segment)
     for key, members in by_class.items():
-        template = Anatomy.library.template(key)
+        template = Anatomy.library.template(g, key)
         expected = len(template.cell_layer) + len(template.apoplast["kind"][0])
         assert all(len(owners[s]) == expected for s in members)
     all_compartments = [v for s in segments for v in owners[s]]
     assert len(all_compartments) == len(set(all_compartments)) == ds.n_nodes()     # disjoint copies
     template_of = g.property("template")
     cells = ds.entity_ids("Cell")
-    assert len(cells) == sum(len(Anatomy.library.template(g.property("anatomy_class")[s]).cell_layer)
+    assert len(cells) == sum(len(Anatomy.library.template(g, g.property("anatomy_class")[s]).cell_layer)
                              for s in segments)
     assert "cell__polygon" not in g.properties() or not set(cells) & set(g.property("cell__polygon"))
-    assert {template_of[int(c)] for c in cells} == {t.index for t in Anatomy.library.templates.values()}
+    assert {template_of[int(c)] for c in cells} == {t.index for t in template_registry(g).values()}
 
 
 def test_vessels_are_numbered_within_each_section(plant):
@@ -153,10 +154,10 @@ def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
 
 def test_a_class_differs_only_by_its_own_parametrization(plant):
     g, _, ds = plant
-    main = Anatomy.library.template((1.1, 0., 0.))
-    lateral = Anatomy.library.template(LATERAL)
+    main = Anatomy.library.template(g, (1.1, 0., 0.))
+    lateral = Anatomy.library.template(g, LATERAL)
     assert len(lateral.cell_layer) < len(main.cell_layer)          # two cortex layers instead of five
-    unchanged = AnatomyLibrary().template((0.6, 0., 0.))            # without a parametrization: the preset
+    unchanged = AnatomyLibrary().template(MPG(), (0.6, 0., 0.))     # without a parametrization: the preset
     assert len(unchanged.cell_layer) == len(main.cell_layer)
 
 

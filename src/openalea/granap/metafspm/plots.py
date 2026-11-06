@@ -27,7 +27,7 @@ def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=
     DataStructure node, e.g. ds.get("psi")). Returns the PatchCollection.
     """
     g = ds.mtg
-    template = template_by_index(ds.get("anatomy_template")[ds.index_of([int(segment)], "SubOrgan")[0]])
+    template = template_by_index(ds, ds.get("anatomy_template")[ds.index_of([int(segment)], "SubOrgan")[0]])
     owners = np.asarray(ds.entity_ids("SubOrgan"))[ds.owner("SubOrgan")]
     nodes = np.flatnonzero((owners == int(segment)) & (np.asarray(ds.get("kind")) == 0))
     vids = ds.entity_ids("node")[nodes]

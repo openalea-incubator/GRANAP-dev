@@ -27,13 +27,12 @@ import numpy as np
 from openalea.metafspm.coupling.component import (StructuralComponent, input_variable, parameter, planting_variable,
                                                   state_variable)
 from openalea.metafspm.data_structure.configs import ScalesConfig
-from openalea.metafspm.scene.shared import Shared
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
 from openalea.granap.metafspm import columns
 from openalea.granap.metafspm.build import JUNCTION, LEAF_SURFACE, SOIL_NODE, WALL, _props as _build_props
-from openalea.granap.metafspm.library import (TEMPLATES, AnatomyLibrary, ClassInput, class_key, class_targets,
-                                              merged, preset_parameters, restore_templates, template_by_index)
+from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_targets, merged,
+                                              preset_parameters, template_by_index)
 
 SCALES = ScalesConfig()
 MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's lengths in m
@@ -65,7 +64,6 @@ ORGAN_KINDS = {"Sheath": "StemElement"}
 # mid-line sagging 2 mm below its 4 mm chord: a U)
 DEFAULT_OVERRIDES = {"sheath_anatomy": {"planttype": {"fold_sag": 2.0}}}
 RESERVED = ("preset", "seed")
-_VESSEL_PAIRS = {}
 _SECTION_FIELDS = {}                               # {scenario key: its default preset's numeric fields}
 _UNITS = {"mm", "µm", "um", "mm2", "mm3", "°", "deg", "degrees", "rad", "%", "MPa", "s", "mm-1", "1/mm"}
 
@@ -94,8 +92,7 @@ def section_fields(key: str) -> dict:
                 fields_of[f"{section.name}.{name}"] = dict(default=value, unit=unit.strip(),
                                                            description=description, min_value=low, max_value=high)
         _SECTION_FIELDS[key] = fields_of
-    return _SECTION_FIELDS[key]                                 # {(parent template, child template, family): template-node pairs}
-_LIBRARIES = {}                                   # {(preset, seed): AnatomyLibrary}, shared by the components
+    return _SECTION_FIELDS[key]
 
 
 def organ_class(preset: str):
@@ -110,12 +107,15 @@ def organ_class(preset: str):
 
 
 def preset_library(preset: str, seed: int = 0) -> AnatomyLibrary:
-    """The library of an OrganInputData preset (its organ class, generated with *seed*), one per (preset, seed)."""
-    key = (preset, int(seed))
-    if key not in _LIBRARIES:
-        _LIBRARIES[key] = AnatomyLibrary(parameters=preset_parameters(preset), organ_class=organ_class(preset),
-                                         seed=int(seed))
-    return _LIBRARIES[key]
+    """The library of an OrganInputData preset (its organ class, generated with *seed*); its templates are each
+    population's (AnatomyLibrary.template)."""
+    return AnatomyLibrary(parameters=preset_parameters(preset), organ_class=organ_class(preset), seed=int(seed))
+
+
+def population_preset_library(g, preset: str, seed: int = 0) -> AnatomyLibrary:
+    """preset_library's, one per (preset, seed) in the MPG *g*'s population (its registry,
+    g.objects("anatomy_libraries"): rebuilt when missing, not checkpointed)."""
+    return g.objects("anatomy_libraries", saved=False).get((preset, int(seed)), lambda: preset_library(preset, seed))
 
 
 @dataclass
@@ -167,24 +167,23 @@ def _on_top(base: dict, own: dict) -> dict:
     return out
 
 
-_CHECKED_REDUCTIONS = set()                        # the reductions' labels GRANAP has warned of, once each
 # The SubOrgan labels GRANAP gives an anatomy (a reduction's where= names them; a sheath's elements are StemElements)
 REDUCIBLE_LABELS = ("RootSegment", "RootApex", "StemElement", "LeafElement", "Seed")
-_CHECKPOINTED = {}                                 # {template index: (template, sections known, its copy saved)}
 
 
-def check_reduced_labels(reduction) -> None:
+def check_reduced_labels(g, reduction) -> None:
     """
-    Warns, once per filter, when a plant model's reduction (solve.reduction: its where=, a filter of the SubOrgans)
+    Warns, once per filter and population (the MPG *g*'s registry, g.objects), when a plant model's reduction (solve.reduction: its where=, a filter of the SubOrgans)
     names a SubOrgan label that GRANAP gives no anatomy (REDUCIBLE_LABELS: RootSegment, RootApex, StemElement,
     LeafElement, Seed; a sheath's elements are StemElements of a Sheath organ, "Organ.label"): nothing is reduced
     for it.
     """
     import warnings
     labels = tuple(reduction.labels())
-    if not labels or labels in _CHECKED_REDUCTIONS:
+    checked = g.objects("granap_checked_reductions", saved=False)
+    if not labels or labels in checked:
         return
-    _CHECKED_REDUCTIONS.add(labels)
+    checked.add(labels, True)
     unknown = [label for label in labels if label not in REDUCIBLE_LABELS]
     if unknown:
         warnings.warn(f"the reduction's labels {unknown} are no SubOrgan label with a GRANAP anatomy "
@@ -425,17 +424,6 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
                 sources[i] = candidates[int(np.argmin(np.linalg.norm(there - here, axis=1)))]
                 break
     return sources
-
-
-def _saved_copy(template):
-    """The copy of *template* a checkpoint saves: without its generated organ (for inspection only), its sections'
-    templates as known now; the same copy while the template and its sections are the same (a shared part is not
-    pickled again)."""
-    known = _CHECKPOINTED.get(template.index)
-    if known is None or known[0] is not template or known[1] != len(template._sections):
-        copy = dataclasses.replace(template, organ=None, _sections=dict(template._sections))
-        known = _CHECKPOINTED[template.index] = (template, len(template._sections), copy)
-    return known[2]
 
 
 @dataclass
@@ -712,7 +700,8 @@ class GranapAnatomy(StructuralComponent):
         key = ANATOMY_KEYS[base]
         if base == "RootSegment" and not set(RESERVED) & set(settings):
             return OrganAnatomy(cls.library, "radius")
-        return OrganAnatomy(preset_library(settings.get("preset", DEFAULT_PRESETS[key]), settings.get("seed", 0)),
+        return OrganAnatomy(population_preset_library(g, settings.get("preset", DEFAULT_PRESETS[key]),
+                                                      settings.get("seed", 0)),
                             SIZES[key])
 
     @classmethod
@@ -829,7 +818,7 @@ class GranapAnatomy(StructuralComponent):
         lengths = g.property("length") if lengths is None else lengths
         reduction = g.reduction                                 # the plant model's (solve.reduction)
         if reduction is not None:
-            check_reduced_labels(reduction)
+            check_reduced_labels(g, reduction)
         done = {"emerged": [], "replaced": []}
         for segment in segments:
             current = anatomy_class.get(segment)
@@ -875,7 +864,7 @@ class GranapAnatomy(StructuralComponent):
         organ = cls.organ_of(g, segment)
         own = {k: v for k, v in cls.anatomy_settings(g, segment).items() if k not in RESERVED}
         plant = merged(DEFAULT_OVERRIDES.get(ANATOMY_KEYS.get(cls._label_name(g, segment)), {}), own) or None
-        return organ.library.template(key, plant=plant, targets=class_targets(organ.class_inputs, key))
+        return organ.library.template(g, key, plant=plant, targets=class_targets(organ.class_inputs, key))
 
     @classmethod
     def _same_anatomy(cls, g, segment, key, previous, name) -> bool:
@@ -937,7 +926,7 @@ class GranapAnatomy(StructuralComponent):
             for element, vids in pores.items():
                 if not vids:
                     continue
-                template = template_by_index(template_of[element])
+                template = template_by_index(g, template_of[element])
                 rectangles = [shapely.minimum_rotated_rectangle(template.polygons[int(template_row[v])]) for v in vids]
                 sides = np.array([sorted(_rectangle_sides(r)) for r in rectangles])
                 g.set_values("pore_width", vids, sides[:, 0].tolist())
@@ -969,54 +958,6 @@ class GranapAnatomy(StructuralComponent):
             template_of[segment] = -1.
         super().__post_init__()
         self.data_structure.inheritance = GranapInheritance()
-
-    @classmethod
-    def _libraries(cls) -> dict:
-        """{name: AnatomyLibrary} of the libraries the segments' templates come from, by names a new process gives
-        the same libraries (the class's library, root and shoot; the presets' by (preset, seed))."""
-        found = {("library",): cls.library}
-        if cls.root is not None:
-            found[("root",)] = cls.root.library
-        found.update({("shoot", label): organ.library for label, organ in cls.shoot.items()})
-        found.update({("preset", preset, seed): library for (preset, seed), library in _LIBRARIES.items()})
-        return found
-
-    def checkpoint_state(self) -> dict:
-        """The kept state, and the anatomy templates (restore_state): the libraries' and those the segments'
-        anatomy_template give, which a new process does not have (its own made at the scene's construction). Each
-        template is a shared part of the checkpoints (metafspm.scene.shared.Shared): written once, under its
-        content's key, every later checkpoint referring to it."""
-        state = super().checkpoint_state()
-        libraries = self._libraries()
-        templates = {template.index: template for library in libraries.values()
-                     for template in library.templates.values()}
-        given = self.data_structure.structure.properties().get("anatomy_template", {}).values()
-        templates.update({int(index): TEMPLATES[int(index)] for index in set(given)
-                          if index is not None and index >= 0 and int(index) in TEMPLATES})
-        state["anatomy_templates"] = {"templates": {index: Shared("granap_template", _saved_copy(template))
-                                                    for index, template in templates.items()},
-                                      "libraries": {name: {entry: template.index for entry, template in
-                                                           library.templates.items()}
-                                                    for name, library in libraries.items()}}
-        return state
-
-    def restore_state(self, state: dict) -> None:
-        """The kept state, and the checkpoint's anatomy templates registered again (library.restore_templates): the
-        segments' anatomy_template resolvable (template_by_index: drawing their sections, their pores), each
-        library's classes given back their templates."""
-        super().restore_state(state)
-        saved = state.get("anatomy_templates")
-        if saved is None:
-            return
-        libraries = self._libraries()
-        resolved = {}
-        for name, entries in saved["libraries"].items():
-            library = libraries.get(name)
-            if library is None and name[0] == "preset":
-                library = preset_library(name[1], name[2])            # not made yet in this process
-            if library is not None:
-                resolved[library] = entries
-        restore_templates(saved["templates"], resolved)
 
     @postsegmentation
     def _anatomies(self):
@@ -1124,7 +1065,7 @@ class GranapAnatomy(StructuralComponent):
             index = template_of.get(segment, -1.)
             if index is None or index < 0:
                 continue
-            local, rows = _template_triangles(template_by_index(index))
+            local, rows = _template_triangles(template_by_index(g, index))
             row_of = {int(template_row[c]): int(c) for c in compartments
                       if int(c) in wanted and c in template_row and scale[int(c)] == g.scales.Compartment
                       and complex_[int(c)] >= 0 and scale[complex_[int(c)]] == g.scales.Cell}
@@ -1132,7 +1073,7 @@ class GranapAnatomy(StructuralComponent):
             interior = {}
             if segment in reduced and (where is None or row_of):      # its interior's protoplasts, by display id
                 from openalea.metafspm.solve.reduction import display_ids
-                cell_rows, full_rows = _interior_protoplasts(reduction, reduced[segment])
+                cell_rows, full_rows = _interior_protoplasts(g, reduction, reduced[segment])
                 interior = dict(zip(cell_rows.tolist(), display_ids(segment, full_rows).tolist()))
             shown = np.array([row in interior and row not in row_of for row in rows], dtype=bool)
             if not drawn.any() and not shown.any():
@@ -1183,16 +1124,13 @@ class GranapAnatomy(StructuralComponent):
                 "edge_length": np.where(path == columns.JUNCTION_PATH, junction_mm, edge_length)}
 
 
-_TEMPLATE_TRIANGLES = {}                  # {template index: (triangles (T, 3, 2) in mm, the cell row of each)}
-_INTERIOR_PROTOPLASTS = {}                # {(id of a Reduction, reduced key): (cell rows, full template rows)}
-
-
-def _interior_protoplasts(reduction, key) -> tuple:
+def _interior_protoplasts(g, reduction, key) -> tuple:
     """(their cell rows in GRANAP's template, their rows in the full SectionTemplate) of the protoplasts a reduced
     template of key *key* eliminates (the full template's Compartments in a Cell that the reduced one does not hold):
-    the interior cells a reduced section's drawing adds; once per reduced template."""
-    cache_key = (id(reduction), key)
-    if cache_key not in _INTERIOR_PROTOPLASTS:
+    the interior cells a reduced section's drawing adds; once per reduced template of the population (the MPG *g*'s
+    reduction, its registry g.objects: not checkpointed)."""
+    cache = g.objects("granap_interior_protoplasts", saved=False)
+    if key not in cache:
         from openalea.metafspm.data_structure.configs import ScalesConfig
         full = reduction.full_template(key)
         held = np.zeros(full.size, dtype=bool)
@@ -1202,14 +1140,14 @@ def _interior_protoplasts(reduction, key) -> tuple:
         complex_ = full.complex[where]
         in_cell = (complex_ >= 0) & (full.scale[np.maximum(complex_, 0)] == ScalesConfig.Cell)
         keep = (full.scale[where] == ScalesConfig.Compartment) & in_cell & ~held[where]
-        _INTERIOR_PROTOPLASTS[cache_key] = (np.asarray(values, dtype=float)[keep].astype(np.int64), where[keep])
-    return _INTERIOR_PROTOPLASTS[cache_key]
+        cache.add(key, (np.asarray(values, dtype=float)[keep].astype(np.int64), where[keep]))
+    return cache[key]
 
 
 def _template_triangles(template) -> tuple:
     """A template's cells' polygons as triangles in the section's plane (mm), and each triangle's cell row; once per
-    template, its polygons being shared by every segment of its class."""
-    if template.index not in _TEMPLATE_TRIANGLES:
+    template, its polygons being shared by every segment of its class (kept on the template)."""
+    if "_cache_triangles" not in template.__dict__:
         import shapely
         triangles, rows = [], []
         for row, polygon in enumerate(template.polygons):
@@ -1218,9 +1156,9 @@ def _template_triangles(template) -> tuple:
             for piece in shapely.constrained_delaunay_triangles(polygon).geoms:
                 triangles.append(np.asarray(piece.exterior.coords)[:3, :2])
                 rows.append(row)
-        _TEMPLATE_TRIANGLES[template.index] = (np.asarray(triangles, dtype=float).reshape(-1, 3, 2),
-                                               np.asarray(rows, dtype=np.int64))
-    return _TEMPLATE_TRIANGLES[template.index]
+        template.__dict__["_cache_triangles"] = (np.asarray(triangles, dtype=float).reshape(-1, 3, 2),
+                                                 np.asarray(rows, dtype=np.int64))
+    return template.__dict__["_cache_triangles"]
 
 
 SEGMENT_ENDS = ("x1", "y1", "z1", "x2", "y2", "z2")
@@ -1298,13 +1236,14 @@ def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     parent, child = _instance(g, parent_compartments), _instance(g, child_compartments)
     if parent is None or child is None:
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
-    key = (parent[0], child[0], family)                   # template ids: unique across the libraries
-    local = _VESSEL_PAIRS.get(key)
+    key = (parent[0], child[0], family)                   # template indices: of their content
+    cache = g.objects("granap_vessel_pairs", saved=False)  # the population's (not checkpointed)
+    local = cache.get(key)
     if local is None:
         node_a, node_b = dict(zip(parent_compartments, parent[1].tolist())), \
             dict(zip(child_compartments, child[1].tolist()))
-        local = _VESSEL_PAIRS[key] = [(node_a[a], node_b[b])
-                              for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
+        local = [(node_a[a], node_b[b]) for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
+        cache.add(key, local)
     vid_a, vid_b = np.empty(parent[1].size, dtype=np.int64), np.empty(child[1].size, dtype=np.int64)
     vid_a[parent[1]], vid_b[child[1]] = parent_compartments, child_compartments
     return sorted((int(vid_a[a]), int(vid_b[b])) for a, b in local)

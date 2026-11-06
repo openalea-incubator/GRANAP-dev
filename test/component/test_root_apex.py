@@ -16,7 +16,6 @@ from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.solve.reduction import Reduction
 
-from openalea.granap.metafspm import component as granap_component
 from openalea.granap.metafspm.architectures import SegmentArchitecture, new_organ, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, anatomy_ancestor, vessel_pairs
 
@@ -155,7 +154,6 @@ def _reduced_sections(g):
 
 def test_the_stem_elements_are_reduced_with_their_sheaths():
     """where={"label": "StemElement"}: every stem element, a sheath's too (no organ label trick); no warning."""
-    granap_component._CHECKED_REDUCTIONS.clear()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction({"label": "StemElement"}))
@@ -168,7 +166,6 @@ def test_the_stem_elements_are_reduced_with_their_sheaths():
 
 def test_the_sheaths_apart_from_the_stems_by_their_organ():
     """where= filters across scales: the stem elements of the internodes (Organ.label), not the sheaths'."""
-    granap_component._CHECKED_REDUCTIONS.clear()
     ds, g = _built(WHOLE_SHOOT, WheatSeedling, _reduction({"label": "StemElement", "Organ.label": "StemInternode"}))
     roles = _roles(g)
     reduced = _reduced_sections(g)
@@ -176,6 +173,5 @@ def test_the_sheaths_apart_from_the_stems_by_their_organ():
 
 
 def test_a_label_without_anatomy_warns():
-    granap_component._CHECKED_REDUCTIONS.clear()
     with pytest.warns(UserWarning, match="no SubOrgan label with a GRANAP anatomy"):
         _built({}, RootWithApices, _reduction({"label": ("RootSegment", "HiddenElement")}))

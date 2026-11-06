@@ -87,7 +87,7 @@ def layout(ds, segments):
     template_of = dict(zip(ds.entity_ids("SubOrgan").tolist(), ds.get("anatomy_template")))
 
     def size(s):
-        bounds = np.array([p.bounds for p in template_by_index(template_of[s]).polygons if p is not None])
+        bounds = np.array([p.bounds for p in template_by_index(ds, template_of[s]).polygons if p is not None])
         return max(bounds[:, 2].max() - bounds[:, 0].min(), bounds[:, 3].max() - bounds[:, 1].min())
 
     offsets = {}

@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from openalea.metafspm.coupling.component import StructuralComponent
 
+from openalea.metafspm.data_structure.mpg import MPG
 from openalea.granap.metafspm.component import GranapAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary
 
@@ -39,8 +40,9 @@ class Anatomy(GranapAnatomy):
 def main():
     timings = {}
     start = time.perf_counter()
+    scratch = MPG()                     # the templates are each population's: generated here on their own
     for key in ((1.1, 0., 0.), (0.7, 0., 0.), (0.5, 0., 0.)):
-        Anatomy.library.template(key)
+        Anatomy.library.template(scratch, key)
     timings["templates (3 classes)"] = time.perf_counter() - start
     start = time.perf_counter()
     population = initiated(planting(), Seedling, Anatomy)

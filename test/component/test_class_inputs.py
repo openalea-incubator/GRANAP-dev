@@ -13,7 +13,7 @@ from openalea.metafspm.data_structure.configs import PropsConfig, ScalesConfig
 from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, default_class_inputs
-from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput
+from openalea.granap.metafspm.library import AnatomyLibrary, ClassInput, template_registry
 
 from roots import _axis, initiated
 
@@ -54,7 +54,7 @@ def test_plants_parametrized_differently_get_their_own_templates_and_alike_share
     template = g.property("anatomy_template")
     per_plant = [{template[s] for s in g.components_at_scale(p, scale=g.scales.SubOrgan)} for p in plants]
     assert per_plant[0] == per_plant[1] != per_plant[2]          # alike share, the default plant has its own
-    assert len(Anatomy.library.templates) == 2
+    assert len(template_registry(g)) == 2                           # the population's templates
 
 
 def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
@@ -71,9 +71,9 @@ def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
     g, plants = population.data_structure.structure, population.plants
     segments = sorted(int(s) for s in g.property("anatomy_class"))
     assert [g.property("anatomy_class")[s][-1] for s in segments] == [4., 2.]
-    assert len(Anatomy.library.templates) == 2
-    cortex = {key[-1]: sum(c.type == "cortex" for c in t.organ.all_cells.cells)
-              for key, t in Anatomy.library.templates.items()}
+    assert len(template_registry(g)) == 2
+    cortex = {t.key[-1]: sum(c.type == "cortex" for c in t.organ.all_cells.cells)
+              for t in template_registry(g).values()}
     assert cortex[4.] > cortex[2.] > 0                            # the field set from the class input
 
 
@@ -88,7 +88,7 @@ def test_a_scenario_gives_a_kind_of_segment_its_preset():
     template = g.property("anatomy_template")
     with_needle, without = [[template.get(s, -1.) for s in g.components_at_scale(p, scale=g.scales.SubOrgan)]
                             for p in plants]
-    assert isinstance(template_by_index(with_needle[0]).organ, NeedleAnatomy) and without == [-1.]
+    assert isinstance(template_by_index(g, with_needle[0]).organ, NeedleAnatomy) and without == [-1.]
 
 
 def test_a_preset_on_an_explicit_organ_raises():
@@ -176,9 +176,9 @@ def test_a_sheath_is_a_bent_leaf_of_its_own_kind():
     (internode, sheath), (stem, bare) = [sorted(int(v) for v in g.components_at_scale(p, scale=g.scales.SubOrgan))
                                          for p in plants]
     assert template.get(internode, -1.) == -1. and template.get(bare, -1.) == -1.
-    leaf = template_by_index(template[sheath]).organ
+    leaf = template_by_index(g, template[sheath]).organ
     assert isinstance(leaf, LeafAnatomy) and leaf.global_params["fold_sag"] == 2.0
-    assert not isinstance(template_by_index(template[stem]).organ, LeafAnatomy)
+    assert not isinstance(template_by_index(g, template[stem]).organ, LeafAnatomy)
     organ = int(g.complex_at_scale(sheath, g.scales.Organ))
     assert organ in g.property("leaf_surface")
 
@@ -194,6 +194,6 @@ def test_a_plants_anatomy_field_given_dotted():
     g, plants = population.data_structure.structure, population.plants
     template = g.property("anatomy_template")
     from openalea.granap.metafspm.library import template_by_index
-    cortex = [max(sum(c.type == "cortex" for c in template_by_index(template[s]).organ.all_cells.cells)
+    cortex = [max(sum(c.type == "cortex" for c in template_by_index(g, template[s]).organ.all_cells.cells)
                   for s in g.components_at_scale(p, scale=g.scales.SubOrgan)) for p in plants]
     assert 0 < cortex[0] < cortex[1]                              # 2 layers, the preset's 5
