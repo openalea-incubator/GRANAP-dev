@@ -267,21 +267,22 @@ def _instance(g, comps):
 
 
 def _template_nodes(g, comps):
-    """(template, template node of each of *comps*) when *comps* are nodes of one template, each once (a whole copy,
-    or a reduced copy's kept nodes), else None."""
+    """(template, template node of each templated vertex, those vertices) of *comps*: the nodes of one template, each
+    once (a whole copy, or a reduced copy's kept nodes), beside vertices of no template (a section's soil node);
+    None when they are of several templates or none."""
     vids = np.asarray(comps, dtype=np.int64)
     if vids.size == 0:
         return None
     order = np.argsort(vids, kind="stable")
     found, templates = g.values_at("template", vids[order])
-    found_nodes, nodes = g.values_at("template_node", vids[order])
-    if found.size != vids.size or found_nodes.size != vids.size or not (templates == templates[0]).all():
+    found_nodes, nodes = g.values_at("template_node", found)
+    if found.size == 0 or found_nodes.size != found.size or not (templates == templates[0]).all():
         return None
-    out = np.empty(vids.size, dtype=np.int64)
-    out[order] = np.asarray(nodes, dtype=np.int64)
+    templated = vids[np.isin(vids, found)]                      # in the order of *comps*
+    out = np.asarray(nodes, dtype=np.int64)[np.searchsorted(found, templated)]
     if np.unique(out).size != out.size:
         return None
-    return int(templates[0]), out
+    return int(templates[0]), out, templated.tolist()
 
 
 def _positions(g, vids):
@@ -798,7 +799,11 @@ class GranapAnatomy(StructuralComponent):
     def check_class_inputs(cls, organ) -> None:
         """A class input reads a variable the component declares (an input the plant model's translator links, e.g.
         stem_radius from an architecture's organ diameter), never another model's property by name."""
-        declared = {f.name for f in fields(cls) if f.metadata.get("variable_type") in ("input", "parameter")}
+        declared = cls.__dict__.get("_declared_inputs")
+        if declared is None:                                    # read once per class (fields() at every segment cost
+            declared = frozenset(f.name for f in fields(cls)    # a second a step at day 14)
+                                 if f.metadata.get("variable_type") in ("input", "parameter"))
+            setattr(cls, "_declared_inputs", declared)
         for c in organ.class_inputs:
             if c.compute is None and c.width > 0 and c.variable not in declared:
                 raise ValueError(f"{cls.__name__}: the class input '{c.variable}' is not a declared input: declare it "
@@ -1315,19 +1320,31 @@ def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     nodes: computed once per (parent template and nodes, child template and nodes, family) on their template nodes,
     then given each pair's vids.
     """
+    if not len(parent_compartments) or not len(child_compartments):     # a section without anatomy: no junction
+        return []
     parent, child = _template_nodes(g, parent_compartments), _template_nodes(g, child_compartments)
-    if parent is None or child is None:
+    if parent is None or child is None or _untemplated_vessel(g, parent_compartments, parent[2], family) \
+            or _untemplated_vessel(g, child_compartments, child[2], family):
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
-    key = (parent[0], np.sort(parent[1]).tobytes(), child[0], np.sort(child[1]).tobytes(), family)
+    (parent_template, parent_nodes, parents), (child_template, child_nodes, children) = parent, child
+    key = (parent_template, np.sort(parent_nodes).tobytes(), child_template, np.sort(child_nodes).tobytes(), family)
     cache = g.objects("granap_vessel_pairs", saved=False)  # the population's (not checkpointed); template indices:
     local = cache.get(key)                                 # of their content
-    if local is None:
-        node_a, node_b = dict(zip(parent_compartments, parent[1].tolist())), \
-            dict(zip(child_compartments, child[1].tolist()))
-        local = [(node_a[a], node_b[b]) for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
+    if local is None:                                      # the vessels are templated: the same pairs without the rest
+        node_a, node_b = dict(zip(parents, parent_nodes.tolist())), dict(zip(children, child_nodes.tolist()))
+        local = [(node_a[a], node_b[b]) for a, b in _vessel_pairs(g, parents, children, family)]
         cache.add(key, local)
-    vid_a, vid_b = dict(zip(parent[1].tolist(), parent_compartments)), dict(zip(child[1].tolist(), child_compartments))
+    vid_a, vid_b = dict(zip(parent_nodes.tolist(), parents)), dict(zip(child_nodes.tolist(), children))
     return sorted((int(vid_a[a]), int(vid_b[b])) for a, b in local)
+
+
+def _untemplated_vessel(g, comps, templated, family) -> bool:
+    """Whether a vertex of *comps* of no template (a soil node) is a conducting cell of *family*."""
+    if len(templated) == len(comps):
+        return False
+    rest = sorted(set(int(v) for v in comps) - set(templated))
+    found, values = g.values_at("family", np.asarray(rest, dtype=np.int64))
+    return bool(found.size) and bool((np.asarray(values, dtype=np.float64) == family).any())
 
 
 def _vessel_pairs(g, parent_compartments, child_compartments, family) -> list:

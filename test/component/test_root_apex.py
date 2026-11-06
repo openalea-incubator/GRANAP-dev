@@ -187,7 +187,7 @@ def test_the_junctions_of_reduced_sections_are_their_templates_pairs_computed_on
     assert set(main) <= _reduced_sections(g)
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     parent, child = owners[main[0]], owners[main[1]]
-    assert _template_nodes(g, parent) is not None and _template_nodes(g, child) is not None
+    assert _template_nodes(g, parent) is not None and _template_nodes(g, child) is not None   # the soil node apart
     cache = g.objects("granap_vessel_pairs", saved=False)
     for family in (0, 1):
         direct = _vessel_pairs(g, parent, child, family)
