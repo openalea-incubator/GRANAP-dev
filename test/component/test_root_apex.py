@@ -175,3 +175,24 @@ def test_the_sheaths_apart_from_the_stems_by_their_organ():
 def test_a_label_without_anatomy_warns():
     with pytest.warns(UserWarning, match="no SubOrgan label with a GRANAP anatomy"):
         _built({}, RootWithApices, _reduction({"label": ("RootSegment", "HiddenElement")}))
+
+
+def test_the_junctions_of_reduced_sections_are_their_templates_pairs_computed_once():
+    """Reduced sections (their kept nodes, a part of their template's) are joined as their whole vessels would be:
+    vessel_pairs gives the pairs of the direct rule (_vessel_pairs), computed once per pair of templates and nodes
+    (the population's cache) and given each section's vids."""
+    from openalea.granap.metafspm.component import _template_nodes, _vessel_pairs
+    ds, g = _built(reduction=_reduction({"label": "RootSegment"}))
+    main = _roles(g)["main"]
+    assert set(main) <= _reduced_sections(g)
+    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    parent, child = owners[main[0]], owners[main[1]]
+    assert _template_nodes(g, parent) is not None and _template_nodes(g, child) is not None
+    cache = g.objects("granap_vessel_pairs", saved=False)
+    for family in (0, 1):
+        direct = _vessel_pairs(g, parent, child, family)
+        assert direct and vessel_pairs(g, parent, child, family) == direct
+        assert _junctions(g, ds, main[0], main[1])[family] == direct
+    entries = len(cache)
+    assert entries > 0                                           # cached, not computed by the direct rule each time
+    assert vessel_pairs(g, parent, child, 0) == _vessel_pairs(g, parent, child, 0) and len(cache) == entries

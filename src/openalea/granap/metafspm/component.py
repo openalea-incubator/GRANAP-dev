@@ -266,6 +266,24 @@ def _instance(g, comps):
     return int(templates[0]), out
 
 
+def _template_nodes(g, comps):
+    """(template, template node of each of *comps*) when *comps* are nodes of one template, each once (a whole copy,
+    or a reduced copy's kept nodes), else None."""
+    vids = np.asarray(comps, dtype=np.int64)
+    if vids.size == 0:
+        return None
+    order = np.argsort(vids, kind="stable")
+    found, templates = g.values_at("template", vids[order])
+    found_nodes, nodes = g.values_at("template_node", vids[order])
+    if found.size != vids.size or found_nodes.size != vids.size or not (templates == templates[0]).all():
+        return None
+    out = np.empty(vids.size, dtype=np.int64)
+    out[order] = np.asarray(nodes, dtype=np.int64)
+    if np.unique(out).size != out.size:
+        return None
+    return int(templates[0]), out
+
+
 def _positions(g, vids):
     """(angle and radius present, x, y) of *vids*, computed value by value as the original rule does."""
     angle, radius = g.view("angle"), g.view("relative_radius")
@@ -1293,22 +1311,22 @@ def _vessels(g, compartments, family):
 def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     """
     The junctions between two successive sections for one family of conducting cells. When both sections are
-    template copies, the pairs depend only on the two templates: computed once per (parent template, child template,
-    family) on their template nodes, then given each pair's vids.
+    template copies (whole, or a reduced copy's kept nodes), the pairs depend only on the two templates and their
+    nodes: computed once per (parent template and nodes, child template and nodes, family) on their template nodes,
+    then given each pair's vids.
     """
-    parent, child = _instance(g, parent_compartments), _instance(g, child_compartments)
+    parent, child = _template_nodes(g, parent_compartments), _template_nodes(g, child_compartments)
     if parent is None or child is None:
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
-    key = (parent[0], child[0], family)                   # template indices: of their content
-    cache = g.objects("granap_vessel_pairs", saved=False)  # the population's (not checkpointed)
-    local = cache.get(key)
+    key = (parent[0], np.sort(parent[1]).tobytes(), child[0], np.sort(child[1]).tobytes(), family)
+    cache = g.objects("granap_vessel_pairs", saved=False)  # the population's (not checkpointed); template indices:
+    local = cache.get(key)                                 # of their content
     if local is None:
         node_a, node_b = dict(zip(parent_compartments, parent[1].tolist())), \
             dict(zip(child_compartments, child[1].tolist()))
         local = [(node_a[a], node_b[b]) for a, b in _vessel_pairs(g, parent_compartments, child_compartments, family)]
         cache.add(key, local)
-    vid_a, vid_b = np.empty(parent[1].size, dtype=np.int64), np.empty(child[1].size, dtype=np.int64)
-    vid_a[parent[1]], vid_b[child[1]] = parent_compartments, child_compartments
+    vid_a, vid_b = dict(zip(parent[1].tolist(), parent_compartments)), dict(zip(child[1].tolist(), child_compartments))
     return sorted((int(vid_a[a]), int(vid_b[b])) for a, b in local)
 
 
@@ -1412,12 +1430,25 @@ def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
         ancestor, hidden = anatomy_ancestor(g, child, owners)
         between = (0.5 * (float(lengths.get(ancestor, 0.)) + float(lengths.get(child, 0.))) +
                    sum(float(lengths.get(v, 0.)) for v in hidden)) * mm_per_unit
-    x, y = g.view("section_x"), g.view("section_y")
+    tails, heads = np.array([a for a, _ in pairs], dtype=np.int64), np.array([b for _, b in pairs], dtype=np.int64)
+    x, y = (_pair_values(g, name, tails, heads) for name in ("section_x", "section_y"))
     out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
     out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
-               edge_dx=[x[b] - x[a] for a, b in pairs], edge_dy=[y[b] - y[a] for a, b in pairs],
-               membrane_surface=[0.] * n)
+               edge_dx=(x[1] - x[0]).tolist(), edge_dy=(y[1] - y[0]).tolist(), membrane_surface=[0.] * n)
     return out
+
+
+def _pair_values(g, name, tails, heads) -> tuple:
+    """Property *name* at the junctions' *tails* and *heads* (in bulk: MPG.values_at, the instanced vertices' values
+    included); a KeyError when a vertex has none."""
+    vids = np.unique(np.concatenate([tails, heads]))
+    if vids.size == 0:
+        return np.zeros(0), np.zeros(0)
+    found, values = g.values_at(name, vids)
+    if found.size != vids.size:
+        raise KeyError(f"{name}: no value on vertex {int(np.setdiff1d(vids, found)[0])}")
+    values = np.asarray(values, dtype=np.float64)
+    return values[np.searchsorted(vids, tails)], values[np.searchsorted(vids, heads)]
 
 
 def junction_geometry(mm_per_unit=MM_PER_M):
