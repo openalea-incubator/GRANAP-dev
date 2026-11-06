@@ -9,7 +9,6 @@ import pytest
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 
@@ -79,7 +78,6 @@ class WheatSeedling(SegmentArchitecture):
 
 @pytest.fixture(scope="module")
 def plants():
-    Choregrapher().set_simulation_time_step(3600.)
     table = planting([Planting(x=0.), Planting(x=0.1)], None, plant_scenarios=[WHOLE_SHOOT, NO_SHEATH])
     population = initiated(table, WheatSeedling, GranapAnatomy)
     return population.data_structure
@@ -207,7 +205,6 @@ def test_a_replaced_ancestor_is_joined_again_across_the_hidden_elements():
     """The DataStructure rewires a replaced section's children only: the component joins the replaced section to
     its descendants across the hidden elements; nothing dangles, nothing is doubled; the junctions' length is kept as
     the elements grow."""
-    Choregrapher().set_simulation_time_step(3600.)
     table = planting([Planting()], None, plant_scenarios=[NO_SHEATH])
     ds = initiated(table, WheatSeedling, GranapAnatomy).data_structure
     g = ds.structure
@@ -245,7 +242,6 @@ def test_a_section_without_length_gets_its_anatomy_when_it_grows():
     """A section of zero length has no anatomy (its section would have no radial conductance): a pass-through, the
     junctions spanning it, as a hidden element. Once it has a length, it gets its anatomy, joined to its nearest
     ancestor and descendant with one; the junctions across it are gone; the conduits stay one network."""
-    Choregrapher().set_simulation_time_step(3600.)
     table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
     ds = initiated(table, UngrownSheathSeedling, GranapAnatomy).data_structure
     g = ds.structure
@@ -283,7 +279,6 @@ class UngrownBladeBaseSeedling(WheatSeedling):
 def test_the_leaf_surface_is_on_the_basal_element_with_an_anatomy():
     """A leaf organ's surface is owned by its basal element with an anatomy: not by an element without length (it has
     no anatomy, MECHA no height for it); once that element grows, the surface moves to it, nothing dangling."""
-    Choregrapher().set_simulation_time_step(3600.)
     table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
     ds = initiated(table, UngrownBladeBaseSeedling, GranapAnatomy).data_structure
     g = ds.structure

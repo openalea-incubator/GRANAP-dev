@@ -12,7 +12,6 @@ import warnings
 import numpy as np
 import pytest
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.solve.reduction import Reduction
@@ -57,7 +56,6 @@ def _roles(g):
 
 
 def _built(scenario=None, architecture=RootWithApices, reduction=None):
-    Choregrapher().set_simulation_time_step(3600.)
     table = planting([Planting()], None, plant_scenarios=[dict(scenario or {})])
     ds = initiated(table, architecture, GranapAnatomy, reduction=reduction).data_structure
     return ds, ds.structure

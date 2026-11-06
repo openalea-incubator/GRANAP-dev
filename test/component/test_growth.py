@@ -6,7 +6,6 @@ segment takes its anatomy with it. Junctions are rewired only where the anatomie
 import numpy as np
 import pytest
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.data_structure.configs import PropsConfig
 
 from openalea.granap.metafspm.component import GranapAnatomy
@@ -23,7 +22,6 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture
 def plant():
-    Choregrapher().set_simulation_time_step(3600.)
     population = initiated(planting(), SmallRootSystem, Anatomy)
     g, plants = population.data_structure.structure, population.plants
     ds = population.data_structure

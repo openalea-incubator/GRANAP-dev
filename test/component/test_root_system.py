@@ -125,9 +125,8 @@ class Hydraulics(FunctionalComponent):
 
 
 def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
-    from openalea.metafspm.coupling.choregrapher import Choregrapher
     g, _, ds = plant
-    Choregrapher().set_simulation_time_step(3600.)
+    ds.simulation_time_step = 3600.
     tissue = g.property("tissue")
     nodes = ds.entity_ids("node")
     first = _segments(g)[0]

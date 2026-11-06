@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.coupling.component import FunctionalComponent, state_variable
 from openalea.metafspm.data_structure.configs import ScalesConfig
 from openalea.metafspm.data_structure.data_api import MPGDataStructure
@@ -41,8 +40,8 @@ def section():
     organ.export_to_adjencymatrix()
     graph = organ.graph                                       # GRANAP's view, built before the conversion
     g.convert_properties_to_arraydict()
-    Choregrapher().set_simulation_time_step(3600.)
     ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment")
+    ds.simulation_time_step = 3600.
     Network(data_structure=ds)
     return organ, g, ds, graph
 

@@ -6,7 +6,6 @@ nodes, edges, junctions, leaf surfaces, variables, growth, class changes and pru
 import numpy as np
 import pytest
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 
@@ -16,7 +15,6 @@ from test_shoot import ShootAnatomy, SmallShoot, TwoElementLeaf
 
 
 def _both(architecture, anatomy, **scenario):
-    Choregrapher().set_simulation_time_step(3600.)
     out = []
     for instanced in (False, True):
         population = initiated(planting([Planting()], None, dict(scenario, instanced_anatomy=instanced)), architecture,
@@ -156,7 +154,6 @@ def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
     conduits joined to the neighbouring sections' by the junctions as in the full anatomy."""
     from openalea.metafspm.solve.reduction import Reduction
     from openalea.granap.metafspm.component import GranapAnatomy
-    Choregrapher().set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
     reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
@@ -196,7 +193,6 @@ def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
     triangles on them; from_frame gives the reduced plant back."""
     from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
     from openalea.metafspm.solve.reduction import Reduction, is_display_id
-    Choregrapher().set_simulation_time_step(3600.)
     full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
                      Anatomy).data_structure
     reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",

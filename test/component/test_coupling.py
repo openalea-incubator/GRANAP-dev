@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from openalea.metafspm.coupling.choregrapher import Choregrapher
 from openalea.metafspm.coupling.component import FunctionalComponent, input_variable
 from openalea.metafspm.data_structure.configs import ScalesConfig
 
@@ -40,7 +39,6 @@ class Anatomy(GranapAnatomy):
 
 @pytest.fixture(scope="module")
 def coupled():
-    Choregrapher().set_simulation_time_step(3600.)
     population = initiated(planting(), SmallRootSystem, Anatomy)
     g = population.data_structure.structure
     ds = population.data_structure
