@@ -27,6 +27,7 @@ import numpy as np
 from openalea.metafspm.coupling.component import (StructuralComponent, input_variable, parameter, planting_variable,
                                                   state_variable)
 from openalea.metafspm.data_structure.configs import ScalesConfig
+from openalea.metafspm.scene.shared import Shared
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
 from openalea.granap.metafspm import columns
@@ -167,6 +168,7 @@ def _on_top(base: dict, own: dict) -> dict:
 
 
 _CHECKED_REDUCTIONS = set()                        # the (labels, check) GRANAP has warned of, once each
+_CHECKPOINTED = {}                                 # {template index: (template, sections known, its copy saved)}
 
 
 def check_reduced_labels(reduction, kinds=()) -> None:
@@ -428,6 +430,17 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
                 sources[i] = candidates[int(np.argmin(np.linalg.norm(there - here, axis=1)))]
                 break
     return sources
+
+
+def _saved_copy(template):
+    """The copy of *template* a checkpoint saves: without its generated organ (for inspection only), its sections'
+    templates as known now; the same copy while the template and its sections are the same (a shared part is not
+    pickled again)."""
+    known = _CHECKPOINTED.get(template.index)
+    if known is None or known[0] is not template or known[1] != len(template._sections):
+        copy = dataclasses.replace(template, organ=None, _sections=dict(template._sections))
+        known = _CHECKPOINTED[template.index] = (template, len(template._sections), copy)
+    return known[2]
 
 
 @dataclass
@@ -973,7 +986,9 @@ class GranapAnatomy(StructuralComponent):
 
     def checkpoint_state(self) -> dict:
         """The kept state, and the anatomy templates (restore_state): the libraries' and those the segments'
-        anatomy_template give, which a new process does not have (its own made at the scene's construction)."""
+        anatomy_template give, which a new process does not have (its own made at the scene's construction). Each
+        template is a shared part of the checkpoints (metafspm.scene.shared.Shared): written once, under its
+        content's key, every later checkpoint referring to it."""
         state = super().checkpoint_state()
         libraries = self._libraries()
         templates = {template.index: template for library in libraries.values()
@@ -981,9 +996,8 @@ class GranapAnatomy(StructuralComponent):
         given = self.data_structure.structure.properties().get("anatomy_template", {}).values()
         templates.update({int(index): TEMPLATES[int(index)] for index in set(given)
                           if index is not None and index >= 0 and int(index) in TEMPLATES})
-        templates = {index: dataclasses.replace(template, organ=None)       # its generated organ, for inspection
-                     for index, template in templates.items()}               # only, not saved
-        state["anatomy_templates"] = {"templates": templates,
+        state["anatomy_templates"] = {"templates": {index: Shared("granap_template", _saved_copy(template))
+                                                    for index, template in templates.items()},
                                       "libraries": {name: {entry: template.index for entry, template in
                                                            library.templates.items()}
                                                     for name, library in libraries.items()}}

@@ -71,7 +71,8 @@ def test_written_in_a_frame(section):
     ds, anatomy = section
     meshes = {mesh.name: mesh for mesh in to_frame({"root": ds}, components={"root": [anatomy]}).data_structures[0].meshes}
     assert set(meshes) == {"GranapAnatomy"}
-    assert len(meshes["GranapAnatomy"].positions) == 3 * len(anatomy.display_triangles())
+    mesh = meshes["GranapAnatomy"]                       # its triangles by indices, their vertices shared
+    assert mesh.indices.size == 3 * len(anatomy.display_triangles()) and len(mesh.positions) < mesh.indices.size / 1.5
 
 
 def test_a_scene_resumed_from_its_checkpoint_draws_its_sections(tmp_path, monkeypatch):
@@ -100,3 +101,20 @@ def test_a_scene_resumed_from_its_checkpoint_draws_its_sections(tmp_path, monkey
     assert [template.index for template in root_library.templates.values()] == [index]
     assert library.template_by_index(index).organ is None              # restored: its tables, not its organ
     assert library._new_template_id() > max(index + 1000, *library.TEMPLATES)   # after the restored ids
+
+
+def test_the_templates_are_saved_once_by_the_checkpoints(tmp_path):
+    """The anatomy templates are shared parts of the checkpoints (metafspm.scene.shared): a second checkpoint into
+    the same shared folder writes none again and refers to the same parts."""
+    import os
+    from openalea.metafspm.scene.shared import references
+    scene = simulate().scene
+    shared = tmp_path / "shared"
+    scene.checkpoint(str(tmp_path / "first"), shared=str(shared))
+    parts = sorted(os.listdir(shared))
+    times = {name: os.path.getmtime(shared / name) for name in parts}
+    scene.checkpoint(str(tmp_path / "second"), shared=str(shared))
+    assert sorted(os.listdir(shared)) == parts and any(name.startswith("granap_template") for name in parts)
+    assert all(os.path.getmtime(shared / name) == times[name] for name in parts)
+    assert references(str(tmp_path / "first"))[1] == references(str(tmp_path / "second"))[1]
+    assert os.path.getsize(tmp_path / "second" / "states.pkl") < 10_000            # the templates referred to only
