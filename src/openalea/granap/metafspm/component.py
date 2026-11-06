@@ -583,20 +583,20 @@ class GranapAnatomy(StructuralComponent):
     pore_width: float = state_variable(unit="mm",
                                        description="a stomatal pore's aperture width in the section (NaN: not a pore)",
                                        references="GRANAP", default=np.nan, scale=SCALES.Compartment,
-                                       location="node", kind="NonInertialIntensive")
+                                       location="node", kind="descriptor")
     pore_depth: float = state_variable(unit="mm",
                                        description="a stomatal pore's depth through the epidermis (NaN: not a pore)",
                                        references="GRANAP", default=np.nan, scale=SCALES.Compartment,
-                                       location="node", kind="NonInertialIntensive")
+                                       location="node", kind="descriptor")
     cgroup: float = state_variable(unit="", description="the protoplast's MECHA cell group (NaN: apoplast)",
                                    references="GRANAP", default=np.nan, scale=SCALES.Compartment, location="node",
                                    kind="descriptor")
     section_x: float = state_variable(unit="mm", description="position in the section", references="GRANAP",
                                       default=np.nan, scale=SCALES.Compartment, location="node",
-                                      kind="NonInertialIntensive")
+                                      kind="descriptor")
     section_y: float = state_variable(unit="mm", description="position in the section", references="GRANAP",
                                       default=np.nan, scale=SCALES.Compartment, location="node",
-                                      kind="NonInertialIntensive")
+                                      kind="descriptor")
     wall_length: float = state_variable(unit="mm", description="the wall's length in the section (0: not a wall)",
                                         references="GRANAP", default=0., scale=SCALES.Compartment, location="node",
                                         kind="NonInertialExtensive")
@@ -605,7 +605,7 @@ class GranapAnatomy(StructuralComponent):
                                                                   "NaN: not a wall)", references="GRANAP",
                                            default=np.nan,
                                            scale=SCALES.Compartment, location="node",
-                                           kind="NonInertialIntensive")
+                                           kind="descriptor")
     cell_area: float = state_variable(unit="mm2", description="the protoplast's area in the section (0: apoplast)",
                                       references="GRANAP", default=0., scale=SCALES.Compartment, location="node",
                                       kind="NonInertialExtensive")
