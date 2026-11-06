@@ -207,7 +207,7 @@ def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
     assert is_display_id(drawn.owner_ids[drawn.owner < 0]).all()
     np.testing.assert_array_equal(drawn.owner_ids[drawn.owner >= 0],
                                   reduced.entity_ids("node")[drawn.owner[drawn.owner >= 0]])
-    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]})
+    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]}, display="full")
     plant = frame.data_structures[0]
     compartments = plant.entity_set("Compartment").columns
     shown = np.asarray(compartments[DISPLAY_ONLY], dtype=bool)
@@ -221,4 +221,36 @@ def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
                         (drawn.owner_ids - 2 ** 52) // 2 ** 24)
     np.testing.assert_array_equal(sections, expected)
     assert (mesh.feature_rows["Cell"][corner] >= 0).all()               # every protoplast in its Cell
+    assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()
+
+
+def test_reduced_sections_are_instances_of_their_full_templates():
+    """display="instances" (metafspm's default): each reduced section an instance of its full template
+    (display_instances: its protoplasts once, in the section's plane, and its segment's transform), placed where
+    display_triangles draws it; the template's nodes are the full template's Compartments with their tissue; no
+    interior row in the frame, no reduced section in its display mesh."""
+    from openalea import encoding3d
+    from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
+    from openalea.metafspm.solve.reduction import Reduction
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    anatomy = Anatomy(data_structure=reduced)
+    drawn = anatomy.display_triangles()                                # whole, in the scene's coordinates
+    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]})
+    plant = frame.data_structures[0]
+    sections = plant.instance_set(type(anatomy).__name__)
+    groups = reduced.structure.reduction.reduced_groups(reduced)
+    assert sorted(sections.columns["owner"].tolist()) == sorted(owner for owner, _ in groups.values())
+    assert DISPLAY_ONLY not in plant.entity_set("Compartment").columns
+    assert type(anatomy).__name__ not in {mesh.name for mesh in plant.meshes}    # every section reduced here
+    placed = encoding3d.placed_meshes(frame, plant, sections)
+    corners = placed.positions[placed.triangles]
+    assert corners.shape == drawn.vertices.shape
+    np.testing.assert_allclose(np.sort(corners.reshape(-1)), np.sort(drawn.vertices.reshape(-1)), atol=1e-12)
+    template = frame.part(sections.parts[0])
+    nodes = template.entity_set("Compartment").columns
+    assert "tissue" in nodes and len(set(nodes["id"].tolist())) == len(nodes["id"])
+    assert not sections.derived                         # no reduced system bound: the shapes, no derived field
     assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()

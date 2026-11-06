@@ -1098,6 +1098,46 @@ class GranapAnatomy(StructuralComponent):
         return Triangles(np.concatenate(vertices), owners,
                          np.concatenate(owner_ids) if (owners < 0).any() else None)
 
+    def display_instances(self, owners):
+        """
+        The reduced sections among the segments *owners* (the plant model's reduction: their kept nodes only in the
+        DataStructure) drawn as instances of their full templates, for metafspm's encoding3d frames
+        (display="instances", the default): each full template's protoplasts once, its cells' polygons triangulated
+        flat in the section's own plane (x, y in m, z 0), each triangle owned by its protoplast's row in the full
+        template; each segment's transform placing it as display_triangles draws it (across the middle of the
+        segment, perpendicular to it: its columns the section's two axes, the segment's axis and its middle). The
+        frame writes the templates and the kinds' recovery operators once (shared parts) and the reduced system's
+        unknown (MECHA's psi) on every protoplast as a derived field of the kept nodes' values, rebuilt by the reader
+        for the sections selected.
+        """
+        from openalea.metafspm.coupling.geometry import TemplateShapes
+        ds = self.data_structure
+        g = ds.structure
+        reduction = getattr(g, "reduction", None)
+        reduced = ({int(owner): key for owner, key in reduction.reduced_groups(ds).values()}
+                   if reduction is not None and g._instanced() else {})
+        template_of = g.properties().get("anatomy_template", {})
+        plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
+                                  np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
+        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + ("length",)}
+        drawn, shape_of, transforms, shapes = [], [], [], {}
+        for segment in np.asarray(owners, dtype=np.int64).tolist():
+            index = template_of.get(segment, -1.)
+            if segment not in reduced or index is None or index < 0:
+                continue
+            full = reduction.full_template(reduced[segment])
+            if full.key not in shapes:
+                shapes[full.key] = _template_shape(g, template_by_index(g, index), full, self.mm_per_unit)
+            centre, axis = _segment_frame(g, segment, plant_position, frame_values)
+            u, v = _perpendiculars(axis)
+            transform = np.eye(4)
+            transform[:3, 0], transform[:3, 1], transform[:3, 2], transform[:3, 3] = u, v, axis, centre
+            drawn.append(segment)
+            shape_of.append(full.key)
+            transforms.append(transform)
+        return TemplateShapes(np.asarray(drawn, dtype=np.int64), shapes, shape_of,
+                              np.asarray(transforms).reshape(-1, 4, 4))
+
     @state(include_inactive=True)        # the sections' geometry, emerged or not
     def _wall_surface(self, wall_length, cell_area, length, edge_length, network_path) \
             -> dict:
@@ -1142,6 +1182,29 @@ def _interior_protoplasts(g, reduction, key) -> tuple:
         keep = (full.scale[where] == ScalesConfig.Compartment) & in_cell & ~held[where]
         cache.add(key, (np.asarray(values, dtype=float)[keep].astype(np.int64), where[keep]))
     return cache[key]
+
+
+def _template_shape(g, template, full, mm_per_unit: float):
+    """The shape of a section of GRANAP's *template* whose full SectionTemplate is *full*, in the section's own plane
+    (x, y in m, z 0: Triangles), each triangle owned by its protoplast's row in *full* (a Compartment in a Cell, by
+    its template_row); once per full template of the population (its registry g.objects: not checkpointed)."""
+    from openalea.metafspm.coupling.geometry import Triangles
+    cache = g.objects("granap_display_shapes", saved=False)
+    if full.key not in cache:
+        local, rows = _template_triangles(template)
+        where, values = full.properties.get("template_row", (np.zeros(0, dtype=np.int64), np.zeros(0)))
+        where = np.asarray(where, dtype=np.int64)
+        complex_ = full.complex[where]
+        in_cell = (complex_ >= 0) & (full.scale[np.maximum(complex_, 0)] == ScalesConfig.Cell)
+        protoplast = (full.scale[where] == ScalesConfig.Compartment) & in_cell
+        row_of = dict(zip(np.asarray(values, dtype=float)[protoplast].astype(np.int64).tolist(),
+                          where[protoplast].tolist()))
+        shown = np.array([int(row) in row_of for row in rows.tolist()], dtype=bool)
+        xy = local[shown] / mm_per_unit
+        vertices = np.concatenate([xy, np.zeros(xy.shape[:2] + (1,))], axis=2)
+        cache.add(full.key, Triangles(vertices, np.array([row_of[int(row)] for row in rows[shown].tolist()],
+                                                          dtype=np.int64)))
+    return cache[full.key]
 
 
 def _template_triangles(template) -> tuple:

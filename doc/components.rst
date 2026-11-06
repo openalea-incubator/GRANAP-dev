@@ -11,12 +11,26 @@ segment is placed by its ends (``x1`` ... ``z2``, optional inputs: on the DataSt
 gives them); otherwise, as with ``RootAxis`` and ``Needle``, along a straight axis from the plant's position. These shapes are for display only: metafspm's
 encoding3d export writes them as a mesh of their own, which ParaView colours by any Compartment variable (tissue, water
 potential, ...). Light models keep the architecture's triangles. They are computed when asked (a frame written), not
-at each step. A reduced section (the plant model's reduction, e.g. MECHA's ``scenario_reduction``: only its conduits,
-its soil node and a blade's vapour path in the DataStructure) is drawn whole: its interior's protoplasts owned by
-their display ids (metafspm's ``solve.reduction.display_ids``), which the frame writes as display rows of the
-Compartments (``metafspm_display_only``), their values the reduced system's unknown recovered (MECHA's ``psi``) and
-their template's properties (tissue, cell area, ...), NaN otherwise. The DataStructure stays reduced; such a frame is
-as large as the full anatomy's.
+at each step.
+
+**Reduced sections in frames.** A reduced section (the plant model's reduction, e.g. MECHA's ``scenario_reduction``:
+only its conduits, its soil node and a blade's vapour path in the DataStructure) is drawn whole, in one of two ways
+(metafspm's ``display=`` of ``SceneRecorder``, ``to_frame``, ``scene_to_frame``):
+
+- ``"instances"`` (the default): ``GranapAnatomy.display_instances(owners)`` gives each full template's protoplasts
+  once, flat in the section's own plane (x, y in m), each triangle owned by its protoplast's row in the full
+  template, and each reduced segment's 4×4 transform (its columns the section's two axes, the segment's axis and its
+  middle: where ``display_triangles`` draws it). The frame writes an instance set ``GranapAnatomy``: per segment its
+  transform and its kept nodes' ``psi``; once per template and per kind (shared parts, ``frames/parts``), the shape
+  with the template's protoplasts and walls (tissue, ...) and the kind's recovery operator; ``psi`` on every
+  protoplast is a derived field, rebuilt by encoding3d (``encoding3d.evaluate``) or ParaView (Select at scale) for
+  the sections chosen. A display frame of use case 1 (one plant drawn, day 3) is 0.8 MB instead of 33 MB.
+- ``"full"``: the interior's protoplasts owned by their display ids (metafspm's ``solve.reduction.display_ids``),
+  which the frame writes as display rows of the Compartments (``metafspm_display_only``), their values the reduced
+  system's unknown recovered (MECHA's ``psi``) and their template's properties (tissue, cell area, ...), NaN
+  otherwise; such a frame is as large as the full anatomy's.
+
+The DataStructure stays reduced either way.
 
 **Templates and checkpoints.** The anatomy templates are the population's (metafspm's registry of its MPG,
 ``g.objects("anatomy_templates")``, ``ds.objects`` on its DataStructure: no module-level registry, two Scenes in one
