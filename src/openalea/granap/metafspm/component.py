@@ -281,36 +281,83 @@ def _instance(g, comps):
     return int(templates[0]), out
 
 
+TABLE_COLUMNS = ("template", "template_node")     # _compartment_table's: set when a Compartment is created
+
+
+def _compartment_table(g) -> dict:
+    """{"vids": every Compartment owned by a SubOrgan (ascending), name: (present, values: NaN where none)} of its
+    template and template node (written when it is created, never after), for the wiring of the junctions
+    (vessel_pairs): a structure-derived value of the MPG (MPG._derived), patched from its delta, the new
+    Compartments read in bulk."""
+    def read(vids):
+        out = [vids]
+        for name in TABLE_COLUMNS:
+            out.extend(_present_values(g, name, vids))
+        return tuple(out)
+
+    def build(arrays):
+        return read(np.asarray(g.owned_compartments(g.scales.SubOrgan), dtype=np.int64))
+
+    def patch(value, arrays, removed, added):
+        owned = np.asarray(g.owned_compartments(g.scales.SubOrgan), dtype=np.int64)
+        new = read(owned[owned >= added[0]] if added.size else owned[:0])
+        kept = ~np.isin(value[0], removed, assume_unique=True)
+        return tuple(np.concatenate((old[kept], fresh)) for old, fresh in zip(value, new))
+
+    value = g._derived("granap_compartments", build, patch)
+    table = {"vids": value[0]}
+    for k, name in enumerate(TABLE_COLUMNS):
+        table[name] = (value[1 + 2 * k], value[2 + 2 * k])
+    return table
+
+
+def _table_values(g, name, vids) -> tuple:
+    """(which of *vids* have a value of *name*, the values: NaN where none) from _compartment_table;
+    the vertices it does not hold (not owned by a SubOrgan) read from the MPG."""
+    table = _compartment_table(g)
+    vids = np.asarray(vids, dtype=np.int64)
+    keys = table["vids"]
+    position = np.searchsorted(keys, vids).clip(0, max(keys.size - 1, 0))
+    held = (keys[position] == vids) if keys.size else np.zeros(vids.size, dtype=bool)
+    present, values = np.zeros(vids.size, dtype=bool), np.full(vids.size, np.nan)
+    if keys.size:
+        present[held], values[held] = table[name][0][position[held]], table[name][1][position[held]]
+    if not held.all():
+        rest = np.unique(vids[~held])
+        their_present, their_values = _present_values(g, name, rest)
+        at = np.searchsorted(rest, vids[~held])
+        present[~held], values[~held] = their_present[at], their_values[at]
+    return present, values
+
+
+def _present_values(g, name, vids) -> tuple:
+    """(which of *vids* (ascending) have property *name*, the values: NaN where none), in one bulk read."""
+    present, values = np.zeros(vids.size, dtype=bool), np.full(vids.size, np.nan)
+    found, found_values = g.values_at(name, vids)
+    if found.size:
+        at = np.searchsorted(vids, found)
+        present[at], values[at] = True, np.asarray(found_values, dtype=np.float64)
+    return present, values
+
+
 def _template_nodes(g, comps):
     """(template, template node of each templated vertex, those vertices) of *comps*: the nodes of one template, each
     once (a whole copy, or a reduced copy's kept nodes), beside vertices of no template (a section's soil node);
-    None when they are of several templates or none."""
+    None when they are of several templates or none. Read from the bulk table of the Compartments
+    (_compartment_table)."""
     vids = np.asarray(comps, dtype=np.int64)
     if vids.size == 0:
         return None
-    order = np.argsort(vids, kind="stable")
-    found, templates = g.values_at("template", vids[order])
-    found_nodes, nodes = g.values_at("template_node", found)
-    if found.size == 0 or found_nodes.size != found.size or not (templates == templates[0]).all():
+    has, templates = _table_values(g, "template", vids)
+    if not has.any():
         return None
-    templated = vids[np.isin(vids, found)]                      # in the order of *comps*
-    out = np.asarray(nodes, dtype=np.int64)[np.searchsorted(found, templated)]
+    has_node, nodes = _table_values(g, "template_node", vids[has])
+    if not has_node.all() or not (templates[has] == templates[has][0]).all():
+        return None
+    out = nodes.astype(np.int64)
     if np.unique(out).size != out.size:
         return None
-    return int(templates[0]), out, templated.tolist()
-
-
-def _section_template_nodes(g, comps):
-    """_template_nodes of a section's Compartments *comps*, kept until the MPG's next structural edit: a section is
-    wired to its parent and to each of its children, for each family of conducting cells."""
-    signature = g._structure_signature()
-    cache = g.__dict__.get("_granap_template_nodes")
-    if cache is None or cache[0] != signature:
-        cache = g.__dict__["_granap_template_nodes"] = (signature, {})
-    key = (int(comps[0]), int(comps[-1]), len(comps))
-    if key not in cache[1]:
-        cache[1][key] = _template_nodes(g, comps)
-    return cache[1][key]
+    return int(templates[has][0]), out, vids[has].tolist()
 
 
 def _positions(g, vids):
@@ -1447,7 +1494,7 @@ def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     """
     if not len(parent_compartments) or not len(child_compartments):     # a section without anatomy: no junction
         return []
-    parent, child = _section_template_nodes(g, parent_compartments), _section_template_nodes(g, child_compartments)
+    parent, child = _template_nodes(g, parent_compartments), _template_nodes(g, child_compartments)
     if parent is None or child is None or _untemplated_vessel(g, parent_compartments, parent[2], family) \
             or _untemplated_vessel(g, child_compartments, child[2], family):
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
