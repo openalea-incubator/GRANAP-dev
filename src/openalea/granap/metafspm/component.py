@@ -698,7 +698,16 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def _label_name(cls, g, segment) -> str:
         """The segment's kind: its SubOrgan label's name, or its organ's for the kinds named by their organ (Sheath)."""
-        return cls._label_names(g, [segment])[0]
+        labels = g.view("label")                               # one segment: read vertex by vertex (the column)
+        code = labels.get(segment)
+        name = next((name for name in ANATOMY_KEYS if getattr(g.labels.SubOrgan, name, None) == code), None)
+        organ = None
+        for organ_name, element in ORGAN_KINDS.items():
+            if name == element:
+                organ = int(g.complex_at_scale(segment, g.scales.Organ)) if organ is None else organ
+                if labels.get(organ) == getattr(g.labels.Organ, organ_name):
+                    return organ_name
+        return name
 
     @classmethod
     def _label_names(cls, g, segments) -> list:
