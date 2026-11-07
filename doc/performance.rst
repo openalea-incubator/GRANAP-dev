@@ -226,6 +226,16 @@ cost. Lowering it changes every cell's shape.
 radius. An export with other settings, or with the needle's bridges, runs the exporter again and replaces the
 stored network. ``stores_network = False`` (the CellSet organ's donor section) skips the network.
 
+**Less often, in a scene.** metafspm's per-component cadence runs ``GranapAnatomy`` once per interval
+(``GranapAnatomy(..., cadence="1 d")``, ``Cadence`` of ``openalea.metafspm.coupling.cadence``): the sections emerged or
+replaced since its last call get their anatomy at its next one, its geometry (wall surfaces, volumes) is held between
+its calls. Measured on metafspm's use case 1 (2 plants, 3 days from the sowing, hourly steps; 2026-11-07): every 3 h,
+the anatomies take 8.8 s instead of 10.0 (a call's cost is the sections it builds, not the call), MECHA 30.8 s
+instead of 34.2 (its network lags: fewer sections), the transpiration and the uptake within 1e-7 of their values, the
+roots' mean water potential up to 74 hPa off (it ranges from -131 to -50 hPa); once a day, 7.6 s, MECHA 16.9 s, the
+fluxes within 1e-6, the roots' water potential up to 98 hPa off (-4 hPa instead of -102 at the first day's end).
+Not the default: the anatomies are the hydraulics' structure.
+
 **Measured, not applied.** These change the anatomies and would need reviewed golden changes; the port does exact
 changes only.
 
