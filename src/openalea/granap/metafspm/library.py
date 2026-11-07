@@ -63,7 +63,7 @@ class ClassInput:
             return 0.
         if self.compute is not None:
             return self.binned(self.compute(g, segment))
-        values = g.property(self.variable)
+        values = g.view(self.variable)                           # read vertex by vertex: the column
         if segment not in values:
             raise KeyError(f"class input '{self.variable}': no value on segment {segment} (an input the architecture "
                            f"model gives)")
@@ -138,19 +138,16 @@ def default_root_parameters(key, base: OrganInputData = None, overrides: dict = 
 
 def _vertex_props(g, vids, skip=SKIP) -> dict:
     """{property: (local rows, values)} of the vertices *vids*, the entries present only."""
-    position = {int(v): i for i, v in enumerate(vids)}
+    vids = np.asarray(vids, dtype=np.int64)
+    order = np.argsort(vids, kind="stable")
+    ordered = vids[order]
     out = {}
-    for name, values in g.properties().items():
+    for name, column in g.properties().items():
         if name in skip:
             continue
-        rows, kept = [], []
-        for v, value in values.items():
-            i = position.get(int(v))
-            if i is not None:
-                rows.append(i)
-                kept.append(value)
-        if rows:
-            out[name] = (np.asarray(rows, dtype=np.int64), kept)
+        found, values = column.at(ordered)                     # in bulk, in the order of the column's keys
+        if found.any():
+            out[name] = (order[found], values.tolist())
     return out
 
 
@@ -193,14 +190,17 @@ class Template:
         if tracked:                                              # the series' tracked vessels, for the junctions
             proto_props["track_id"] = (np.array([r for r, _ in tracked], dtype=np.int64), [t for _, t in tracked])
         local = {int(v): i for i, v in enumerate(list(protoplasts) + list(apoplast))}
-        a, b = g.property("n_id_a"), g.property("n_id_b")
-        links = np.array([[local[int(a[e])], local[int(b[e])]] for e in connections], dtype=np.int64)
-        boundary = g.property("boundary")
+        ends = np.asarray(connections, dtype=np.int64)
+        order = np.argsort(ends, kind="stable")
+        a, b = np.empty(ends.size), np.empty(ends.size)
+        a[order], b[order] = g.values_at("n_id_a", ends[order])[1], g.values_at("n_id_b", ends[order])[1]
+        links = np.array([[local[int(u)], local[int(v)]] for u, v in zip(a.tolist(), b.tolist())], dtype=np.int64)
+        boundary = g.view("boundary")
         return cls(key=key, index=index, layers=_vertex_props(g, w["layers"]),
                    cell_layer=np.array([layer_index[int(g.complex(c))] for c in cells], dtype=np.int64),
                    cells=cell_props, protoplasts=proto_props, apoplast=_vertex_props(g, apoplast),
                    connections=_vertex_props(g, connections), links=links,
-                   polygons=[g.property("cell__polygon").get(int(c)) for c in cells],
+                   polygons=[g.view("cell__polygon").get(int(c)) for c in cells],
                    rings={r: boundary[int(p)] for r, p in enumerate(protoplasts) if int(p) in boundary},
                    organ=organ)
 

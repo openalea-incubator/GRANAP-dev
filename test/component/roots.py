@@ -27,9 +27,9 @@ def _axis(g, plant, n, radius, bearer=None):
         segments.append(g.add_child(segments[-1], **PropsConfig(scale=s.SubOrgan, edge_type='<',
                                                                 label=L.SubOrgan.RootSegment)))
     for rank, v in enumerate(segments):
-        g.property("radius")[v] = radius
-        g.property("length")[v] = SEGMENT
-        g.property("distance_from_tip")[v] = (n - 1 - rank) * SEGMENT
+        g.set_values("radius", [v], [radius])
+        g.set_values("length", [v], [SEGMENT])
+        g.set_values("distance_from_tip", [v], [(n - 1 - rank) * SEGMENT])
     return segments
 
 

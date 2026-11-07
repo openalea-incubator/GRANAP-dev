@@ -196,9 +196,7 @@ def clear_network(g, written: dict) -> None:
         keep = len(written["cells"]) - len(bridges)
         written["cells"], written["protoplasts"] = written["cells"][:keep], written["protoplasts"][:keep]
     for name in [n for n in g.properties() if n in columns.NODE_COLUMNS or n == "mecha_index"]:
-        values = g.property(name)
-        for v in written["protoplasts"]:
-            values.pop(v, None)
+        g.properties()[name].delete_many(written["protoplasts"])
 
 
 def write_network(g, segment, organ, written: dict, network=None) -> dict:
@@ -244,9 +242,7 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
     node_vids = [vid_of_node[n] for n in nodes]
     rows = [columns.node_columns(graph.nodes[n]) for n in nodes]
     columns.write(g, {name: [r[name] for r in rows] for name in columns.NODE_COLUMNS}, node_vids)
-    mecha = g.properties().setdefault("mecha_index", {})
-    for n in nodes:
-        mecha[vid_of_node[n]] = int(n)
+    g.set_values("mecha_index", [vid_of_node[n] for n in nodes], [int(n) for n in nodes])
     edges = list(graph.edges(data=True))
     connections = g.add_components_bulk(
         s.anchors[s.Connection], len(edges), topo_parents=[segment] * len(edges),

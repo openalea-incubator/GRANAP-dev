@@ -76,7 +76,7 @@ def layout(ds, segments):
     lateral root to the side of its bearer; spaced by the sections' sizes."""
     g = ds.structure
     L = g.labels.SubOrgan
-    label = g.property("label")
+    label = g.view("label")
     template_of = dict(zip(ds.entity_ids("SubOrgan").tolist(), ds.get("anatomy_template")))
 
     def size(s):
@@ -92,7 +92,7 @@ def layout(ds, segments):
         gap = 0.6 * (size(s) + size(parent))
         if label[s] == L.StemElement:
             step = (0., gap)
-        elif label[s] == L.LeafElement or (label[parent] == L.RootSegment and g.property("edge_type").get(s) == "+"):
+        elif label[s] == L.LeafElement or (label[parent] == L.RootSegment and g.view("edge_type").get(s) == "+"):
             step = (gap, 0.)                                       # a leaf, or a lateral root: to the side
         else:
             step = (0., -gap)                                      # down the roots
@@ -112,7 +112,7 @@ def main():
     names = {g.labels.SubOrgan.StemElement: "stem", g.labels.SubOrgan.LeafElement: "leaf",
              g.labels.SubOrgan.RootSegment: "root"}
     for s, (x, y) in offsets.items():
-        ax.annotate(f"{names[g.property('label')[s]]} {s}", (x, y), ha="center", va="center", fontsize=8,
+        ax.annotate(f"{names[g.view('label')[s]]} {s}", (x, y), ha="center", va="center", fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.6, lw=0))
     ax.margins(0.04, 0.06)
     ax.set_xticks([])

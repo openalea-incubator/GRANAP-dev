@@ -15,7 +15,7 @@ from openalea.granap.metafspm import columns
 def _by_row(g, vids, prefix):
     """{row: {attribute: value}} of the vertices *vids*, from their properties named prefix + attribute."""
     props = {name[len(prefix):]: values for name, values in g.properties().items() if name.startswith(prefix)}
-    rows = g.property("cell_row")
+    rows = g.view("cell_row")
     out = {}
     for v in vids:
         out[int(rows[v])] = {name: values[v] for name, values in props.items() if v in values}
@@ -55,13 +55,13 @@ def gdf_from_cells(cells, n_real=None) -> gpd.GeoDataFrame:
 def network_from_mpg(g, written) -> nx.Graph:
     """The exporter's networkx graph: its nodes (MECHA indices, attributes) and edges (attributes), rebuilt from the
     MPG's network columns (columns.py)."""
-    mecha, kinds, tissue = g.property("mecha_index"), g.property("kind"), g.property("tissue")
+    mecha, kinds, tissue = g.view("mecha_index"), g.view("kind"), g.view("tissue")
     graph = nx.Graph()
     compartments = sorted(mecha, key=lambda v: mecha[v])
     for v, attrs in zip(compartments, columns.node_attributes(g, compartments, [int(kinds[v]) for v in compartments],
                                                              mecha, tissue)):
         graph.add_node(int(mecha[v]), **attrs)
-    u_of, v_of = g.property("edge_u"), g.property("edge_v")
+    u_of, v_of = g.view("edge_u"), g.view("edge_v")
     connections = written["connections"]
     for e, attrs in zip(connections, columns.edge_attributes(g, connections)):
         graph.add_edge(int(u_of[e]), int(v_of[e]), **attrs)

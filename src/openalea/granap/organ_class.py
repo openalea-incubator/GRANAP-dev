@@ -1624,7 +1624,7 @@ class Organ(AbstractNetwork, ABC):
         if not self.__dict__.get("_network_built"):
             self._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
         g, written = self.mpg, self._mpg_written
-        u_of, v_of = g.property("edge_u"), g.property("edge_v")
+        u_of, v_of = g.view("edge_u"), g.view("edge_v")
         u = np.array([u_of[e] for e in written["connections"]], dtype=np.int64)
         v = np.array([v_of[e] for e in written["connections"]], dtype=np.int64)
         n = self.n_total

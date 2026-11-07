@@ -50,7 +50,7 @@ def test_a_new_segment_gets_its_anatomy_and_inherits_from_the_same_cells_upstrea
     new = g.add_child(main_tip, **PropsConfig(scale=g.scales.SubOrgan, edge_type='<',
                                               label=g.labels.SubOrgan.RootSegment))
     for name, value in (("radius", MAIN_RADIUS), ("length", SEGMENT), ("distance_from_tip", 0.)):
-        g.property(name)[new] = value
+        g.set_values(name, [new], [value])
     anatomy()
     assert anatomy.last_update == {"emerged": [new], "replaced": []}
     compartments = g.compartments_by_owner(g.scales.SubOrgan)[new]

@@ -100,8 +100,8 @@ def test_successive_sections_are_joined_vessel_to_vessel(plant):
 def test_the_hydraulic_graph_holds_every_compartment_and_connection(plant):
     g, _, ds = plant
     view = ds.to_graph_view()
-    n_connections = sum(1 for v, s in g.property("scale").items() if s == g.scales.Connection
-                        and not g.property("isanchor").get(v, False))
+    n_connections = sum(1 for v, s in g.view("scale").items() if s == g.scales.Connection
+                        and not g.view("isanchor").get(v, False))
     assert view.incidence.shape == (ds.n_nodes(), ds.n_edges()) and ds.n_edges() == n_connections
 
 

@@ -147,11 +147,26 @@ def _segments(g, plant, labels_handled=("RootSegment",), kind=None):
     (g, segment) -> its kind's name (GranapAnatomy._label_name), by default its SubOrgan label's."""
     codes = {getattr(g.labels.SubOrgan, name, None) for name in labels_handled}
     codes |= {getattr(g.labels.SubOrgan, ORGAN_KINDS[name]) for name in labels_handled if name in ORGAN_KINDS}
-    labels = g.property("label")
-    candidates = [int(v) for v in g.components_at_scale(plant, scale=g.scales.SubOrgan) if labels.get(v) in codes]
+    components = np.asarray(g.components_at_scale(plant, scale=g.scales.SubOrgan), dtype=np.int64)
+    labels = _aligned(g, "label", components)                   # one read of the labels
+    candidates = [int(v) for v, code in zip(components.tolist(), labels.tolist()) if code in codes]
     if kind is None:
         return candidates
+    if getattr(kind, "__func__", None) is GranapAnatomy._label_name.__func__:     # the candidates' kinds in one read
+        return [v for v, name in zip(candidates, kind.__self__._label_names(g, candidates)) if name in labels_handled]
     return [v for v in candidates if kind(g, v) in labels_handled]
+
+
+def _aligned(g, name, vids, default=None) -> np.ndarray:
+    """Property *name* at each of *vids*, in their order (an object array, *default* where there is none): one bulk
+    read (g.values_at)."""
+    vids = np.asarray(vids, dtype=np.int64)
+    unique, inverse = np.unique(vids, return_inverse=True)
+    found, values = g.values_at(name, unique)
+    out = np.empty(unique.size, dtype=object)
+    out[:] = [default] * unique.size
+    out[np.searchsorted(unique, found)] = values.tolist()
+    return out[inverse]
 
 
 def _label_codes(g, names) -> set:
@@ -208,10 +223,10 @@ def _basal_with_anatomy(g, elements, anatomy_class):
 
 def distance_from_junction(g, segment, length="length") -> float:
     """The length of the segments from *segment* up to the root-shoot junction (its own length excluded)."""
-    lengths, total = g.property(length), 0.
+    lengths, labels, total = g.view(length), g.view("label"), 0.          # read vertex by vertex: the columns
     parent = g.parent(segment)
     while parent is not None and g.scale(parent) == g.scales.SubOrgan and \
-            g.property("label").get(parent) == g.labels.SubOrgan.RootSegment:
+            labels.get(parent) == g.labels.SubOrgan.RootSegment:
         total += float(lengths.get(parent, 0.))
         parent = g.parent(parent)
     return total
@@ -683,16 +698,28 @@ class GranapAnatomy(StructuralComponent):
     @classmethod
     def _label_name(cls, g, segment) -> str:
         """The segment's kind: its SubOrgan label's name, or its organ's for the kinds named by their organ (Sheath)."""
-        labels = g.property("label")
-        code = labels.get(segment)
-        name = next((name for name in ANATOMY_KEYS if getattr(g.labels.SubOrgan, name, None) == code), None)
-        organ = None
-        for organ_name, element in ORGAN_KINDS.items():
-            if name == element:
-                organ = int(g.complex_at_scale(segment, g.scales.Organ)) if organ is None else organ
-                if labels.get(organ) == getattr(g.labels.Organ, organ_name):
-                    return organ_name
-        return name
+        return cls._label_names(g, [segment])[0]
+
+    @classmethod
+    def _label_names(cls, g, segments) -> list:
+        """_label_name of each of *segments*, from one read of their labels and one of their organs'."""
+        segments = np.asarray(segments, dtype=np.int64)
+        if segments.size == 0:
+            return []
+        name_of = {}
+        for name in reversed(ANATOMY_KEYS):                  # the first name of a code, as next() over ANATOMY_KEYS
+            name_of[getattr(g.labels.SubOrgan, name, None)] = name
+        names = [name_of.get(code) for code in _aligned(g, "label", segments).tolist()]
+        organ_kinds = [k for k, name in enumerate(names) if name in ORGAN_KINDS.values()]
+        if organ_kinds:
+            organs = np.asarray(g.complex_at_scale_array(segments[organ_kinds], g.scales.Organ), dtype=np.int64)
+            organ_labels = _aligned(g, "label", organs).tolist()
+            for k, organ_label in zip(organ_kinds, organ_labels):
+                for organ_name, element in ORGAN_KINDS.items():
+                    if names[k] == element and organ_label == getattr(g.labels.Organ, organ_name):
+                        names[k] = organ_name
+                        break
+        return names
 
     @classmethod
     def anatomy_settings(cls, g, segment) -> dict:
@@ -747,7 +774,7 @@ class GranapAnatomy(StructuralComponent):
     def has_soil_node(cls, g, segment) -> bool:
         """Whether the segment is a root section (a root segment or apex, ROOT_KINDS) whose plant has soil nodes (its
         scenario's soil_node)."""
-        if g.property("label").get(segment) not in _label_codes(g, ROOT_KINDS):
+        if g.view("label").get(segment) not in _label_codes(g, ROOT_KINDS):
             return False
         plant = g.complex_at_scale(segment, g.scales.Plant)
         return bool(cls._plant_value(g, plant, "soil_node"))
@@ -786,7 +813,7 @@ class GranapAnatomy(StructuralComponent):
         for name in columns.NODE_COLUMNS + ("pore_width", "pore_depth"):
             g.set_values(name, [soil], [0. if name in ("wall_length", "cell_area") else np.nan])
         for name, value in cls._declared_initial("node").items():
-            if soil not in g.property(name):
+            if soil not in g.view(name):
                 g.set_values(name, [soil], [value])
         n = len(candidates)
         links = g.add_components_bulk(s.anchors[s.Connection], n, topo_parents=[segment] * n, **_build_props(
@@ -838,7 +865,7 @@ class GranapAnatomy(StructuralComponent):
         for key in tuple(ANATOMY_KEYS.values()) + ("soil_node", "instanced_anatomy"):   # its declared Plant parameters
             if key in parameters:
                 value = parameters[key]
-                g.property(key)[plant_vid] = dict(value) if isinstance(value, dict) else value
+                g.set_values(key, [plant_vid], [dict(value) if isinstance(value, dict) else value])
         segments = _segments(g, plant_vid, cls.handled_labels(g, plant_vid), cls._label_name)
         cls.update_anatomies(g, segments)
         cls.update_leaf_surfaces(g, segments)
@@ -858,17 +885,18 @@ class GranapAnatomy(StructuralComponent):
         anatomy_class = g.properties().setdefault("anatomy_class", {})
         template_of = g.properties().setdefault("anatomy_template", {})
         kind_of = g.properties().setdefault("anatomy_kind", {})
-        lengths = g.property("length") if lengths is None else lengths
+        lengths = g.view("length") if lengths is None else lengths
         reduction = g.reduction                                 # the plant model's (solve.reduction)
         if reduction is not None:
             check_reduced_labels(g, reduction)
         done = {"emerged": [], "replaced": []}
+        names = dict(zip(segments, cls._label_names(g, segments)))     # the segments' kinds, in one read
         for segment in segments:
             current = anatomy_class.get(segment)
             if current is None and not float(lengths.get(segment, 0.) or 0.) > 0.:
                 continue
             key = cls.segment_class(g, segment)
-            name = cls._label_name(g, segment)
+            name = names[segment]
             previous = kind_of.get(segment, name)
             if current == key and (previous == name or cls._same_anatomy(g, segment, key, previous, name)):
                 kind_of[segment] = name
@@ -890,7 +918,7 @@ class GranapAnatomy(StructuralComponent):
                 written = template.instantiate(g, segment)
                 if soil:
                     cls.add_soil_node(g, segment, written)
-            _write_3d(g, written, float(g.property("length").get(segment, 0.)) * cls.mm_per_unit)
+            _write_3d(g, written, float(g.view("length").get(segment, 0.)) * cls.mm_per_unit)
             if not instanced:                           # the pores' (leaf surfaces); an instance has its template's
                 nodes = list(written["protoplasts"]) + list(written["apoplast"])
                 g.set_values("pore_width", nodes, [np.nan] * len(nodes))
@@ -914,7 +942,7 @@ class GranapAnatomy(StructuralComponent):
         """Whether the segment, of class *key*, its kind changed from *previous* to *name*, would get the anatomy it
         has: the same template, reduced (the plant model's reduction, its where= on the segment as it is now) as its
         instance is or not reduced as it is."""
-        if float(g.property("anatomy_template").get(segment, -1.)) != float(cls._template(g, segment, key).index):
+        if float(g.view("anatomy_template").get(segment, -1.)) != float(cls._template(g, segment, key).index):
             return False
         reduction = g.reduction
         if reduction is None:
@@ -935,8 +963,8 @@ class GranapAnatomy(StructuralComponent):
         """
         import shapely
         s, L = g.scales, g.labels
-        labels = g.property("label")
-        organs = sorted({int(g.complex_at_scale(v, s.Organ)) for v in segments if cls._label_name(g, v) in cls.leaf_labels})
+        leaves = [v for v, name in zip(segments, cls._label_names(g, segments)) if name in cls.leaf_labels]
+        organs = sorted({int(organ) for organ in g.complex_at_scale_array(np.asarray(leaves, dtype=np.int64), s.Organ)})
         if not organs:
             return
         surfaces = g.properties().setdefault("leaf_surface", {})
@@ -944,8 +972,8 @@ class GranapAnatomy(StructuralComponent):
         path, tissue = g.view("network_path"), g.view("tissue")
         template_row = g.view("template_row")
         for organ in organs:
-            elements = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan)
-                        if cls._label_name(g, v) in cls.leaf_labels]
+            components = [int(v) for v in g.components_at_scale(organ, scale=s.SubOrgan)]
+            elements = [v for v, name in zip(components, cls._label_names(g, components)) if name in cls.leaf_labels]
             stomatal = [c for e in elements for c in g.anchored(e)
                         if g.scale(c) == s.Connection and path.get(c) == columns.STOMATAL_PATH]
             g.remove_connections(stomatal)
@@ -962,10 +990,10 @@ class GranapAnatomy(StructuralComponent):
             for name in columns.NODE_COLUMNS + ("pore_width", "pore_depth"):
                 g.set_values(name, [surface], [0. if name in ("wall_length", "cell_area") else np.nan])
             for name, value in cls._declared_initial("node").items():           # the other declared variables
-                if surface not in g.property(name):
+                if surface not in g.view(name):
                     g.set_values(name, [surface], [value])
             surfaces[organ] = int(surface)
-            template_of = g.property("anatomy_template")
+            template_of = g.view("anatomy_template")
             for element, vids in pores.items():
                 if not vids:
                     continue
@@ -1041,7 +1069,7 @@ class GranapAnatomy(StructuralComponent):
         descendants = anatomy_descendants(g, sections, owners)
         if descendants:
             heads = {int(c) for v in descendants for c in owners.get(v, [])}
-            n_id_b = g.property("n_id_b")
+            n_id_b = g.view("n_id_b")
             g.remove_connections([int(e) for e in g.junction_vids() if int(n_id_b[e]) in heads])
             g.wire_junctions(g.scales.SubOrgan, rules, children=descendants)
 
@@ -1090,7 +1118,7 @@ class GranapAnatomy(StructuralComponent):
         from openalea.metafspm.coupling.geometry import Triangles
         ds = self.data_structure
         g = ds.structure
-        properties = g.properties()                   # read only: g.property() would create a missing property
+        properties = g.properties()                   # the columns, read as they are
         template_of, template_row = properties.get("anatomy_template", {}), g.view("template_row")
         arrays = g.topology_arrays()
         scale, complex_ = arrays["scale"], arrays["complex"]
@@ -1276,7 +1304,8 @@ def _suborgan_lengths(ds) -> dict:
     DataStructure's when the architecture holds length at the SubOrgans, else the MPG's property."""
     if ds.has("length") and ds.location("length") == "SubOrgan":
         return dict(zip(ds.entity_ids("SubOrgan").tolist(), np.asarray(ds.get("length"), dtype=float).tolist()))
-    return {int(v): float(value) for v, value in ds.mtg.property("length").items()}
+    vids, lengths = ds.mtg.properties()["length"].items_arrays()
+    return dict(zip(vids.tolist(), np.asarray(lengths, dtype=float).tolist()))
 
 
 def _per_segment(component, name):
@@ -1299,7 +1328,7 @@ def _segment_frame(g, segment, plant_position, frame_values) -> tuple:
     straight axis from its plant's position (*plant_position*: {plant: (x, y, z)}, the planting's), roots down and the
     shoot up, at its distance from the axis' base. *frame_values*: {name: {segment: value} or None}, the segments'
     ends and lengths (_per_segment)."""
-    properties = g.properties()                       # read only: g.property() would create a missing property
+    properties = g.properties()                       # the columns, read as they are
     ends = [(frame_values.get(name) or {}).get(segment) for name in DISPLAY_ENDS]      # where it is drawn, else
     if not all(value is not None and not np.isnan(value) for value in ends):          # at its topological place
         ends = [(frame_values[name] or {}).get(segment) for name in SEGMENT_ENDS]
@@ -1463,7 +1492,7 @@ def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
     across SubOrgans without anatomy (a pass-through), between *child* and its nearest ancestor with one, their
     length spanning the SubOrgans in between."""
     n = len(pairs)
-    lengths = g.property("length")
+    lengths = g.view("length")
     owners = g.compartments_by_owner(g.scale(child))
     if owners.get(parent):
         between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit

@@ -40,11 +40,12 @@ class RootWithApices(SegmentArchitecture):
         primordium = g.add_component_with_topo(lateral_organ, main[0], **PropsConfig(
             scale=g.scales.SubOrgan, edge_type="+", label=L.RootApex))
         for vertex, length in ((apex, cls.apex_length), (primordium, 0.)):
-            g.property("radius")[vertex], g.property("length")[vertex] = RADIUS, length
-            g.property("distance_from_tip")[vertex] = 0.
+            for name, value in (("radius", RADIUS), ("length", length)):
+                g.set_values(name, [vertex], [value])
+            g.set_values("distance_from_tip", [vertex], [0.])
         for role, vertices in dict(main=main, apex=[apex], primordium=[primordium]).items():
             for vertex in vertices:
-                g.property("role")[vertex] = role
+                g.set_values("role", [vertex], [role])
 
 
 def _roles(g):
@@ -131,7 +132,7 @@ def test_an_apex_relabelled_a_segment_keeps_or_replaces_its_anatomy(apex_anatomy
     RootWithApices(data_structure=ds)
     anatomy = GranapAnatomy(data_structure=ds)
     before = g.property("anatomy_template")[apex]
-    g.property("label")[apex] = g.labels.SubOrgan.RootSegment            # ArchiSimple cuts it off the tip
+    g.set_values("label", [apex], [g.labels.SubOrgan.RootSegment])            # ArchiSimple cuts it off the tip
     anatomy()
     assert anatomy.last_update == {"emerged": [], "replaced": [apex] if replaced else []}
     assert g.property("anatomy_kind")[apex] == "RootSegment"

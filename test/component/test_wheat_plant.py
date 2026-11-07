@@ -29,9 +29,9 @@ def _following(g, organ, label, lengths, after, edge="<"):
     for rank, length in enumerate(lengths):
         props = PropsConfig(scale=g.scales.SubOrgan, edge_type=edge if rank == 0 else "<", label=label)
         previous = g.add_component_with_topo(organ, previous, **props) if rank == 0 else g.add_child(previous, **props)
-        g.property("length")[previous] = float(length)
-        g.property("stem_radius")[previous] = STEM_RADIUS
-        g.property("distance_from_tip")[previous] = 0.
+        g.set_values("length", [previous], [float(length)])
+        g.set_values("stem_radius", [previous], [STEM_RADIUS])
+        g.set_values("distance_from_tip", [previous], [0.])
         out.append(previous)
     return out
 
@@ -50,8 +50,9 @@ class WheatSeedling(SegmentArchitecture):
         L = g.labels.SubOrgan
         seed_organ = g.add_organ(plant, "StemInternode", kind="Shoot")
         seed = g.add_component(seed_organ, **PropsConfig(scale=g.scales.SubOrgan, edge_type="/", label=L.Seed))
-        g.property("length")[seed], g.property("stem_radius")[seed] = SEED_LENGTH, STEM_RADIUS
-        g.property("distance_from_tip")[seed] = 0.
+        for name, value in (("length", SEED_LENGTH), ("stem_radius", STEM_RADIUS)):
+            g.set_values(name, [seed], [value])
+        g.set_values("distance_from_tip", [seed], [0.])
         phytomer = g.complex(seed_organ)
         organ = lambda label: g.add_component(phytomer, **PropsConfig(scale=g.scales.Organ, edge_type="/",
                                                                       label=getattr(g.labels.Organ, label)))
@@ -73,7 +74,7 @@ class WheatSeedling(SegmentArchitecture):
                      crown=[crown], sheath=[sheath_element], leaf=leaf, seminal=seminal, nodal=nodal)
         for role, vids in roles.items():
             for v in vids:
-                g.property("role")[v] = role
+                g.set_values("role", [v], [role])
 
 
 @pytest.fixture(scope="module")

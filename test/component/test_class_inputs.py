@@ -24,8 +24,7 @@ class TwoRoots(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         segments = _axis(g, plant, 2, 0.55e-3)
-        g.property("cortex_layers")[segments[0]] = 4
-        g.property("cortex_layers")[segments[1]] = 2
+        g.set_values("cortex_layers", segments[:2], [4, 2])
 
 
 def _planting(*overrides, key="root_anatomy"):
@@ -42,7 +41,8 @@ class OneLeafElement(StructuralComponent):
                              (s.Phytomer, L.Phytomer.Shoot), (s.Organ, L.Organ.Leaf)):
             complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
         v = g.add_component(complex_, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.LeafElement))
-        g.property("radius")[v], g.property("length")[v], g.property("distance_from_tip")[v] = 1e-3, 2e-4, 0.
+        for name, value in (("radius", 1e-3), ("length", 2e-4), ("distance_from_tip", 0.)):
+            g.set_values(name, [v], [value])
 
 
 def test_plants_parametrized_differently_get_their_own_templates_and_alike_share():
@@ -70,7 +70,7 @@ def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
     population = initiated(_planting(None), TwoRoots, Anatomy)
     g, plants = population.data_structure.structure, population.plants
     segments = sorted(int(s) for s in g.property("anatomy_class"))
-    assert [g.property("anatomy_class")[s][-1] for s in segments] == [4., 2.]
+    assert [g.view("anatomy_class")[s][-1] for s in segments] == [4., 2.]
     assert len(template_registry(g)) == 2
     cortex = {t.key[-1]: sum(c.type == "cortex" for c in t.organ.all_cells.cells)
               for t in template_registry(g).values()}
@@ -113,11 +113,12 @@ class TwoStemOrgans(StructuralComponent):
         for diameter in (2e-3, 3e-3):
             phytomer = g.add_component(complex_, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Shoot))
             organ = g.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.StemInternode))
-            g.property("diameter")[organ] = diameter
+            g.set_values("diameter", [organ], [diameter])
             for _ in range(2):
                 v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/',
                                                          label=L.SubOrgan.StemElement))
-                g.property("length")[v], g.property("distance_from_tip")[v] = 1e-2, 0.
+                for name, value in (("length", 1e-2), ("distance_from_tip", 0.)):
+                    g.set_values(name, [v], [value])
 
 
 def test_the_stems_are_classed_by_a_linked_stem_radius():
@@ -135,7 +136,7 @@ def test_the_stems_are_classed_by_a_linked_stem_radius():
     population = initiated(_planting(None), TwoStemOrgans, Anatomy, translator=translator)
     g = population.data_structure.structure
     elements = sorted(int(s) for s in g.property("anatomy_class"))
-    assert [g.property("anatomy_class")[s][0] for s in elements] == [2., 2., 3., 3.]   # diameters in mm
+    assert [g.view("anatomy_class")[s][0] for s in elements] == [2., 2., 3., 3.]   # diameters in mm
     with pytest.raises(KeyError, match="class input 'stem_radius'"):
         initiated(_planting(None), TwoStemOrgans, Anatomy)
 
@@ -160,7 +161,8 @@ class InternodeAndSheath(StructuralComponent):
         for organ_label in (L.Organ.StemInternode, L.Organ.Sheath):
             organ = g.add_component(complex_, **PropsConfig(scale=s.Organ, edge_type='/', label=organ_label))
             v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.StemElement))
-            g.property("stem_radius")[v], g.property("length")[v], g.property("distance_from_tip")[v] = 1e-3, 1e-2, 0.
+            for name, value in (("stem_radius", 1e-3), ("length", 1e-2), ("distance_from_tip", 0.)):
+                g.set_values(name, [v], [value])
 
 
 def test_a_sheath_is_a_bent_leaf_of_its_own_kind():

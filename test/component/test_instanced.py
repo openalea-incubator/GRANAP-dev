@@ -79,7 +79,7 @@ def test_growth_class_changes_and_pruning_on_instanced_anatomies():
         new = g.add_child(main_tip, **PropsConfig(scale=g.scales.SubOrgan, edge_type='<',
                                                   label=g.labels.SubOrgan.RootSegment))
         for name, value in (("radius", MAIN_RADIUS), ("length", SEGMENT), ("distance_from_tip", 0.)):
-            g.property(name)[new] = value
+            g.set_values(name, [new], [value])
         anatomy()                                                    # growth: inherits from the same cells upstream
         grown = ds.get("solute").copy()
         lateral = min(segments, key=lambda s: (g.property("radius")[s], s))
@@ -88,7 +88,7 @@ def test_growth_class_changes_and_pruning_on_instanced_anatomies():
         ds.set("radius", radius)
         anatomy()                                                    # a class change: replaced, defaults
         changed = ds.get("solute").copy()
-        tip = min((s for s in tips if s != lateral), key=lambda s: g.property("radius")[s])
+        tip = min((s for s in tips if s != lateral), key=lambda s: g.view("radius")[s])
         g.remove_vertex(tip)
         ds.update_topology()
         anatomy()                                                    # pruning
@@ -140,7 +140,7 @@ def test_a_state_changed_in_the_data_structure_survives_the_next_anatomy_step():
         new = g.add_child(tip, **PropsConfig(scale=g.scales.SubOrgan, edge_type='<',
                                              label=g.labels.SubOrgan.RootSegment))
         for name, value in (("radius", g.property("radius")[tip]), ("length", SEGMENT), ("distance_from_tip", 0.)):
-            g.property(name)[new] = value
+            g.set_values(name, [new], [value])
         anatomy()
         results.append(ds)
     copied, instanced = results

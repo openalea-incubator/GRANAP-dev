@@ -36,7 +36,7 @@ def store_topology(g, segment, organ, written: dict) -> tuple:
 def topology_from_mpg(g, segment, written: dict) -> tuple:
     """GRANAP's (cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set), from the MPG."""
     record = written["topology"]
-    boundary = g.property("boundary")
+    boundary = g.view("boundary")
     cell_vkeys = {row: list(boundary[written["protoplasts"][row]]) for row in record["rows"]}
     vertex_to_cells = {}
     for cid, vkeys in cell_vkeys.items():                 # phase 1, as GRANAP builds it
