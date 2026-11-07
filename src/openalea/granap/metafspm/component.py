@@ -29,10 +29,10 @@ from openalea.metafspm.coupling.component import (StructuralComponent, input_var
 from openalea.metafspm.data_structure.configs import ScalesConfig
 from openalea.metafspm.solve.decorator import postsegmentation, state
 
-from openalea.granap.metafspm import columns
+from openalea.granap.metafspm import columns, kernels
 from openalea.granap.metafspm.build import JUNCTION, LEAF_SURFACE, SOIL_NODE, WALL, _props as _build_props
-from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_targets, merged,
-                                              preset_parameters, template_by_index)
+from openalea.granap.metafspm.library import (AnatomyLibrary, ClassInput, class_key, class_keys, class_targets,
+                                              merged, preset_parameters, template_by_index)
 
 SCALES = ScalesConfig()
 MM_PER_M = 1000.                 # GRANAP's sections are in mm; the MPG's lengths in m
@@ -300,6 +300,19 @@ def _template_nodes(g, comps):
     return int(templates[0]), out, templated.tolist()
 
 
+def _section_template_nodes(g, comps):
+    """_template_nodes of a section's Compartments *comps*, kept until the MPG's next structural edit: a section is
+    wired to its parent and to each of its children, for each family of conducting cells."""
+    signature = g._structure_signature()
+    cache = g.__dict__.get("_granap_template_nodes")
+    if cache is None or cache[0] != signature:
+        cache = g.__dict__["_granap_template_nodes"] = (signature, {})
+    key = (int(comps[0]), int(comps[-1]), len(comps))
+    if key not in cache[1]:
+        cache[1][key] = _template_nodes(g, comps)
+    return cache[1][key]
+
+
 def _positions(g, vids):
     """(angle and radius present, x, y) of *vids*, computed value by value as the original rule does."""
     angle, radius = g.view("angle"), g.view("relative_radius")
@@ -329,14 +342,15 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     sections = ds.sections_of(new_vids)
     owners = g.compartments_by_owner(from_scale)
     tissue = g.view("tissue")
+    linked = g.linked_parents(from_scale)
     upstream_cache, known_sections = {}, {}
 
     def upstream(section):
         if section not in upstream_cache:
-            chain, vertex = [], g.linked_parent(int(section), from_scale)
+            chain, vertex = [], linked.get(int(section))
             while vertex is not None:
                 chain.append(int(vertex))
-                vertex = g.linked_parent(vertex, from_scale)
+                vertex = linked.get(vertex)
             upstream_cache[section] = chain
         return upstream_cache[section]
 
@@ -421,14 +435,15 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     owners = g.compartments_by_owner(from_scale)
     template, node = g.view("template"), g.view("template_node")
     tissue, angle, radius = g.view("tissue"), g.view("angle"), g.view("relative_radius")
+    linked = g.linked_parents(from_scale)
     upstream_cache, node_maps = {}, {}
 
     def upstream(section):
         if section not in upstream_cache:
-            chain, vertex = [], g.linked_parent(int(section), from_scale)
+            chain, vertex = [], linked.get(int(section))
             while vertex is not None:
                 chain.append(int(vertex))
-                vertex = g.linked_parent(vertex, from_scale)
+                vertex = linked.get(vertex)
             upstream_cache[section] = chain
         return upstream_cache[section]
 
@@ -734,8 +749,11 @@ class GranapAnatomy(StructuralComponent):
     def anatomy_settings(cls, g, segment) -> dict:
         """The segment's plant's scenario dict for the segment's kind (root_anatomy...), {} if not given; a kind of
         KIND_DEFAULTS (a root apex) on top of its default kind's (root_anatomy)."""
-        plant = g.complex_at_scale(segment, g.scales.Plant)
-        name = cls._label_name(g, segment)
+        return cls._settings(g, g.complex_at_scale(segment, g.scales.Plant), cls._label_name(g, segment))
+
+    @classmethod
+    def _settings(cls, g, plant, name) -> dict:
+        """anatomy_settings of a segment of kind *name* in *plant*."""
         settings = {}
         for kind in (KIND_DEFAULTS.get(name), name):
             key = ANATOMY_KEYS.get(kind)
@@ -762,11 +780,15 @@ class GranapAnatomy(StructuralComponent):
     def organ_of(cls, g, segment) -> OrganAnatomy:
         """The segment's library and class inputs: the explicit ones (root, shoot), else its scenario's preset. A kind
         of KIND_DEFAULTS (a root apex) without an explicit one of its own takes its default kind's (the root's)."""
-        name = cls._label_name(g, segment)
+        return cls._organ(g, g.complex_at_scale(segment, g.scales.Plant), cls._label_name(g, segment))
+
+    @classmethod
+    def _organ(cls, g, plant, name) -> OrganAnatomy:
+        """organ_of a segment of kind *name* in *plant*."""
         base = name if name in cls.shoot else KIND_DEFAULTS.get(name, name)
         explicit = cls.shoot.get(name) if name in cls.shoot else cls.root if base == "RootSegment" else \
             cls.shoot.get(base)
-        settings = cls.anatomy_settings(g, segment)
+        settings = cls._settings(g, plant, name)
         if explicit is not None:
             if "preset" in settings:
                 raise ValueError(f"{cls.__name__}: {ANATOMY_KEYS[name]} gives a preset, but {name} has an explicit "
@@ -852,6 +874,25 @@ class GranapAnatomy(StructuralComponent):
         return class_key(organ.class_inputs, g, segment)
 
     @classmethod
+    def segment_classes(cls, g, segments, names=None) -> list:
+        """segment_class of each of *segments* (*names*: their kinds, _label_names' by default): each kind's organ
+        found once per plant, each class input read in one bulk read."""
+        segments = np.asarray(segments, dtype=np.int64)
+        names = cls._label_names(g, segments) if names is None else list(names)
+        plants = np.asarray(g.complex_at_scale_array(segments, g.scales.Plant), dtype=np.int64).tolist() \
+            if segments.size else []
+        groups = {}
+        for row, group in enumerate(zip(plants, names)):
+            groups.setdefault(group, []).append(row)
+        keys = [None] * segments.size
+        for (plant, name), rows in groups.items():
+            organ = cls._organ(g, plant, name)
+            cls.check_class_inputs(organ)
+            for row, key in zip(rows, class_keys(organ.class_inputs, g, segments[rows])):
+                keys[row] = key
+        return keys
+
+    @classmethod
     def check_class_inputs(cls, organ) -> None:
         """A class input reads a variable the component declares (an input the plant model's translator links, e.g.
         stem_radius from an architecture's organ diameter), never another model's property by name."""
@@ -899,16 +940,19 @@ class GranapAnatomy(StructuralComponent):
         if reduction is not None:
             check_reduced_labels(g, reduction)
         done = {"emerged": [], "replaced": []}
-        names = dict(zip(segments, cls._label_names(g, segments)))     # the segments' kinds, in one read
-        for segment in segments:
-            current = anatomy_class.get(segment)
-            if current is None and not float(lengths.get(segment, 0.) or 0.) > 0.:
-                continue
-            key = cls.segment_class(g, segment)
-            name = names[segment]
-            previous = kind_of.get(segment, name)
+        segments = [int(segment) for segment in segments]
+        names = cls._label_names(g, segments)                  # the segments' kinds, classes and records in bulk
+        currents, kinds = _aligned(g, "anatomy_class", segments), _aligned(g, "anatomy_kind", segments)
+        rows = [i for i, (segment, current) in enumerate(zip(segments, currents.tolist()))
+                if current is not None or float(lengths.get(segment, 0.) or 0.) > 0.]
+        keys = cls.segment_classes(g, [segments[i] for i in rows], [names[i] for i in rows])
+        copies = []                                            # the new anatomies, their 3D quantities written at once
+        for i, key in zip(rows, keys):
+            segment, name, current, recorded = segments[i], names[i], currents[i], kinds[i]
+            previous = name if recorded is None else recorded
             if current == key and (previous == name or cls._same_anatomy(g, segment, key, previous, name)):
-                kind_of[segment] = name
+                if recorded != name:
+                    kind_of[segment] = name
                 continue
             if current is not None:
                 remove_anatomy(g, segment)
@@ -927,7 +971,7 @@ class GranapAnatomy(StructuralComponent):
                 written = template.instantiate(g, segment)
                 if soil:
                     cls.add_soil_node(g, segment, written)
-            _write_3d(g, written, float(g.view("length").get(segment, 0.)) * cls.mm_per_unit)
+            copies.append((segment, written))
             if not instanced:                           # the pores' (leaf surfaces); an instance has its template's
                 nodes = list(written["protoplasts"]) + list(written["apoplast"])
                 g.set_values("pore_width", nodes, [np.nan] * len(nodes))
@@ -935,6 +979,9 @@ class GranapAnatomy(StructuralComponent):
             anatomy_class[segment] = key
             template_of[segment] = float(template.index)
             kind_of[segment] = name
+        if copies:
+            length_mm = _aligned(g, "length", [segment for segment, _ in copies], 0.).astype(float) * cls.mm_per_unit
+            _write_3d(g, [written for _, written in copies], length_mm)
         return done
 
     @classmethod
@@ -1048,17 +1095,18 @@ class GranapAnatomy(StructuralComponent):
                     for plant in g.components_at_scale(g.root, scale=g.scales.Plant)}
         emerged = set(self.active_ids("Plant").tolist())
         segments = [s for plant, these in by_plant.items() if plant in emerged for s in these]
-        alive = {s for these in by_plant.values() for s in these}
+        alive = np.asarray(sorted(s for these in by_plant.values() for s in these), dtype=np.int64)
         for record in ("anatomy_class", "anatomy_kind"):
-            records = g.properties().get(record, {})
-            for gone in [s for s in list(records) if s not in alive]:          # pruned segments: their record only
-                del records[gone]
+            records = g.properties().get(record)
+            if records:                                                       # pruned segments: their record only
+                keys = records.keys_array()
+                records.delete_many(keys[~np.isin(keys, alive)])
         done = self.update_anatomies(g, segments, _suborgan_lengths(self.data_structure))
         self.update_leaf_surfaces(g, done["emerged"] + done["replaced"])
         self._wire_pass_through(done["emerged"] + done["replaced"])
-        template_of = g.properties()["anatomy_template"]
-        for segment in g.components_at_scale(g.root, scale=g.scales.SubOrgan):
-            template_of.setdefault(int(segment), -1.)
+        every = g._vertices_at_scale(g.scales.SubOrgan)
+        missing = every[~np.isin(every, g.properties()["anatomy_template"].keys_array())]
+        g.set_values("anatomy_template", missing, np.full(missing.size, -1.))   # the segments without an anatomy
         self.data_structure.inheritance.fresh = set(done["replaced"])
         self.last_update = done
 
@@ -1083,12 +1131,12 @@ class GranapAnatomy(StructuralComponent):
             g.wire_junctions(g.scales.SubOrgan, rules, children=descendants)
 
     def _pass_through_spans(self, network_path) -> tuple:
-        """(the junctions across SubOrgans without anatomy, as edge indices; for each, those SubOrgans), the
-        pass-through junctions whose length (_wall_surface) spans them; None when there is none. Cached until the
-        topology changes."""
+        """(the junctions across SubOrgans without anatomy, as edge indices; each one's span; the spans' offsets into
+        the SubOrgans without anatomy they cross, those SubOrgans, nearest first), the pass-through junctions whose
+        length (_wall_surface) spans them; None when there is none. Cached until the topology changes."""
         ds = self.data_structure
         key = (ds.topology_version, ds.n_edges())
-        cached = self.__dict__.get("_pass_through")
+        cached = self.__dict__.get("_pass_through_cache")
         if cached is not None and cached[0] == key:
             return cached[1]
         g = ds.mtg
@@ -1098,16 +1146,19 @@ class GranapAnatomy(StructuralComponent):
             edges = ds.edge_endpoints()
             rows = np.flatnonzero(np.asarray(network_path) == columns.JUNCTION_PATH)
             parents, children = ds.sections_of(edges[rows, 0]), ds.sections_of(edges[rows, 1])
-            found_rows, hidden = [], []
+            found_rows, span_of, offsets, hidden = [], [], [0], []
             for child in np.unique(children).tolist():
                 ancestor, between = anatomy_ancestor(g, child, owners)
                 if between:
                     here = rows[(children == child) & (parents == ancestor)]
                     found_rows.extend(here.tolist())
-                    hidden.extend([between] * here.size)
+                    span_of.extend([len(offsets) - 1] * here.size)
+                    hidden.extend(between)
+                    offsets.append(len(hidden))
             if found_rows:
-                spans = (np.asarray(found_rows, dtype=np.int64), hidden)
-        self.__dict__["_pass_through"] = (key, spans)
+                spans = (np.asarray(found_rows, dtype=np.int64), np.asarray(span_of, dtype=np.int64),
+                         np.asarray(offsets, dtype=np.int64), np.asarray(hidden, dtype=np.int64))
+        self.__dict__["_pass_through_cache"] = (key, spans)
         return spans
 
     def display_triangles(self, where=None):
@@ -1234,11 +1285,13 @@ class GranapAnatomy(StructuralComponent):
         junction_mm = edge_mm
         spans = self._pass_through_spans(path)
         if spans is not None:                   # a pass-through junction: plus the SubOrgans without anatomy between
-            rows, hidden = spans
-            lengths = _suborgan_lengths(self.data_structure)
+            rows, span_of, offsets, hidden = spans
+            vids, lengths = _suborgan_length_arrays(self.data_structure)
+            position = np.searchsorted(vids, hidden).clip(0, max(vids.size - 1, 0))
+            found = (vids[position] == hidden) if vids.size else np.zeros(hidden.size, dtype=bool)
+            spanned = kernels.python_sums(np.where(found, lengths[position] if vids.size else 0., 0.), offsets)
             junction_mm = np.array(edge_mm, dtype=float)
-            junction_mm[rows] += np.array([sum(lengths.get(v, 0.) for v in between) for between in hidden]) * \
-                self.mm_per_unit
+            junction_mm[rows] += spanned[span_of] * self.mm_per_unit
         return {"wall_surface": wall_length * length_mm, "cell_volume": cell_area * length_mm,
                 "membrane_surface": np.where(membranes, edge_length * edge_mm, 0.),
                 "edge_length": np.where(path == columns.JUNCTION_PATH, junction_mm, edge_length)}
@@ -1308,13 +1361,23 @@ SEGMENT_ENDS = ("x1", "y1", "z1", "x2", "y2", "z2")
 DISPLAY_ENDS = tuple(f"display_{name}" for name in SEGMENT_ENDS)        # metafspm's: where a segment is drawn
 
 
-def _suborgan_lengths(ds) -> dict:
-    """{SubOrgan: length} of every SubOrgan, those without anatomy (no Compartment, so no node value) included: the
-    DataStructure's when the architecture holds length at the SubOrgans, else the MPG's property."""
+def _suborgan_length_arrays(ds) -> tuple:
+    """(SubOrgans, ascending; their lengths) of every SubOrgan, those without anatomy (no Compartment, so no node
+    value) included: the DataStructure's when the architecture holds length at the SubOrgans, else the MPG's
+    property."""
     if ds.has("length") and ds.location("length") == "SubOrgan":
-        return dict(zip(ds.entity_ids("SubOrgan").tolist(), np.asarray(ds.get("length"), dtype=float).tolist()))
-    vids, lengths = ds.mtg.properties()["length"].items_arrays()
-    return dict(zip(vids.tolist(), np.asarray(lengths, dtype=float).tolist()))
+        vids, lengths = np.asarray(ds.entity_ids("SubOrgan"), dtype=np.int64), np.asarray(ds.get("length"), dtype=float)
+    else:
+        vids, lengths = ds.mtg.properties()["length"].items_arrays()
+        vids, lengths = np.asarray(vids, dtype=np.int64), np.asarray(lengths, dtype=float)
+    order = np.argsort(vids, kind="stable")
+    return vids[order], lengths[order]
+
+
+def _suborgan_lengths(ds) -> dict:
+    """{SubOrgan: length} of every SubOrgan (_suborgan_length_arrays')."""
+    vids, lengths = _suborgan_length_arrays(ds)
+    return dict(zip(vids.tolist(), lengths.tolist()))
 
 
 def _per_segment(component, name):
@@ -1384,7 +1447,7 @@ def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     """
     if not len(parent_compartments) or not len(child_compartments):     # a section without anatomy: no junction
         return []
-    parent, child = _template_nodes(g, parent_compartments), _template_nodes(g, child_compartments)
+    parent, child = _section_template_nodes(g, parent_compartments), _section_template_nodes(g, child_compartments)
     if parent is None or child is None or _untemplated_vessel(g, parent_compartments, parent[2], family) \
             or _untemplated_vessel(g, child_compartments, child[2], family):
         return _vessel_pairs(g, parent_compartments, child_compartments, family)
@@ -1433,19 +1496,27 @@ def _vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     return sorted(pairs)
 
 
-def _write_3d(g, written, length_mm) -> None:
-    """A new copy's 3D quantities: its walls' surfaces, protoplasts' volumes and membranes' surfaces, for a segment of
-    *length_mm* (then recomputed at each step as it elongates, GranapAnatomy._wall_surface)."""
-    nodes = np.asarray(list(written["protoplasts"]) + list(written["apoplast"]), dtype=np.int64)
-    g.set_values("wall_surface", nodes.tolist(), (_values_at(g, "wall_length", nodes, 0.) * length_mm).tolist())
-    g.set_values("cell_volume", nodes.tolist(), (_values_at(g, "cell_area", nodes, 0.) * length_mm).tolist())
-    edges = np.asarray(list(written["connections"]), dtype=np.int64)
+def _write_3d(g, copies, length_mm) -> None:
+    """The new copies' 3D quantities, all at once: their walls' surfaces, protoplasts' volumes and membranes'
+    surfaces, for segments of *length_mm* (one per copy: a written dict, its vids by kind; then recomputed at each
+    step as they elongate, GranapAnatomy._wall_surface)."""
+    def gathered(kinds):
+        vids = [np.asarray(list(v for kind in kinds for v in written[kind]), dtype=np.int64) for written in copies]
+        lengths = np.repeat(np.asarray(length_mm, dtype=float), [v.size for v in vids])
+        vids = np.concatenate(vids) if vids else np.zeros(0, dtype=np.int64)
+        order = np.argsort(vids, kind="stable")                  # ascending: one bulk read per property
+        return vids[order], lengths[order]
+
+    nodes, node_mm = gathered(("protoplasts", "apoplast"))
+    g.set_values("wall_surface", nodes, _values_at(g, "wall_length", nodes, 0.) * node_mm)
+    g.set_values("cell_volume", nodes, _values_at(g, "cell_area", nodes, 0.) * node_mm)
+    edges, edge_mm = gathered(("connections",))
     path = _values_at(g, "network_path", edges, np.nan)
     membranes = np.isin(path, (columns.PATH_CODES["membrane"], columns.PATH_CODES["wall_air"]))
     edge_length = _values_at(g, "edge_length", edges, np.nan)
     if np.isnan(edge_length[membranes]).any():
         raise KeyError("a membrane Connection without edge_length")
-    g.set_values("membrane_surface", edges.tolist(), np.where(membranes, edge_length * length_mm, 0.).tolist())
+    g.set_values("membrane_surface", edges, np.where(membranes, edge_length * edge_mm, 0.))
 
 
 def _values_at(g, name, vids, default) -> np.ndarray:
@@ -1467,10 +1538,11 @@ def anatomy_ancestor(g, section, owners=None) -> tuple:
     """
     scale = g.scale(section)
     owners = g.compartments_by_owner(scale) if owners is None else owners
-    between, vertex = [], g.linked_parent(section, scale)
+    parents = g.linked_parents(scale)
+    between, vertex = [], parents.get(section)
     while vertex is not None and not owners.get(vertex):
         between.append(int(vertex))
-        vertex = g.linked_parent(vertex, scale)
+        vertex = parents.get(vertex)
     return (None if vertex is None else int(vertex)), between
 
 
@@ -1482,13 +1554,13 @@ def anatomy_descendants(g, sections, owners=None) -> list:
         return []
     scale = g.scale(next(iter(sections)))
     owners = g.compartments_by_owner(scale) if owners is None else owners
-    every = [int(v) for v in g.components_at_scale(g.root, scale=scale)]
-    if all(owners.get(v) for v in every):                  # every section has an anatomy: no pass-through
+    parents = g.linked_parents(scale)
+    if all(owners.get(v) for v in parents):                # every section has an anatomy: no pass-through
         return []
     out = []
-    for vertex in sorted(every):
+    for vertex in sorted(parents):
         if owners.get(vertex):
-            parent = g.linked_parent(vertex, scale)
+            parent = parents[vertex]
             if parent is not None and not owners.get(parent):
                 ancestor, _ = anatomy_ancestor(g, vertex, owners)
                 if ancestor in sections:

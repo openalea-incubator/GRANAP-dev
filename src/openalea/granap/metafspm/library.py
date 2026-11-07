@@ -3,6 +3,7 @@ The anatomy library: one template per anatomy class, generated once, instantiate
 segment of the class.
 
     key = class_key(class_inputs, g, segment)                   a class: its class inputs' binned values
+    keys = class_keys(class_inputs, g, segments)                 the classes of many segments, in bulk
     library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
     template = library.template(g, key, plant=overrides)        generated at the first request (per plant overrides),
                                                                 kept in g's registry (g.objects("anatomy_templates"))
@@ -69,10 +70,32 @@ class ClassInput:
                            f"model gives)")
         return self.binned(values[segment])
 
+    def values(self, g, segments) -> list:
+        """value() of each of *segments* (ascending or not), the variable read in one bulk read (g.values_at)."""
+        segments = np.asarray(segments, dtype=np.int64)
+        if self.width <= 0:
+            return [0.] * segments.size
+        if self.compute is not None:
+            return [self.binned(self.compute(g, segment)) for segment in segments.tolist()]
+        unique, inverse = np.unique(segments, return_inverse=True)
+        found, values = g.values_at(self.variable, unique)
+        if found.size != unique.size:
+            missing = int(np.setdiff1d(unique, found)[0])
+            raise KeyError(f"class input '{self.variable}': no value on segment {missing} (an input the architecture "
+                           f"model gives)")
+        binned = [self.binned(value) for value in values.tolist()]
+        return [binned[i] for i in inverse.reshape(-1).tolist()]
+
 
 def class_key(class_inputs, g, segment) -> tuple:
     """A segment's anatomy class: its class inputs' binned values."""
     return tuple(c.value(g, segment) for c in class_inputs)
+
+
+def class_keys(class_inputs, g, segments) -> list:
+    """class_key of each of *segments*, each class input read in one bulk read."""
+    columns = [c.values(g, segments) for c in class_inputs]
+    return list(zip(*columns)) if columns else [()] * len(segments)
 
 
 def class_targets(class_inputs, key) -> dict:

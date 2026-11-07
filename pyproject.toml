@@ -81,6 +81,7 @@ dependencies = [
     "roifile >=2023.8",      # roi_organ
     "lxml >=5,<7",           # no usage in src/ — kept for compatibility
     "scikit-learn >=1.3,<2", # no usage in src/ — kept for compatibility
+    "numba >=0.60",          # the metafspm component's kernels (openalea.granap.metafspm.kernels)
     # "openalea.metafspm",   # the MPG every section is generated into (openalea.granap.metafspm): required, not
     #                        # packaged yet (its latest version) — install it from source, see README.md
 ]
@@ -110,3 +111,7 @@ Repository = "https://github.com/openalea-incubator/GRANAP-dev"
 
 [project.entry-points."wralea"]
 "granap" = "granap_wralea"
+
+# numba's cache filled by metafspm's warm_up (python -m openalea.metafspm warm_up)
+[project.entry-points."openalea.metafspm.warm_up"]
+"granap" = "openalea.granap.metafspm.kernels:warm_up"
