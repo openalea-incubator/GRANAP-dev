@@ -16,7 +16,7 @@ from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.solve.reduction import Reduction
 
-from openalea.granap.metafspm.architectures import SegmentArchitecture, new_organ, segment_chain
+from openalea.granap.metafspm.architectures import SegmentArchitecture, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, anatomy_ancestor, vessel_pairs
 
 from roots import initiated
@@ -33,10 +33,10 @@ class RootWithApices(SegmentArchitecture):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        main = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        main = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                              [(RADIUS, SEGMENT, SEGMENT + APEX), (RADIUS, SEGMENT, APEX)])
         apex = g.add_child(main[-1], **PropsConfig(scale=g.scales.SubOrgan, edge_type="<", label=L.RootApex))
-        lateral_organ = new_organ(g, plant, "Root", "Root", "Root", "RootInternode")
+        lateral_organ = g.add_organ(plant, "RootInternode", kind="Root")
         primordium = g.add_component_with_topo(lateral_organ, main[0], **PropsConfig(
             scale=g.scales.SubOrgan, edge_type="+", label=L.RootApex))
         for vertex, length in ((apex, cls.apex_length), (primordium, 0.)):

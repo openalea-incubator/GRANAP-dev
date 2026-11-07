@@ -7,7 +7,7 @@ from openalea.metafspm.scene.population import Planting, planting
 
 from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.leaf_class import LeafAnatomy
-from openalea.granap.metafspm.architectures import new_organ, segment_chain
+from openalea.granap.metafspm.architectures import segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy
 from openalea.granap.metafspm.library import AnatomyLibrary, preset_parameters, template_by_index
 
@@ -25,11 +25,11 @@ class SmallShoot(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+        stem = segment_chain(g, g.add_organ(plant, "StemInternode", kind="Shoot"), L.StemElement,
                              _elements(2, 2.5e-3))
-        segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement, _elements(1, 2.5e-3),
+        segment_chain(g, g.add_organ(plant, "Leaf", kind="Shoot"), L.LeafElement, _elements(1, 2.5e-3),
                       bearer=stem[1])
-        segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                       _elements(1, 0.55e-3), bearer=stem[0])
 
 
@@ -70,9 +70,9 @@ class TwoElementLeaf(StructuralComponent):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+        stem = segment_chain(g, g.add_organ(plant, "StemInternode", kind="Shoot"), L.StemElement,
                              _elements(1, 2.5e-3))
-        segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement, _elements(2, 2.5e-3),
+        segment_chain(g, g.add_organ(plant, "Leaf", kind="Shoot"), L.LeafElement, _elements(2, 2.5e-3),
                       bearer=stem[0])
 
 

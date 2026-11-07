@@ -12,7 +12,7 @@ from scipy.sparse.csgraph import connected_components
 from openalea.metafspm.data_structure.configs import PropsConfig
 from openalea.metafspm.scene.population import Planting, planting
 
-from openalea.granap.metafspm.architectures import SegmentArchitecture, new_organ, segment_chain
+from openalea.granap.metafspm.architectures import SegmentArchitecture, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, anatomy_ancestor, vessel_pairs
 
 from roots import initiated
@@ -48,7 +48,7 @@ class WheatSeedling(SegmentArchitecture):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        seed_organ = new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode")
+        seed_organ = g.add_organ(plant, "StemInternode", kind="Shoot")
         seed = g.add_component(seed_organ, **PropsConfig(scale=g.scales.SubOrgan, edge_type="/", label=L.Seed))
         g.property("length")[seed], g.property("stem_radius")[seed] = SEED_LENGTH, STEM_RADIUS
         g.property("distance_from_tip")[seed] = 0.
@@ -65,9 +65,9 @@ class WheatSeedling(SegmentArchitecture):
         blade = organ("Blade")
         (blade_hidden,) = _following(g, blade, L.HiddenElement, [HIDDEN], sheath_element)
         leaf = _following(g, blade, L.LeafElement, list(cls.leaf_lengths), blade_hidden)
-        seminal = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        seminal = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                                 [(ROOT_RADIUS, ELEMENT, ELEMENT), (ROOT_RADIUS, ELEMENT, 0.)], bearer=seed)
-        nodal = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        nodal = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                               [(ROOT_RADIUS, ELEMENT, 0.)], bearer=crown)
         roles = dict(seed=[seed], subcrown=subcrown, hidden=[internode_hidden, sheath_hidden, blade_hidden],
                      crown=[crown], sheath=[sheath_element], leaf=leaf, seminal=seminal, nodal=nodal)

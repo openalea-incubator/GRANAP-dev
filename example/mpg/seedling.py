@@ -20,7 +20,7 @@ from openalea.metafspm.coupling.translator import Translator
 from openalea.metafspm.scene.population import Planting, planting
 from openalea.metafspm.scene.scene import Scene
 
-from openalea.granap.metafspm.architectures import SegmentArchitecture, new_organ, segment_chain
+from openalea.granap.metafspm.architectures import SegmentArchitecture, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
 from openalea.granap.metafspm.library import AnatomyLibrary, template_by_index
 from openalea.granap.metafspm.plots import draw_plant, tissue_legend
@@ -42,14 +42,14 @@ class SeedlingArchitecture(SegmentArchitecture):
     @classmethod
     def initiate_plant(cls, g, plant, parameters):
         L = g.labels.SubOrgan
-        stem = segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "StemInternode"), L.StemElement,
+        stem = segment_chain(g, g.add_organ(plant, "StemInternode", kind="Shoot"), L.StemElement,
                              _elements(3, STEM_RADIUS))
         for bearer in stem[1:]:
-            segment_chain(g, new_organ(g, plant, "Shoot", "Shoot", "Shoot", "Leaf"), L.LeafElement,
+            segment_chain(g, g.add_organ(plant, "Leaf", kind="Shoot"), L.LeafElement,
                           _elements(2, LEAF_RADIUS), bearer=bearer)
-        main = segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        main = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                              _elements(3, ROOT_RADIUS), bearer=stem[0])
-        segment_chain(g, new_organ(g, plant, "Root", "Root", "Root", "RootInternode"), L.RootSegment,
+        segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
                       _elements(2, LATERAL_RADIUS), bearer=main[1])
 
 
