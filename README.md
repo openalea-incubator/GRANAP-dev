@@ -17,8 +17,8 @@ from source (`pip install -e`) in one environment.
 
 ```bash
 mkdir fspm && cd fspm                       # any folder: the repositories side by side
-git clone -b data_structure_api https://github.com/openalea/metafspm.git metafspm
-git clone https://github.com/openalea/encoding3d.git encoding3d
+git clone -b release2026 https://github.com/openalea/metafspm.git metafspm
+git clone -b other_platforms_bindings https://github.com/openalea/encoding3d.git encoding3d
 git clone -b to_metafspm https://github.com/openalea-incubator/GRANAP-dev.git GRANAP
 
 mamba env create -f GRANAP/conda/environment.yaml        # GRANAP's dependencies and metafspm's
@@ -74,7 +74,7 @@ Run them locally with `jupyter lab example/tutorials/`.
 
 This version generates every cross-section into metafspm's multiscale plant graph (MPG): its cells, walls, junctions
 and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`; the documentation in `doc/`: its components, equations, the legacy compared, performance). metafspm is
-therefore required, on its `data_structure_api` branch (the anatomy scales), until it is merged.
+therefore required, on its `release2026` branch, until it is merged.
 
 The original source is kept, frozen, as `openalea.granap.legacy` (the reference the port is compared with:
 `test/comparison/`, `example/comparison/`). New work goes into the main package.
