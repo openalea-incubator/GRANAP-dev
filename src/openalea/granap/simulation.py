@@ -71,14 +71,7 @@ def _plant_model():
         initiators = (RootAxis, GranapAnatomy)
         from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
 
-        def __init__(self, data_structure, time_step):
-            self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)
-            self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-            self.couple(self.architecture, self.anatomy)
-
-        def run(self):
-            self.architecture()
-            self.anatomy()
+        parts = {"architecture": RootAxis, "anatomy": GranapAnatomy}
 
     return SectionAlone
 

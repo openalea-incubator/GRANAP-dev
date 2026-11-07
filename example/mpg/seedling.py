@@ -68,14 +68,7 @@ class Seedling(CompositeModel):
     from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
     translator = Translator().link("SeedlingAnatomy", "stem_radius", "SeedlingArchitecture", {"radius": 1.})
 
-    def __init__(self, data_structure, time_step):
-        self.architecture = SeedlingArchitecture(data_structure=data_structure, time_step=time_step)
-        self.anatomy = SeedlingAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.architecture, self.anatomy)
-
-    def run(self):
-        self.architecture()
-        self.anatomy()
+    parts = {"architecture": SeedlingArchitecture, "anatomy": SeedlingAnatomy}
 
 
 def layout(ds, segments):

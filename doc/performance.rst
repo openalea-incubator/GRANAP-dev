@@ -226,8 +226,9 @@ cost. Lowering it changes every cell's shape.
 radius. An export with other settings, or with the needle's bridges, runs the exporter again and replaces the
 stored network. ``stores_network = False`` (the CellSet organ's donor section) skips the network.
 
-**Less often, in a scene.** metafspm's per-component cadence runs ``GranapAnatomy`` once per interval
-(``GranapAnatomy(..., cadence="1 d")``, ``Cadence`` of ``openalea.metafspm.coupling.cadence``): the sections emerged or
+**Less often, in a scene.** metafspm's schedule step cadence runs ``GranapAnatomy`` once per interval (a plant
+model's ``Step("anatomy", cadence="1 d")``, or its scenario's ``{"cadence": {"anatomy": "1 d"}}``; ``Cadence`` of
+``openalea.metafspm.coupling.cadence``): the sections emerged or
 replaced since its last call get their anatomy at its next one, its geometry (wall surfaces, volumes) is held between
 its calls. Measured on metafspm's use case 1 (2 plants, 3 days from the sowing, hourly steps; 2026-11-07): every 3 h,
 the anatomies take 8.8 s instead of 10.0 (a call's cost is the sections it builds, not the call), MECHA 30.8 s

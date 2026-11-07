@@ -1,4 +1,4 @@
-"""A plant emerging later in an anatomy-mode scene: the sections' 3D quantities are computed for every plant, emerged
+"""A plant planted later in an anatomy-mode scene: the sections' 3D quantities are computed for every plant, planted
 or not (the step's arrays are not restricted to the active entities, its edge means cover every edge)."""
 import numpy as np
 
@@ -16,16 +16,11 @@ class Roots(CompositeModel):
     nodes = "Compartment"
     wiring = staticmethod(junction_rules)
 
-    def __init__(self, data_structure, time_step):
-        self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.anatomy)
-
-    def run(self):
-        self.anatomy()
+    parts = {"anatomy": GranapAnatomy}
 
 
-def test_a_plant_not_yet_emerged_has_its_sections_geometry():
-    table = planting([Planting(), Planting(x=0.5)], Roots, emergence_times=[0., 7200.], xrange=1., yrange=1.)
+def test_a_plant_not_yet_planted_has_its_sections_geometry():
+    table = planting([Planting(), Planting(x=0.5)], Roots, planting_times=[0., 7200.], xrange=1., yrange=1.)
     scene = Scene(table, time_step=3600.)
     for _ in range(3):
         scene.run()

@@ -15,15 +15,9 @@ distance_from_tip: SegmentArchitecture), which GranapAnatomy reads as inputs:
     class RootAnatomies(CompositeModel):
         initiators = (RootAxis, GranapAnatomy)
         from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
-
-        def __init__(self, data_structure, time_step):
-            self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)   # first: it owns the
-            self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)   # segments' variables
-            self.couple(self.architecture, self.anatomy)
-
-        def run(self):
-            self.architecture()          # the roots grow (root_growth)
-            self.anatomy()               # the new segments get their anatomies
+        # the roots grow (root_growth: the architecture first, it owns the segments' variables), then the new
+        # segments get their anatomies
+        parts = {"architecture": RootAxis, "anatomy": GranapAnatomy}
 
     table = planting([Planting()], RootAnatomies, {"root_segments": [[0.55e-3, 2e-4, 0.]]})
 """

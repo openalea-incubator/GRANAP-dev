@@ -24,14 +24,9 @@ class RootAnatomies(CompositeModel):
     initiators = (RootAxis, GranapAnatomy)
     from_scale, nodes, wiring = "SubOrgan", "Compartment", junction_rules
 
-    def __init__(self, data_structure, time_step):
-        self.architecture = RootAxis(data_structure=data_structure, time_step=time_step)
-        self.anatomy = GranapAnatomy(data_structure=data_structure, time_step=time_step)
-        self.couple(self.architecture, self.anatomy)          # the segments' radius, length...: shared by name
-
-    def run(self):
-        self.architecture()                                   # the root grows (root_growth)
-        self.anatomy()                                        # the new segment gets its anatomy
+    # the root grows (root_growth), then the new segment gets its anatomy; the segments' radius, length...: shared
+    # by name
+    parts = {"architecture": RootAxis, "anatomy": GranapAnatomy}
 
 
 def grown():

@@ -532,6 +532,26 @@ class GranapAnatomy(StructuralComponent):
     z2: float = input_variable(unit="m", description="the segment's end, z (display only)",
                                references="GRANAP", by="Architecture", scale=SCALES.SubOrgan, kind="descriptor",
                                optional=True)
+    # where the architecture draws a segment when not at its topological place (metafspm's display ends: the
+    # sections are drawn there; NaN, or not given: at x1 ... z2)
+    display_x1: float = input_variable(unit="m", description="where the segment's start is drawn, x (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
+    display_y1: float = input_variable(unit="m", description="where the segment's start is drawn, y (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
+    display_z1: float = input_variable(unit="m", description="where the segment's start is drawn, z (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
+    display_x2: float = input_variable(unit="m", description="where the segment's end is drawn, x (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
+    display_y2: float = input_variable(unit="m", description="where the segment's end is drawn, y (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
+    display_z2: float = input_variable(unit="m", description="where the segment's end is drawn, z (display only)",
+                                       references="metafspm", by="Architecture", scale=SCALES.SubOrgan, default=np.nan,
+                                       kind="descriptor", optional=True)
     # ── Inputs: the plants' positions (the planting's), where display_triangles draws the sections ──
     x: float = planting_variable("x")
     y: float = planting_variable("y")
@@ -1079,7 +1099,7 @@ class GranapAnatomy(StructuralComponent):
         wanted = set(node_ids[kept].tolist())
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
-        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + ("length",)}
+        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + DISPLAY_ENDS + ("length",)}
         reduction = getattr(g, "reduction", None)              # the plant model's: its reduced sections drawn whole
         reduced = ({int(owner): key for owner, key in reduction.reduced_groups(ds).values()}
                    if reduction is not None and g._instanced() else {})
@@ -1142,7 +1162,7 @@ class GranapAnatomy(StructuralComponent):
         template_of = g.properties().get("anatomy_template", {})
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
-        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + ("length",)}
+        frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + DISPLAY_ENDS + ("length",)}
         drawn, shape_of, transforms, shapes = [], [], [], {}
         for segment in np.asarray(owners, dtype=np.int64).tolist():
             index = template_of.get(segment, -1.)
@@ -1248,6 +1268,7 @@ def _template_triangles(template) -> tuple:
 
 
 SEGMENT_ENDS = ("x1", "y1", "z1", "x2", "y2", "z2")
+DISPLAY_ENDS = tuple(f"display_{name}" for name in SEGMENT_ENDS)        # metafspm's: where a segment is drawn
 
 
 def _suborgan_lengths(ds) -> dict:
@@ -1273,12 +1294,15 @@ def _per_segment(component, name):
 
 
 def _segment_frame(g, segment, plant_position, frame_values) -> tuple:
-    """(middle, unit axis) of *segment*: from its ends (x1 ... z2) when the architecture gives them, else along a
+    """(middle, unit axis) of *segment*: from where it is drawn (its display ends, else its ends x1 ... z2) when the
+    architecture gives them, else along a
     straight axis from its plant's position (*plant_position*: {plant: (x, y, z)}, the planting's), roots down and the
     shoot up, at its distance from the axis' base. *frame_values*: {name: {segment: value} or None}, the segments'
     ends and lengths (_per_segment)."""
     properties = g.properties()                       # read only: g.property() would create a missing property
-    ends = [(frame_values[name] or {}).get(segment) for name in SEGMENT_ENDS]
+    ends = [(frame_values.get(name) or {}).get(segment) for name in DISPLAY_ENDS]      # where it is drawn, else
+    if not all(value is not None and not np.isnan(value) for value in ends):          # at its topological place
+        ends = [(frame_values[name] or {}).get(segment) for name in SEGMENT_ENDS]
     if all(value is not None and not np.isnan(value) for value in ends):
         start, end = np.asarray(ends[:3], dtype=float), np.asarray(ends[3:], dtype=float)
         length = np.linalg.norm(end - start)
