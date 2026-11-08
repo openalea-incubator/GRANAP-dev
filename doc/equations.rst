@@ -399,6 +399,9 @@ each family are paired by equal ``track_id``; every other child vessel with its 
 other parent vessel with its nearest child vessel, in :math:`(\rho\cos\theta, \rho\sin\theta)`: a fusion or a split
 gives one-to-many junctions. A junction's length is :math:`(L_\text{parent} + L_\text{child})/2`, its vector the two
 vessels' in-plane offset; xylem junctions are apoplastic, phloem junctions symplastic.
+The rules (``junction_rules``: ``family_junctions`` and ``junction_geometry``) are metafspm wiring rules evaluated
+once over every pair of sections being wired (``vessel_junctions``): two template copies' pairs are computed once per
+(templates, nodes, family) and given each pair's vids in one lookup.
 
 **3D quantities** (``GranapAnatomy._wall_surface``, every time step, and ``_write_3d`` at instantiation), with the
 segment's length :math:`L_s` in mm:

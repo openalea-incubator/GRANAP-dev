@@ -78,6 +78,10 @@ Run them locally with `jupyter lab example/tutorials/`.
 This version generates every cross-section into metafspm's multiscale plant graph (MPG): its cells, walls, junctions
 and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`; the documentation in `doc/`: its components, equations, the legacy compared, performance). metafspm is
 therefore required, on its `release2026` branch, until it is merged.
+The axial junctions between successive sections come from `junction_rules(g)`, metafspm wiring rules
+(`{"pairs": ..., "properties": junction_geometry(...)}`) each evaluated once over every pair of sections being
+wired (`vessel_junctions`: the pairs of two templates computed once, then given each pair's vids in one lookup);
+`vessel_pairs` gives one pair's junctions.
 
 The original source is kept, frozen, as `openalea.granap.legacy` (the reference the port is compared with:
 `test/comparison/`, `example/comparison/`). New work goes into the main package.

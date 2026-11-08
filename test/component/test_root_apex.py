@@ -182,13 +182,15 @@ def test_the_junctions_of_reduced_sections_are_their_templates_pairs_computed_on
     """Reduced sections (their kept nodes, a part of their template's) are joined as their whole vessels would be:
     vessel_pairs gives the pairs of the direct rule (_vessel_pairs), computed once per pair of templates and nodes
     (the population's cache) and given each section's vids."""
-    from openalea.granap.metafspm.component import _template_nodes, _vessel_pairs
+    from openalea.granap.metafspm.component import _table_values, _vessel_pairs
     ds, g = _built(reduction=_reduction({"label": "RootSegment"}))
     main = _roles(g)["main"]
     assert set(main) <= _reduced_sections(g)
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     parent, child = owners[main[0]], owners[main[1]]
-    assert _template_nodes(g, parent) is not None and _template_nodes(g, child) is not None   # the soil node apart
+    for section in (parent, child):                              # one template's nodes (a soil node may have none)
+        has, templates = _table_values(g, "template", np.asarray(section, dtype=np.int64))
+        assert has.sum() >= len(section) - 1 and np.unique(templates[has]).size == 1
     cache = g.objects("granap_vessel_pairs", saved=False)
     for family in (0, 1):
         direct = _vessel_pairs(g, parent, child, family)

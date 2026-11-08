@@ -340,26 +340,6 @@ def _present_values(g, name, vids) -> tuple:
     return present, values
 
 
-def _template_nodes(g, comps):
-    """(template, template node of each templated vertex, those vertices) of *comps*: the nodes of one template, each
-    once (a whole copy, or a reduced copy's kept nodes), beside vertices of no template (a section's soil node);
-    None when they are of several templates or none. Read from the bulk table of the Compartments
-    (_compartment_table)."""
-    vids = np.asarray(comps, dtype=np.int64)
-    if vids.size == 0:
-        return None
-    has, templates = _table_values(g, "template", vids)
-    if not has.any():
-        return None
-    has_node, nodes = _table_values(g, "template_node", vids[has])
-    if not has_node.all() or not (templates[has] == templates[has][0]).all():
-        return None
-    out = nodes.astype(np.int64)
-    if np.unique(out).size != out.size:
-        return None
-    return int(templates[has][0]), out, vids[has].tolist()
-
-
 def _positions(g, vids):
     """(angle and radius present, x, y) of *vids*, computed value by value as the original rule does."""
     angle, radius = g.view("angle"), g.view("relative_radius")
@@ -1487,36 +1467,94 @@ def _vessels(g, compartments, family):
 
 def vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
     """
-    The junctions between two successive sections for one family of conducting cells. When both sections are
-    template copies (whole, or a reduced copy's kept nodes), the pairs depend only on the two templates and their
-    nodes: computed once per (parent template and nodes, child template and nodes, family) on their template nodes,
-    then given each pair's vids.
+    The junctions [(parent-side vid, child-side vid), ...] between two successive sections for one family of
+    conducting cells: vessel_junctions for one pair, sorted.
     """
-    if not len(parent_compartments) or not len(child_compartments):     # a section without anatomy: no junction
-        return []
-    parent, child = _template_nodes(g, parent_compartments), _template_nodes(g, child_compartments)
-    if parent is None or child is None or _untemplated_vessel(g, parent_compartments, parent[2], family) \
-            or _untemplated_vessel(g, child_compartments, child[2], family):
-        return _vessel_pairs(g, parent_compartments, child_compartments, family)
-    (parent_template, parent_nodes, parents), (child_template, child_nodes, children) = parent, child
-    key = (parent_template, np.sort(parent_nodes).tobytes(), child_template, np.sort(child_nodes).tobytes(), family)
+    _, tails, heads = vessel_junctions(g, [np.asarray(parent_compartments, dtype=np.int64)],
+                                       [np.asarray(child_compartments, dtype=np.int64)], family)
+    return list(zip(tails.tolist(), heads.tolist()))
+
+
+def vessel_junctions(g, parent_compartments, child_compartments, family) -> tuple:
+    """
+    The junctions of one family of conducting cells between the sections of many pairs, at once: *parent_compartments*
+    and *child_compartments* hold each pair's two sides (arrays of Compartment vids). (pair, tails, heads): each
+    junction's pair index and its parent-side and child-side vids, by pair, then sorted.
+
+    When both sides of a pair are template copies (whole, or a reduced copy's kept nodes), its junctions depend only
+    on the two templates and their nodes: computed once per (parent template and nodes, child template and nodes,
+    family) on their template nodes (the population's cache), then given each pair's vids through one lookup of
+    (side, template node). Every side's templates and nodes are read in one bulk read of the Compartments' table
+    (_compartment_table). The other pairs (a side not of one template with each node once, or with an untemplated
+    conducting cell of the family) take the direct rule (_vessel_pairs).
+    """
+    n = len(parent_compartments)
+    sides = [np.asarray(side, dtype=np.int64) for side in list(parent_compartments) + list(child_compartments)]
+    counts = np.array([side.size for side in sides], dtype=np.int64)
+    vids = np.concatenate(sides) if sides else np.zeros(0, dtype=np.int64)
+    side_of = np.repeat(np.arange(2 * n, dtype=np.int64), counts)
+    has, templates = _table_values(g, "template", vids)
+    has_node, nodes = _table_values(g, "template_node", vids)
+    nodes = np.where(has & has_node, nodes, -1.).astype(np.int64)
+    # a side is templated when its vertices of a template are all one template's, each node once
+    templated_count = np.bincount(side_of[has], minlength=2 * n)
+    bad = np.zeros(2 * n, dtype=bool)
+    bad[side_of[has & ~has_node]] = True
+    first = np.full(2 * n, np.nan)
+    with_template, at = np.unique(side_of[has], return_index=True)
+    first[with_template] = templates[has][at]                        # each side's first template
+    bad[side_of[has][templates[has] != first[side_of[has]]]] = True
+    order = np.lexsort((nodes, ~has, side_of))                        # by side, the templated first, by node
+    repeated = has[order][1:] & has[order][:-1] & (side_of[order][1:] == side_of[order][:-1]) \
+        & (nodes[order][1:] == nodes[order][:-1])
+    bad[side_of[order][1:][repeated]] = True
+    rest = np.unique(vids[~has])                     # an untemplated vertex (a soil node): a conducting cell?
+    if rest.size:
+        found, values = g.values_at("family", rest)
+        conducting = found[np.asarray(values, dtype=np.float64) == family]
+        bad[side_of[~has & np.isin(vids, conducting)]] = True
+    templated = (templated_count > 0) & ~bad
+    starts = np.concatenate(([0], np.cumsum(counts)))
+    by_node = order[has[order]]                                       # each side's templated entries, by node
+    node_starts = np.concatenate(([0], np.cumsum(templated_count)))
+    stride = int(nodes.max(initial=0)) + 1
+    lookup_keys = side_of[by_node] * stride + nodes[by_node]          # ascending: (side, template node)
+    lookup_vids = vids[by_node]
     cache = g.objects("granap_vessel_pairs", saved=False)  # the population's (not checkpointed); template indices:
-    local = cache.get(key)                                 # of their content
-    if local is None:                                      # the vessels are templated: the same pairs without the rest
-        node_a, node_b = dict(zip(parents, parent_nodes.tolist())), dict(zip(children, child_nodes.tolist()))
-        local = [(node_a[a], node_b[b]) for a, b in _vessel_pairs(g, parents, children, family)]
-        cache.add(key, local)
-    vid_a, vid_b = dict(zip(parent_nodes.tolist(), parents)), dict(zip(child_nodes.tolist(), children))
-    return sorted((int(vid_a[a]), int(vid_b[b])) for a, b in local)
-
-
-def _untemplated_vessel(g, comps, templated, family) -> bool:
-    """Whether a vertex of *comps* of no template (a soil node) is a conducting cell of *family*."""
-    if len(templated) == len(comps):
-        return False
-    rest = sorted(set(int(v) for v in comps) - set(templated))
-    found, values = g.values_at("family", np.asarray(rest, dtype=np.int64))
-    return bool(found.size) and bool((np.asarray(values, dtype=np.float64) == family).any())
+    pairs_out, tails_out, heads_out = [], [], []           # of their content
+    for i in range(n):
+        a, b = i, n + i
+        if not counts[a] or not counts[b]:                 # a section without anatomy: no junction
+            continue
+        if not (templated[a] and templated[b]):
+            direct = _vessel_pairs(g, sides[a].tolist(), sides[b].tolist(), family)
+            if direct:
+                pairs_out.append(np.full(len(direct), i, dtype=np.int64))
+                tails_out.append(np.array([t for t, _ in direct], dtype=np.int64))
+                heads_out.append(np.array([h for _, h in direct], dtype=np.int64))
+            continue
+        key = (int(first[a]), nodes[by_node[node_starts[a]:node_starts[a + 1]]].tobytes(),
+               int(first[b]), nodes[by_node[node_starts[b]:node_starts[b + 1]]].tobytes(), family)
+        local = cache.get(key)
+        if local is None:                                  # the vessels are templated: the same pairs without the rest
+            ends = [(vids[starts[side]:starts[side + 1]][has[starts[side]:starts[side + 1]]],
+                     nodes[starts[side]:starts[side + 1]][has[starts[side]:starts[side + 1]]]) for side in (a, b)]
+            node_a, node_b = (dict(zip(side_vids.tolist(), side_nodes.tolist())) for side_vids, side_nodes in ends)
+            local = np.array([(node_a[p], node_b[c]) for p, c in
+                              _vessel_pairs(g, ends[0][0].tolist(), ends[1][0].tolist(), family)],
+                             dtype=np.int64).reshape(-1, 2)
+            cache.add(key, local)
+        if not local.size:
+            continue
+        pairs_out.append(np.full(local.shape[0], i, dtype=np.int64))
+        tails_out.append(lookup_vids[np.searchsorted(lookup_keys, a * stride + local[:, 0])])
+        heads_out.append(lookup_vids[np.searchsorted(lookup_keys, b * stride + local[:, 1])])
+    if not pairs_out:
+        empty = np.zeros(0, dtype=np.int64)
+        return empty, empty, empty
+    pair, tails, heads = np.concatenate(pairs_out), np.concatenate(tails_out), np.concatenate(heads_out)
+    order = np.lexsort((heads, tails, pair))
+    return pair[order], tails[order], heads[order]
 
 
 def _vessel_pairs(g, parent_compartments, child_compartments, family) -> list:
@@ -1615,24 +1653,29 @@ def anatomy_descendants(g, sections, owners=None) -> list:
     return out
 
 
-def _junction_properties(mm_per_unit, g, parent, child, pairs) -> dict:
-    """The properties of the axial junctions *pairs* between the sections of *parent* and *child* (junction_geometry);
-    across SubOrgans without anatomy (a pass-through), between *child* and its nearest ancestor with one, their
-    length spanning the SubOrgans in between."""
-    n = len(pairs)
-    lengths = g.view("length")
-    owners = g.compartments_by_owner(g.scale(child))
-    if owners.get(parent):
-        between = 0.5 * (float(lengths.get(parent, 0.)) + float(lengths.get(child, 0.))) * mm_per_unit
-    else:
-        ancestor, hidden = anatomy_ancestor(g, child, owners)
-        between = (0.5 * (float(lengths.get(ancestor, 0.)) + float(lengths.get(child, 0.))) +
-                   sum(float(lengths.get(v, 0.)) for v in hidden)) * mm_per_unit
-    tails, heads = np.array([a for a, _ in pairs], dtype=np.int64), np.array([b for _, b in pairs], dtype=np.int64)
+def _junction_properties(mm_per_unit, g, section_pairs, pair, tails, heads) -> dict:
+    """The properties of the axial junctions (*pair*, *tails*, *heads*) of *section_pairs* (junction_geometry), for
+    every pair at once; across SubOrgans without anatomy (a pass-through), between the child and its nearest ancestor
+    with one, their length spanning the SubOrgans in between."""
+    n = pair.size
+    vertices = np.unique(np.concatenate((section_pairs.parents, section_pairs.children)))
+    lengths = _values_at(g, "length", vertices, 0.)
+    parent_length = lengths[np.searchsorted(vertices, section_pairs.parents)]
+    child_length = lengths[np.searchsorted(vertices, section_pairs.children)]
+    between = 0.5 * (parent_length + child_length) * mm_per_unit
+    passing = np.unique(pair[section_pairs.parent_at[pair] < 0])     # the parent without anatomy: a pass-through
+    if passing.size:
+        view = g.view("length")
+        owners = g.compartments_by_owner(g.scale(int(section_pairs.children[passing[0]])))
+        for index in passing.tolist():
+            child = int(section_pairs.children[index])
+            ancestor, hidden = anatomy_ancestor(g, child, owners)
+            between[index] = (0.5 * (float(view.get(ancestor, 0.)) + float(view.get(child, 0.))) +
+                              sum(float(view.get(v, 0.)) for v in hidden)) * mm_per_unit
     x, y = (_pair_values(g, name, tails, heads) for name in ("section_x", "section_y"))
-    out = {name: [np.nan] * n for name in columns.EDGE_COLUMNS}
-    out.update(network_path=[float(columns.JUNCTION_PATH)] * n, edge_length=[between] * n,
-               edge_dx=(x[1] - x[0]).tolist(), edge_dy=(y[1] - y[0]).tolist(), membrane_surface=[0.] * n)
+    out = {name: np.full(n, np.nan) for name in columns.EDGE_COLUMNS}
+    out.update(network_path=np.full(n, float(columns.JUNCTION_PATH)), edge_length=between[pair],
+               edge_dx=x[1] - x[0], edge_dy=y[1] - y[0], membrane_surface=np.zeros(n))
     return out
 
 
@@ -1654,33 +1697,40 @@ def junction_geometry(mm_per_unit=MM_PER_M):
     The geometry of the axial junctions a wiring rule creates (Q-C1a): their length between the two sections' centres
     (the mean of the segments' lengths, plus the lengths of the SubOrgans without anatomy between: a pass-through),
     the in-plane offset between the two vessels, the path code of an axial
-    junction (5); the other network columns NaN, the membrane surface 0. A function (g, parent, child, pairs) ->
-    {property: values}, picklable (the Scene's checkpoints keep the wiring).
+    junction (5); the other network columns NaN, the membrane surface 0. A function (g, section_pairs, pair, tails,
+    heads) -> {property: one value per junction}, for every pair at once (metafspm's wiring rules), picklable (the
+    Scene's checkpoints keep the wiring).
     """
     return partial(_junction_properties, mm_per_unit)
 
 
-def _family_pairs(family, g, parent, child, parent_compartments, child_compartments) -> list:
-    """A wiring rule: the junctions of one family of conducting cells between two sections (vessel_pairs). When the
-    child's linked parent has no anatomy (a pass-through), between the child and its nearest ancestor with one
-    (anatomy_ancestor); a child without anatomy has none."""
-    if not parent_compartments and child_compartments:
-        owners = g.compartments_by_owner(g.scale(child))
+def family_junctions(family, g, section_pairs) -> tuple:
+    """A wiring rule over every pair of sections at once (metafspm's SectionPairs): the junctions (pair, tails,
+    heads) of one family of conducting cells (vessel_junctions). When a child's linked parent has no anatomy (a
+    pass-through), between the child and its nearest ancestor with one (anatomy_ancestor); a child without anatomy has
+    none."""
+    parents = [section_pairs.parent_compartments(i) for i in range(len(section_pairs))]
+    children = [section_pairs.child_compartments(i) for i in range(len(section_pairs))]
+    owners = None
+    for index in np.flatnonzero((section_pairs.parent_at < 0) & (section_pairs.child_at >= 0)).tolist():
+        child = int(section_pairs.children[index])
+        if owners is None:
+            owners = g.compartments_by_owner(g.scale(child))
         ancestor, _ = anatomy_ancestor(g, child, owners)
-        if ancestor is None:
-            return []
-        parent_compartments = owners[ancestor]
-    return vessel_pairs(g, parent_compartments, child_compartments, family)
+        if ancestor is not None:
+            parents[index] = np.asarray(owners[ancestor], dtype=np.int64)
+    return vessel_junctions(g, parents, children, family)
 
 
 def junction_rules(g, mm_per_unit=MM_PER_M) -> list:
     """
     The wiring rules of anatomy mode: axial xylem junctions (apoplastic) and phloem junctions (symplastic), with their
-    geometry (junction_geometry); functions, not closures, so that the Scene's checkpoints keep them. A section whose
-    linked parent has no anatomy is joined to its nearest ancestor with one (a pass-through, anatomy_ancestor).
+    geometry (junction_geometry), each evaluated over every pair of sections at once; functions, not closures, so that
+    the Scene's checkpoints keep them. A section whose linked parent has no anatomy is joined to its nearest ancestor
+    with one (a pass-through, anatomy_ancestor).
     """
     geometry = junction_geometry(mm_per_unit)
     return [
-        {"rule": partial(_family_pairs, 0), "edge_label": g.labels.Connection.Apoplastic, "properties": geometry},
-        {"rule": partial(_family_pairs, 1), "edge_label": g.labels.Connection.Symplastic, "properties": geometry},
+        {"pairs": partial(family_junctions, 0), "edge_label": g.labels.Connection.Apoplastic, "properties": geometry},
+        {"pairs": partial(family_junctions, 1), "edge_label": g.labels.Connection.Symplastic, "properties": geometry},
     ]
