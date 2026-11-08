@@ -367,7 +367,7 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     new_vids = np.asarray(new_vids, dtype=np.int64)
     sources = np.full(new_vids.size, -1, dtype=np.int64)
     sections = ds.sections_of(new_vids)
-    owners = g.compartments_by_owner(from_scale)
+    owners = g.compartments_csr(from_scale)
     tissue = g.view("tissue")
     linked = g.linked_parents(from_scale)
     upstream_cache, known_sections = {}, {}
@@ -384,7 +384,7 @@ def granap_inheritance(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     def known_section(section):
         """("all", copy) when every Compartment is known and they form one copy; "none"; or "partial"."""
         if section not in known_sections:
-            comps = owners.get(section, [])
+            comps = owners.compartments_of(section).tolist()
             known = np.asarray(is_known(np.asarray(comps, dtype=np.int64)), dtype=bool) if comps else \
                 np.zeros(0, dtype=bool)
             if not known.any():
@@ -459,7 +459,7 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
     new_vids = np.asarray(new_vids, dtype=np.int64)
     sources = np.full(new_vids.size, -1, dtype=np.int64)
     sections = ds.sections_of(new_vids)
-    owners = g.compartments_by_owner(from_scale)
+    owners = g.compartments_csr(from_scale)
     template, node = g.view("template"), g.view("template_node")
     tissue, angle, radius = g.view("tissue"), g.view("angle"), g.view("relative_radius")
     linked = g.linked_parents(from_scale)
@@ -476,7 +476,7 @@ def _inheritance_by_vertex(ds, new_vids, is_known, fresh=()) -> np.ndarray:
 
     def node_map(section):
         if section not in node_maps:
-            comps = np.asarray(owners.get(section, []), dtype=np.int64)
+            comps = owners.compartments_of(section)
             known = comps[np.asarray(is_known(comps), dtype=bool)] if comps.size else comps
             node_maps[section] = {(template.get(int(v)), node.get(int(v))): int(v) for v in known}
         return node_maps[section]
@@ -1149,10 +1149,10 @@ class GranapAnatomy(StructuralComponent):
         if not sections or not rules:
             return
         g = self.mtg
-        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        owners = g.compartments_csr(g.scales.SubOrgan)
         descendants = anatomy_descendants(g, sections, owners)
         if descendants:
-            heads = {int(c) for v in descendants for c in owners.get(v, [])}
+            heads = set(np.concatenate([owners.compartments_of(v) for v in descendants]).tolist())
             n_id_b = g.view("n_id_b")
             g.remove_connections([int(e) for e in g.junction_vids() if int(n_id_b[e]) in heads])
             g.wire_junctions(g.scales.SubOrgan, rules, children=descendants)
@@ -1167,9 +1167,9 @@ class GranapAnatomy(StructuralComponent):
         if cached is not None and cached[0] == key:
             return cached[1]
         g = ds.mtg
-        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        owners = g.compartments_csr(g.scales.SubOrgan)
         spans = None
-        if not all(owners.get(int(v)) for v in ds.entity_ids("SubOrgan")):
+        if not owners.has_all(ds.entity_ids("SubOrgan")):
             edges = ds.edge_endpoints()
             rows = np.flatnonzero(np.asarray(network_path) == columns.JUNCTION_PATH)
             parents, children = ds.sections_of(edges[rows, 0]), ds.sections_of(edges[rows, 1])
@@ -1219,12 +1219,12 @@ class GranapAnatomy(StructuralComponent):
         reduced = ({int(owner): key for owner, key in reduction.reduced_groups(ds).values()}
                    if reduction is not None and g._instanced() else {})
         vertices, owners, owner_ids = [], [], []
-        for segment, compartments in g.compartments_by_owner(g.scales.SubOrgan).items():
+        for segment, compartments in g.compartments_csr(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
             if index is None or index < 0:
                 continue
             local, rows = _template_triangles(template_by_index(g, index))
-            row_of = {int(template_row[c]): int(c) for c in compartments
+            row_of = {int(template_row[c]): int(c) for c in compartments.tolist()
                       if int(c) in wanted and c in template_row and scale[int(c)] == g.scales.Compartment
                       and complex_[int(c)] >= 0 and scale[complex_[int(c)]] == g.scales.Cell}
             drawn = np.array([row in row_of for row in rows], dtype=bool)
@@ -1619,13 +1619,13 @@ def anatomy_ancestor(g, section, owners=None) -> tuple:
     (the nearest ancestor of *section* with an anatomy, [the SubOrgans without one in between, nearest first]): its
     linked parent when that has an anatomy (Compartments), else the first with one up the linked parents, through
     the SubOrgans without (a pass-through: an Adel HiddenElement, a kind the scenario does not give). (None, [...]):
-    no ancestor has one. *owners*: g.compartments_by_owner of the sections' scale (default: read).
+    no ancestor has one. *owners*: g.compartments_csr of the sections' scale (default: read).
     """
     scale = g.scale(section)
-    owners = g.compartments_by_owner(scale) if owners is None else owners
+    owners = g.compartments_csr(scale) if owners is None else owners
     parents = g.linked_parents(scale)
     between, vertex = [], parents.get(section)
-    while vertex is not None and not owners.get(vertex):
+    while vertex is not None and not owners.has(vertex):
         between.append(int(vertex))
         vertex = parents.get(vertex)
     return (None if vertex is None else int(vertex)), between
@@ -1638,15 +1638,15 @@ def anatomy_descendants(g, sections, owners=None) -> list:
     if not sections:
         return []
     scale = g.scale(next(iter(sections)))
-    owners = g.compartments_by_owner(scale) if owners is None else owners
+    owners = g.compartments_csr(scale) if owners is None else owners
     parents = g.linked_parents(scale)
-    if all(owners.get(v) for v in parents):                # every section has an anatomy: no pass-through
+    if owners.has_all(list(parents)):                      # every section has an anatomy: no pass-through
         return []
     out = []
     for vertex in sorted(parents):
-        if owners.get(vertex):
+        if owners.has(vertex):
             parent = parents[vertex]
-            if parent is not None and not owners.get(parent):
+            if parent is not None and not owners.has(parent):
                 ancestor, _ = anatomy_ancestor(g, vertex, owners)
                 if ancestor in sections:
                     out.append(int(vertex))
@@ -1666,7 +1666,7 @@ def _junction_properties(mm_per_unit, g, section_pairs, pair, tails, heads) -> d
     passing = np.unique(pair[section_pairs.parent_at[pair] < 0])     # the parent without anatomy: a pass-through
     if passing.size:
         view = g.view("length")
-        owners = g.compartments_by_owner(g.scale(int(section_pairs.children[passing[0]])))
+        owners = g.compartments_csr(g.scale(int(section_pairs.children[passing[0]])))
         for index in passing.tolist():
             child = int(section_pairs.children[index])
             ancestor, hidden = anatomy_ancestor(g, child, owners)
@@ -1715,10 +1715,10 @@ def family_junctions(family, g, section_pairs) -> tuple:
     for index in np.flatnonzero((section_pairs.parent_at < 0) & (section_pairs.child_at >= 0)).tolist():
         child = int(section_pairs.children[index])
         if owners is None:
-            owners = g.compartments_by_owner(g.scale(child))
+            owners = g.compartments_csr(g.scale(child))
         ancestor, _ = anatomy_ancestor(g, child, owners)
         if ancestor is not None:
-            parents[index] = np.asarray(owners[ancestor], dtype=np.int64)
+            parents[index] = np.asarray(owners.compartments_of(ancestor), dtype=np.int64)
     return vessel_junctions(g, parents, children, family)
 
 

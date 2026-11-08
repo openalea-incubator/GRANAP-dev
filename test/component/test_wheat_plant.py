@@ -103,7 +103,7 @@ def _expected_junctions(g, sections):
     owners = g.compartments_by_owner(g.scales.SubOrgan)
     out = {}
     for section in sections:
-        ancestor, _ = anatomy_ancestor(g, section, owners)
+        ancestor, _ = anatomy_ancestor(g, section, g.compartments_csr(g.scales.SubOrgan))
         if ancestor is not None and owners.get(section):
             for family in (0, 1):
                 out[(ancestor, section, family)] = vessel_pairs(g, owners[ancestor], owners[section], family)

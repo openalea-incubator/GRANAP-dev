@@ -89,7 +89,7 @@ def test_an_apex_with_a_length_gets_the_root_segments_anatomy_and_is_joined_to_i
     junctions = _junctions(g, ds, main[-1], apex)
     for family in (0, 1):
         assert junctions[family] == vessel_pairs(g, owners[main[-1]], owners[apex], family) != []
-    assert anatomy_ancestor(g, apex, owners) == (main[-1], [])
+    assert anatomy_ancestor(g, apex, g.compartments_csr(g.scales.SubOrgan)) == (main[-1], [])
 
 
 def test_an_apex_without_length_gets_its_anatomy_when_it_grows():
