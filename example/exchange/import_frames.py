@@ -43,8 +43,8 @@ def main():
     parser = argparse.ArgumentParser(description="GRANAP's encoding3d sections read back")
     parser.add_argument("--show", action="store_true")
     show = parser.parse_args().show
-    paths = [os.path.join(OUTPUTS, preset, "frames", "frame_000000.glb") for preset in PRESETS]
-    if not all(os.path.exists(path) for path in paths):
+    paths = [os.path.join(OUTPUTS, preset, "frames.fspm.zip", "frame_000000.glb") for preset in PRESETS]
+    if not all(encoding3d.archive.exists(path) for path in paths):            # a frame in its archive
         export()
     summaries = {}
     for preset, path in zip(PRESETS, paths):
