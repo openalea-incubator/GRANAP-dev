@@ -51,11 +51,9 @@ def initiated(table, *initiators, time_step: float = 3600., reduction=None, tran
     Compartments wired at the segments' junctions, in one MPGDataStructure: metafspm's population_data_structure with
     a model of no component (the tests build theirs on population.data_structure)."""
     from openalea.granap.metafspm.component import junction_rules
+    from openalea.metafspm.coupling.composite_wrapper import CompositeModel
 
-    def __init__(self, data_structure, time_step):
-        self.components = []
-
-    model = type("Initiated", (), dict(initiators=tuple(initiators), nodes="Compartment",
-                                       wiring=staticmethod(junction_rules), __init__=__init__, run=lambda self: None,
-                                       reduction=reduction, translator=translator))
+    model = type("Initiated", (CompositeModel,), dict(initiators=tuple(initiators), nodes="Compartment",
+                                                      wiring=staticmethod(junction_rules), reduction=reduction,
+                                                      translator=translator))
     return population.population_data_structure(table, model, time_step=time_step)
