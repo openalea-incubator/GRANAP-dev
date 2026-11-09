@@ -204,7 +204,41 @@ section's MPG writes went from 0.25 to 0.07 s with ``ArrayDict.update`` in bulk 
 In use case 1 at 8 plants (day 10 to 11, 110 k nodes, from a checkpoint), metafspm's incremental topology updates
 (its devplan's O-14: the structure-derived arrays patched from what an update removed and added, the instances'
 tables gathered per template) and the pass-through spans read as an array (``ds.edge_endpoints()``) took this
-component from 1.15 to 0.88 s per step, the step from 4.51 to 3.95 s, every result identical.
+component from 1.15 to 0.88 s per step, the step from 4.51 to 3.95 s, every result identical (measured on 2026-11-07,
+``c626201``; a record of its time, on other days of the run than the figures below).
+
+The later changes in the scene, each bit-identical on every step to the code before it, were measured on use case 1 at
+8 plants (``--variability 1``), from a checkpoint at hour 264 or from the sowing, as stated; day 12 is hours 267 to 288,
+day 13 hours 289 to 312. Each phase measured its before and after on the same day; the machine's speed varied by a few
+per cent from day to day, so figures of different phases are not compared with each other.
+
+- **The anatomies in bulk** (``d11c253``, 2026-11-07, metafspm's ``devplan_scene_parallel`` P2.1): the segment classes
+  computed per (plant, kind) with each class input read once, one gather and one write per quantity for the step's
+  new copies and instances, the whole-scene walks through metafspm's ``MPG.linked_parents`` (metafspm ``4845d7a``), and
+  the pass-through lengths kept as offsets and summed by ``openalea.granap.metafspm.kernels.python_sums`` (CPython's
+  ``sum()`` bit for bit; the package's ``warm_up`` entry point). Under the profiler at day 11, the anatomies had taken
+  1.83 s of a step, of which the segment classes 0.90 s over 8.5 k segments; at day 12 after metafspm's P2 (with the
+  junction wiring read from one table of every owned Compartment, ``64da8ff``), 0.40 s. Resumed at day 12, 1 thread,
+  the step went from 5.56 to 5.05 s with the anatomies in bulk and to 4.90 s with the wiring table (and metafspm's
+  carry-over in one gather per location, ``712e179``). Over the whole of P2, from the sowing to day 13 at 1 thread,
+  this component (with the topology update it triggers) went from 2.02 to 1.41 s per step on day 13.
+- **The junction rules in bulk** (``9d0534e``, 2026-11-08, metafspm's wiring rules evaluated once over every (linked
+  parent, child) pair, metafspm ``5e16bcf``; with metafspm's bulk reads and carry-over, ``ef0b3a0`` and ``bc0de7c``):
+  ``junction_rules`` declares ``{"pairs": ...}`` rules and ``junction_geometry`` reads everything in one pass.
+  Resumed over hours 265 to 312 at 1 thread, ``GranapAnatomy`` took 42.7 s over the 48 steps instead of 59.3 s; the
+  day-13 step went from 5.32 to 4.80 s at 1 thread and from 5.11 to 4.53 s with ``threads="auto"``.
+- **The Compartments of each section as one CSR** (``55fa545``, 2026-11-08, metafspm's ``MPG.compartments_csr``,
+  ``devplan_generic_kernels`` GK-1): the pass-through spans and their wiring, the anatomy ancestors and descendants, the
+  family junctions, the junction properties, the inheritance rules and ``display_triangles`` read it. Before it, under
+  the profiler at day 13 (hours 290 to 292), the pass-through took 0.12 s and ``compartments_by_owner`` 0.11 s of a
+  step, and ``GranapAnatomy.anatomies`` 0.91 s per step (``threads="auto"``). GK-1 as a whole (with metafspm's
+  instanced ``column``, ``parameter_table`` and tree kernels, metafspm ``68746b1``) took the profiled day-13 step from
+  5.21 to 4.75 s at 1 thread and from 5.07 to 4.57 s with ``threads="auto"``; resumed, the day-13 step went from 4.91
+  to 4.54 s at 1 thread and from 4.62 to 4.29 s with ``threads="auto"``.
+- **The step today**, after metafspm's process pool was removed (metafspm ``b69347a``, GRANAP ``716a726``,
+  2026-11-08; a reduction's kinds now run in ``Compute``'s threads): resumed from hour 192, the step takes 3.59 s on
+  day 12 and 4.27 s on day 13 at 1 thread, 3.27 and 3.92 s with ``threads="auto"``. From the sowing to day 8 with
+  ``threads="auto"``, the run takes 292.6 s, at a peak of 3.15 GB for its memory-capped scope (all its processes).
 
 
 Options that change the time
