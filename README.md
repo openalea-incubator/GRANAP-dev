@@ -11,9 +11,12 @@ the functional importance of monocotyledon root anatomy. *Plant Physiology* 182,
 
 ## Installation
 
-GRANAP and metafspm (and MECHA, which uses GRANAP's anatomies) are not installable from the `openalea3` channel yet
-in the versions used here: clone the repositories on their working branches, next to each other, and install them
-from source (`pip install -e`) in one environment.
+GRANAP's environment brings [metafspm](https://github.com/openalea/metafspm) (`openalea.metafspm`, from
+`openalea3`) and, through it, encoding3d. GRANAP itself (and MECHA, which uses GRANAP's anatomies) is installed from
+its clone (`pip install -e`).
+Until metafspm's `release2026` and encoding3d are published on `openalea3`, the environment's `openalea.metafspm`
+is an older version: install the two from their clones over it, as below (`--no-deps`: the environment already has
+their dependencies). Once they are published, the clones and those two lines are no longer needed.
 
 ```bash
 mkdir fspm && cd fspm                       # any folder: the repositories side by side
@@ -21,15 +24,14 @@ git clone -b release2026 https://github.com/openalea/metafspm.git metafspm
 git clone -b other_platforms_bindings https://github.com/openalea/encoding3d.git encoding3d
 git clone -b to_metafspm https://github.com/openalea-incubator/GRANAP-dev.git GRANAP
 
-mamba env create -f GRANAP/conda/environment.yaml        # GRANAP's dependencies and metafspm's
+mamba env create -f GRANAP/conda/environment.yaml        # GRANAP's dependencies, openalea.metafspm included
 mamba activate granap
-pip install -e encoding3d
-pip install -e metafspm
+pip install -e encoding3d --no-deps                      # until encoding3d is published
+pip install -e metafspm --no-deps                        # until metafspm's release2026 is published
 pip install -e GRANAP
 ```
 
-Keep the folder names above: `GRANAP/conda/environment.yaml` expects `metafspm` next to GRANAP. To work with MECHA
-too, clone it alongside and use its environment instead, which covers the three
+To work with MECHA too, clone it alongside and use its environment instead, which covers the three
 (`git clone -b to_metafspm https://github.com/openalea-incubator/MECHA-dev.git MECHA-dev`, then MECHA-dev's README).
 
 ## Getting started
