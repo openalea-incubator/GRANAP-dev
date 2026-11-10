@@ -10,6 +10,7 @@ ROOT_SERIES_PLAN.md
 example/**/outputs/
 
 /dev*.md
+/.devplan/
 
 # documentation builds, and the tutorials they copy
 doc/_build/
