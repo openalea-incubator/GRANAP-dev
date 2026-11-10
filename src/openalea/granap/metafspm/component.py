@@ -1212,6 +1212,8 @@ class GranapAnatomy(StructuralComponent):
         node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
         kept = np.ones(node_ids.size, dtype=bool) if where is None else np.asarray(where, dtype=bool)
         wanted = set(node_ids[kept].tolist())
+        wanted_at = np.zeros(scale.size, dtype=bool)          # by vid: a segment with none of them is not drawn
+        wanted_at[node_ids[kept]] = True
         plant_position = dict(zip(ds.entity_ids("Plant").tolist(),
                                   np.column_stack([np.asarray(ds.get(name), dtype=float) for name in ("x", "y", "z")])))
         frame_values = {name: _per_segment(self, name) for name in SEGMENT_ENDS + DISPLAY_ENDS + ("length",)}
@@ -1221,8 +1223,8 @@ class GranapAnatomy(StructuralComponent):
         vertices, owners, owner_ids = [], [], []
         for segment, compartments in g.compartments_csr(g.scales.SubOrgan).items():
             index = template_of.get(segment, -1.)
-            if index is None or index < 0:
-                continue
+            if index is None or index < 0 or (where is not None and not wanted_at[compartments].any()):
+                continue                    # (no compartment wanted: nothing of its own drawn, nor its interior)
             local, rows = _template_triangles(template_by_index(g, index))
             row_of = {int(template_row[c]): int(c) for c in compartments.tolist()
                       if int(c) in wanted and c in template_row and scale[int(c)] == g.scales.Compartment
