@@ -70,10 +70,8 @@ dependencies = [
     "geos ==3.14.1",         # geometry engine — decides the golden census
     "shapely ==2.1.2",       # GEOS bindings
     "opencv ==4.13.0",       # cv2.fitEllipse in geometry_collection
-    "scipy >=1.13,<1.18",    # vendored Qhull — Voronoi / Delaunay / cKDTree
-    "numpy >=1.26,<3",
+    "scipy >=1.13,<1.18",    # vendored Qhull — Voronoi / Delaunay / cKDTree (metafspm's scipy, bounded)
     "geopandas >=1.0,<2",
-    "pandas >=2.0,<4",
     "matplotlib >=3.8,<4",
     "networkx >=3.1,<4",     # network_base
     "munkres >=1.1,<2",      # shapes
@@ -81,9 +79,8 @@ dependencies = [
     "roifile >=2023.8",      # roi_organ
     "lxml >=5,<7",           # no usage in src/ — kept for compatibility
     "scikit-learn >=1.3,<2", # no usage in src/ — kept for compatibility
-    "numba >=0.60",          # the metafspm component's kernels (openalea.granap.metafspm.kernels)
-    # "openalea.metafspm",   # the MPG every section is generated into (openalea.granap.metafspm): required, not
-    #                        # packaged yet (its latest version) — install it from source, see README.md
+    "openalea.metafspm",     # the MPG every section is generated into (openalea.granap.metafspm); brings numpy,
+                             # pandas, numba (the component's kernels), pyyaml, openalea.mtg and openalea.encoding3d
 ]
 
 [project.optional-dependencies]
