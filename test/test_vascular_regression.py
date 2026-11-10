@@ -73,6 +73,8 @@ from openalea.granap.stem_class import StemAnatomy
 from openalea.granap.input_data import OrganInputData
 from needle_configs import build_gallery_needle_data
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 SEED = 0
 
 

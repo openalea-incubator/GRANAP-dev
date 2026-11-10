@@ -17,6 +17,8 @@ from openalea.granap.metafspm.component import GranapAnatomy, anatomy_ancestor, 
 
 from roots import initiated
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 STEM_RADIUS, ROOT_RADIUS = 1e-3, 0.4e-3                # m
 SEED_LENGTH, ELEMENT, HIDDEN = 2e-3, 5e-3, 1e-2        # m
 WHOLE_SHOOT = {"seed_anatomy": {}, "stem_anatomy": {}, "sheath_anatomy": {}, "leaf_anatomy": {}}

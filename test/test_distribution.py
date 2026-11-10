@@ -20,6 +20,8 @@ from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.input_data import OrganInputData, VascularBundleParams
 from openalea.granap.root_class import RootAnatomy
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 MEAN, SD = 0.035, 0.010
 N = 100_000
 

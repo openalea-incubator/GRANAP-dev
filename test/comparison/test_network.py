@@ -20,6 +20,8 @@ from openalea.granap.roi_organ import RoiOrgan
 
 from test_cross_check import ORGANS, SEED, _apply_air_rules, _check_network, legacy
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 INPUTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inputs")
 ROI = dict(folder_path=os.path.join(INPUTS, "Hypocotyl_RoiSet"), mm_per_pixel=0.001, smooth_factor=0.05)
 CELLSET = os.path.join(INPUTS, "partial_CellSet_brasicaceae.xml")

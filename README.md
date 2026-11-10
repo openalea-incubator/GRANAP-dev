@@ -112,7 +112,8 @@ their own: [`example/root/`](example/root/), [`example/stem/`](example/stem/), [
 [`example/needle/`](example/needle/); the port against the original: [`example/comparison/`](example/comparison/).
 Docs (`doc/`, Sphinx): a user guide (the user tutorials, the parameters in plain words) and a developer guide (the
 developer tutorials, the component's declarations, the equations, the legacy compared, the performance). Tests:
-`pytest test`.
+`pytest test` (about 30 min); `pytest test -m "not slow"` leaves out the minutes-long files (anatomies generated
+whole, the legacy comparisons, the golden regressions), to run before a release or a merge to main.
 
 ## Code structure
 

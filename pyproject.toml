@@ -112,3 +112,8 @@ Repository = "https://github.com/openalea-incubator/GRANAP-dev"
 # numba's cache filled by metafspm's warm_up (python -m openalea.metafspm warm_up)
 [project.entry-points."openalea.metafspm.warm_up"]
 "granap" = "openalea.granap.metafspm.kernels:warm_up"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: minutes long (anatomies generated, legacy comparisons, golden regressions); left out by pytest -m 'not slow', run before a release or a merge to main",
+]

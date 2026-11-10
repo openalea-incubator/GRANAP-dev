@@ -13,6 +13,8 @@ from roots import MAIN_RADIUS, SEGMENT, SmallRootSystem, initiated
 from test_growth import Anatomy
 from test_shoot import ShootAnatomy, SmallShoot, TwoElementLeaf
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 
 def _both(architecture, anatomy, **scenario):
     out = []

@@ -22,6 +22,8 @@ from openalea.granap.metafspm.component import GranapAnatomy, anatomy_ancestor, 
 from roots import initiated
 from test_wheat_plant import WHOLE_SHOOT, WheatSeedling
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 RADIUS, SEGMENT, APEX = 0.4e-3, 4.5e-3, 2e-3              # m
 
 

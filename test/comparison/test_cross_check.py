@@ -18,6 +18,8 @@ from openalea.granap.legacy.root_class import RootAnatomy
 from openalea.granap.legacy.stem_class import StemAnatomy
 from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 SEED = 0
 
 
