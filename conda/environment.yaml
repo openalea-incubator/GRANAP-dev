@@ -1,8 +1,6 @@
 name: granap
 channels:
   - openalea3            # openalea.metafspm, openalea.mtg / plantgl
-  - openalea3/label/rc
-  - openalea3/label/dev
   - conda-forge
   - nodefaults           # ignore the defaults channels added by ~/miniconda3/.condarc
 # flexible: strict priority doubled the solve time (12 min vs 5 min) with no different outcome
