@@ -21,8 +21,8 @@ only its conduits, its soil node and a blade's vapour path in the DataStructure)
   once, flat in the section's own plane (x, y in m), each triangle owned by its protoplast's row in the full
   template, and each reduced segment's 4×4 transform (its columns the section's two axes, the segment's axis and its
   middle: where ``display_triangles`` draws it). The frame writes an instance set ``GranapAnatomy``: per segment its
-  transform and its kept nodes' ``psi``; once per template and per kind (shared parts, ``frames/parts``), the shape
-  with the template's protoplasts and walls (tissue, ...) and the kind's recovery operator; ``psi`` on every
+  transform and its kept nodes' ``psi``; once per template and per archetype (shared parts, ``frames/parts``), the shape
+  with the template's protoplasts and walls (tissue, ...) and the archetype's recovery operator; ``psi`` on every
   protoplast is a derived field, rebuilt by encoding3d (``encoding3d.evaluate``) or ParaView (Select at scale) for
   the sections chosen. A display frame of use case 1 (one plant drawn, day 3) is 0.8 MB instead of 33 MB.
 - ``"full"``: the interior's protoplasts owned by their display ids (metafspm's ``solve.reduction.display_ids``),
@@ -33,10 +33,10 @@ only its conduits, its soil node and a blade's vapour path in the DataStructure)
 The DataStructure stays reduced either way.
 
 **Templates and checkpoints.** The anatomy templates are the population's (metafspm's registry of its MPG,
-``g.objects("anatomy_templates")``, ``ds.objects`` on its DataStructure: no module-level registry, two Scenes in one
+``mtg.objects("anatomy_templates")``, ``data_structure.objects`` on its DataStructure: no module-level registry, two Scenes in one
 process have their own): each keyed by its index, a number of its content (``library.template_index``: the organ
 class, its parameters, the seed and the class key, the same in every population and process), resolved by
-``template_by_index(g, index)``. A Scene's checkpoint saves them with the MPG, each once (a shared part, without its
+``template_by_index(mtg, index)``. A Scene's checkpoint saves them with the MPG, each once (a shared part, without its
 generated organ: ``saved_template``); a run resumed in a new process (``Scene.load_checkpoint``) has them back: the
 segments' sections are drawn from them and a segment of a class the checkpoint has gets its template. The presets'
 libraries and the derived tables (the vessels' pairs, a reduced section's interior protoplasts) are the MPG's caches
@@ -75,7 +75,7 @@ class, its maturity its barriers' (MECHA's ``Development``, by its distance from
 immature, without xylem junction: an apex there takes up almost nothing, its only axial path the protophloem's).
 
 **A reduction selects its sections by their labels.** A plant model's reduction (metafspm's ``solve.reduction``)
-asks of each section its filter, ``Reduction(where=)`` (``Reduction.reduces(g, segment)``): its SubOrgan label
+asks of each section its filter, ``Reduction(where=)`` (``Reduction.reduces(mtg, segment)``): its SubOrgan label
 (``RootSegment``, ``RootApex``, ``StemElement``, ``LeafElement``, ``Seed``: the labels GRANAP gives an anatomy,
 ``REDUCIBLE_LABELS``) and its organ's (``"Organ.label"``): a sheath's elements are ``StemElement``\ s, reduced with the
 stems, or apart from them, ``{"label": "StemElement", "Organ.label": "StemInternode"}``. GRANAP warns (once) of a
@@ -85,7 +85,7 @@ is (``Reduction.is_reduced``).
 **Its named entity sets.** ``GranapAnatomy.entity_sets``: ``soil_nodes`` (a root section's soil node, its one soil
 boundary), ``conduits`` (the protoplasts of families 0 and 1, which the junctions join) and ``leaf_surfaces``.
 Assemblies select by these names, not by the codes: a plant model's mask of the roots' soil nodes,
-``ds.define_mask("root_surface", entities="GranapAnatomy.soil_nodes")``, a reduction's ports and kept nodes,
+``data_structure.define_mask("root_surface", entities="GranapAnatomy.soil_nodes")``, a reduction's ports and kept nodes,
 ``Reduction(ports="GranapAnatomy.conduits", keep="GranapAnatomy.soil_nodes")`` (evaluated on the section templates'
 properties).
 A reduction lumping kept nodes (``Reduction(merge=)``, MECHA's ``leaf_ports="bundles"``: a shoot section's conduits

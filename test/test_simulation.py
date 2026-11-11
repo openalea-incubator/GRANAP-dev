@@ -12,11 +12,11 @@ def default():
 
 
 def test_the_tables_are_the_components_cells(default):
-    ds = default.data_structure
-    cell = np.asarray(ds.get("kind")) == 0
+    data_structure = default.data_structure
+    cell = np.asarray(data_structure.get("compartment_type")) == 0
     cells = default.cells()
     assert len(cells) == int(cell.sum())
-    assert cells["area"].sum() == pytest.approx(float(np.asarray(ds.get("cell_area"))[cell].sum()), rel=1e-12)
+    assert cells["area"].sum() == pytest.approx(float(np.asarray(data_structure.get("cell_area"))[cell].sum()), rel=1e-12)
     summary = default.summary
     assert summary["cells"].sum() == len(cells)
     assert summary["area_share"].sum() == pytest.approx(1.)

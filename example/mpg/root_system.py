@@ -14,9 +14,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.scene.population import Planting, planting
-from openalea.metafspm.scene.scene import Scene
+from openalea.metafspm import CompositeModel, Planting, planting, Scene
 
 from openalea.granap.metafspm.architectures import RootAxis
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
@@ -41,16 +39,16 @@ class RootSystem(CompositeModel):
     parts = {"architecture": RootAxis, "anatomy": RootSystemAnatomy}
 
 
-def layout(g, segments):
+def layout(mtg, segments):
     """Each segment's drawing offset: along its axis from its linked parent, a lateral's first one below its bearer."""
     offsets = {}
     for segment in segments:                                       # parents come first (smaller vids)
-        parent = g.linked_parent(segment, g.scales.SubOrgan)
+        parent = mtg.linked_parent(segment, mtg.scales.SubOrgan)
         if parent is None:
             offsets[segment] = (0., 0.)
         else:
             x, y = offsets[parent]
-            branched = g.complex_at_scale(segment, g.scales.Axis) != g.complex_at_scale(parent, g.scales.Axis)
+            branched = mtg.complex_at_scale(segment, mtg.scales.Axis) != mtg.complex_at_scale(parent, mtg.scales.Axis)
             offsets[segment] = (x, y - SPACING) if branched else (x + SPACING, y)
     return offsets
 
@@ -59,22 +57,22 @@ def main():
     scenario = {"root_segments": [[MAIN, SEGMENT, (3 - i) * SEGMENT] for i in range(4)],
                 "root_laterals": [[1, [[LATERAL, SEGMENT, (1 - i) * SEGMENT] for i in range(2)]]]}
     scene = Scene(planting([Planting()], RootSystem, scenario))
-    ds = scene.populations[0].data_structure
-    g = ds.mtg
-    segments = [int(s) for s in ds.entity_ids("SubOrgan")]
-    offsets = layout(g, segments)
+    data_structure = scene.populations[0].data_structure
+    mtg = data_structure.mtg
+    segments = [int(s) for s in data_structure.entity_ids("SubOrgan")]
+    offsets = layout(mtg, segments)
 
     fig, ax = plt.subplots(figsize=(15, 7.5))
-    draw_plant(ax, ds, offsets)
-    diameter = dict(zip(segments, 2e3 * np.asarray(ds.get("radius"))))          # mm: the class's binned key
+    draw_plant(ax, data_structure, offsets)
+    diameter = dict(zip(segments, 2e3 * np.asarray(data_structure.get("radius"))))          # mm: the class's binned key
     for s, (x, y) in offsets.items():
         ax.annotate(f"segment {s}\ndiameter {diameter[s]:g} mm", (x, y + 0.5), ha="center", fontsize=8)
     ax.margins(0.05, 0.12)
     ax.set_xticks([])
     ax.set_yticks([])
-    n_templates = len(set(ds.get("anatomy_template").tolist()))
-    ax.set_title(f"{len(segments)} segments, {n_templates} anatomy templates: {ds.n_nodes()} Compartments, "
-                 f"{ds.n_edges()} Connections ({int((ds.get('network_path') == 5).sum())} axial junctions)")
+    n_templates = len(set(data_structure.get("anatomy_template").tolist()))
+    ax.set_title(f"{len(segments)} segments, {n_templates} anatomy templates: {data_structure.n_nodes()} Compartments, "
+                 f"{data_structure.n_edges()} Connections ({int((data_structure.get('network_path') == 5).sum())} axial junctions)")
     fig.tight_layout(rect=(0, 0.08, 1, 1))
     tissue_legend(fig)
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")

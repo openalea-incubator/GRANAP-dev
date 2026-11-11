@@ -1,10 +1,10 @@
 """
 A GRANAP cross-section written into a metafspm MPG.
 
-    g, segment = single_plant_mpg()                 one vertex per scale down to one SubOrgan
-    write_cells(g, segment, organ)                  Layers (one per connected region of one tissue type), Cells (every
+    mtg, segment = single_plant_mpg()                 one vertex per scale down to one SubOrgan
+    write_cells(mtg, segment, organ)                  Layers (one per connected region of one tissue type), Cells (every
                                                     attribute of each GRANAP Cell) and one protoplast per Cell
-    write_network(g, segment, organ)                the walls and wall junctions (Compartments anchored to the segment,
+    write_network(mtg, segment, organ)                the walls and wall junctions (Compartments anchored to the segment,
                                                     shared by the cells), the virtual bridge cells, and every network
                                                     edge (Connections), with all the exporter's attributes
 
@@ -30,18 +30,18 @@ PATH_LABELS = {"membrane": "Transmembrane", "wall_air": "Transmembrane", "plasmo
 
 
 def single_plant_mpg():
-    """An MPG with one vertex per scale from the Plant to one SubOrgan (a root segment); returns (g, segment)."""
-    g = MPG()
-    s, L = g.scales, g.labels
+    """An MPG with one vertex per scale from the Plant to one SubOrgan (a root segment); returns (mtg, segment)."""
+    mtg = MPG()
+    s, L = mtg.scales, mtg.labels
     chain = [(s.Plant, None), (s.Axis, L.Axis.Root), (s.GrowthUnit, L.GrowthUnit.Root),
              (s.Phytomer, L.Phytomer.Root), (s.Organ, L.Organ.RootInternode), (s.SubOrgan, L.SubOrgan.RootSegment)]
-    vertex = g.root
+    vertex = mtg.root
     for scale, label in chain:
         props = dict(scale=scale, edge_type='/')
         if label is not None:
             props["label"] = label
-        vertex = g.add_component(vertex, **PropsConfig(**props))
-    return g, vertex
+        vertex = mtg.add_component(vertex, **PropsConfig(**props))
+    return mtg, vertex
 
 
 def _props(scale, **values):
@@ -50,10 +50,10 @@ def _props(scale, **values):
     return out
 
 
-def _write_present(g, prefix, vids, records):
+def _write_present(mtg, prefix, vids, records):
     """For each vertex of *vids* and its record (a dict), the record's entries as properties prefix + name, only
     those the record has (an absent attribute stays absent, not None)."""
-    properties = g.properties()
+    properties = mtg.properties()
     for v, record in zip(vids, records):
         for name, value in record.items():
             properties.setdefault(prefix + name, {})[v] = value
@@ -91,7 +91,7 @@ def _record(cell) -> dict:
     return {name: value for name, value in vars(cell).items() if name != UID}
 
 
-def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -> dict:
+def write_cells(mtg, segment, organ, written: dict = None, stage: str = "final") -> dict:
     """
     Write the current cells of *organ* (organ.all_cells) into the section under *segment*, at a stage of the
     pipeline (P2: grouping, intercellular, aerenchyma, fused_gaps, final). Cells are identified across stages by
@@ -105,7 +105,7 @@ def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -
     *written* (the record of the previous stages, None at the first) is updated and returned: Layers, Cells and
     protoplasts in row order, the uid -> vid maps, and the stages written.
     """
-    s, L = g.scales, g.labels
+    s, L = mtg.scales, mtg.labels
     if written is None:
         written = {"layers": [], "cells": [], "protoplasts": [], "cell_of_uid": {}, "protoplast_of_uid": {},
                    "next_uid": 0, "stages": []}
@@ -125,40 +125,40 @@ def write_cells(g, segment, organ, written: dict = None, stage: str = "final") -
         uids = [c.cell_uid for c in cells]
     present = set(uids)
     gone = [u for u in written["cell_of_uid"] if u not in present]
-    g.remove_connections([written["protoplast_of_uid"].pop(u) for u in gone])        # vertices and properties
-    g.remove_connections([written["cell_of_uid"].pop(u) for u in gone])
+    mtg.remove_connections([written["protoplast_of_uid"].pop(u) for u in gone])        # vertices and properties
+    mtg.remove_connections([written["cell_of_uid"].pop(u) for u in gone])
     old_layers = list(written["layers"])
     if written.get("provisional_layer") is not None:               # the new cells' layer, dissolved by the regrouping
         old_layers.append(written.pop("provisional_layer"))
     regions = tissue_regions(cells)
     region_ids, first = np.unique(regions, return_index=True)
-    layers = g.add_components_bulk(segment, len(region_ids), **_props(s.Layer, tissue=[cells[i].type for i in first]))
+    layers = mtg.add_components_bulk(segment, len(region_ids), **_props(s.Layer, tissue=[cells[i].type for i in first]))
     layer_of_row = np.asarray(layers, dtype=np.int64)[np.searchsorted(region_ids, regions)]
     for layer in layers:                                           # the surviving Cells, moved to their region
         rows = np.flatnonzero(layer_of_row == layer)
         kept = [written["cell_of_uid"][uids[r]] for r in rows if uids[r] in written["cell_of_uid"]]
         if kept:
-            g.move_components(kept, int(layer))
-    g.remove_connections(old_layers)                               # emptied: their Cells were all moved
+            mtg.move_components(kept, int(layer))
+    mtg.remove_connections(old_layers)                               # emptied: their Cells were all moved
     new_rows = [r for r, uid in enumerate(uids) if uid not in written["cell_of_uid"]]
     for layer in layers:
         rows = [r for r in new_rows if layer_of_row[r] == layer]
         if not rows:
             continue
-        vids = g.add_components_bulk(int(layer), len(rows), **_props(s.Cell))
-        protoplasts = g.add_components_bulk(vids, len(rows), **_props(
-            s.Compartment, kind=PROTOPLAST, label=L.Compartment.Symplastic))
+        vids = mtg.add_components_bulk(int(layer), len(rows), **_props(s.Cell))
+        protoplasts = mtg.add_components_bulk(vids, len(rows), **_props(
+            s.Compartment, compartment_type=PROTOPLAST, label=L.Compartment.Symplastic))
         for r, v, p in zip(rows, vids, protoplasts):
             written["cell_of_uid"][uids[r]], written["protoplast_of_uid"][uids[r]] = v, p
     cell_vids = [written["cell_of_uid"][u] for u in uids]
     protoplasts = [written["protoplast_of_uid"][u] for u in uids]
-    properties = g.properties()
+    properties = mtg.properties()
     plain = [(v, c) for v, c in zip(cell_vids, cells) if not _is_view(c)]     # views already live in the MPG
     for name in [n for n in properties if n.startswith("cell__")]:
         values = properties[name]
         for v, _ in plain:
             values.pop(v, None)                                    # an attribute a stage removed stays removed
-    _write_present(g, "cell__", [v for v, _ in plain], [_record(c) for _, c in plain])
+    _write_present(mtg, "cell__", [v for v, _ in plain], [_record(c) for _, c in plain])
     for prop, values in (("cell_row", range(len(cells))), ("tissue", [c.type for c in cells]), (UID, uids)):
         target = properties.setdefault(prop, {})
         for v, p, value in zip(cell_vids, protoplasts, values):
@@ -180,26 +180,26 @@ def network_cell_rows(gdf) -> list:
     return [int(r) for r in gdf.index[valid & ~bridge]] + [int(r) for r in gdf.index[bridge]]
 
 
-def clear_network(g, written: dict) -> None:
+def clear_network(mtg, written: dict) -> None:
     """Remove the stored network of the section: its Connections, walls, junctions and bridge cells, and the network
     attributes of the protoplasts."""
     if "connections" not in written:
         return
-    g.remove_connections(written.pop("connections"))
-    g.remove_connections(written.pop("apoplast"))
+    mtg.remove_connections(written.pop("connections"))
+    mtg.remove_connections(written.pop("apoplast"))
     bridges = written.pop("bridge_cells", [])
     if bridges:
-        g.remove_connections(written.pop("bridge_protoplasts"))
-        g.remove_connections(bridges)
-        g.remove_connections([written.pop("bridge_layer")])
-        written["layers"] = [v for v in written["layers"] if g.has_vertex(v)]
+        mtg.remove_connections(written.pop("bridge_protoplasts"))
+        mtg.remove_connections(bridges)
+        mtg.remove_connections([written.pop("bridge_layer")])
+        written["layers"] = [v for v in written["layers"] if mtg.has_vertex(v)]
         keep = len(written["cells"]) - len(bridges)
         written["cells"], written["protoplasts"] = written["cells"][:keep], written["protoplasts"][:keep]
-    for name in [n for n in g.properties() if n in columns.NODE_COLUMNS or n == "mecha_index"]:
-        g.properties()[name].delete_many(written["protoplasts"])
+    for name in [n for n in mtg.properties() if n in columns.NODE_COLUMNS or n == "mecha_index"]:
+        mtg.properties()[name].delete_many(written["protoplasts"])
 
 
-def write_network(g, segment, organ, written: dict, network=None) -> dict:
+def write_network(mtg, segment, organ, written: dict, network=None) -> dict:
     """
     The network built by the exporter into *network* (default: the organ itself, organ.graph) under *segment*,
     replacing the one stored before: its wall and junction nodes as Compartments anchored to the segment, its
@@ -207,20 +207,20 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
     their own, and every edge as a Connection. The nodes' and edges' attributes become numeric columns (columns.py),
     and each Compartment keeps its MECHA index (mecha_index).
     """
-    s, L = g.scales, g.labels
+    s, L = mtg.scales, mtg.labels
     network = organ if network is None else network
-    clear_network(g, written)
+    clear_network(mtg, written)
     graph = network.graph
     cells = list(organ.all_cells.cells)
     known = len(written["cells"])
     if len(cells) > known:                                       # bridge cells, added by the export
-        layer = g.add_components_bulk(segment, 1, **_props(s.Layer, tissue="bridge"))[0]
+        layer = mtg.add_components_bulk(segment, 1, **_props(s.Layer, tissue="bridge"))[0]
         rows = list(range(known, len(cells)))
-        vids = g.add_components_bulk(layer, len(rows), **_props(s.Cell, cell_row=rows,
+        vids = mtg.add_components_bulk(layer, len(rows), **_props(s.Cell, cell_row=rows,
                                                                 tissue=[cells[r].type for r in rows]))
-        _write_present(g, "cell__", vids, [_record(cells[r]) for r in rows])
-        protoplasts = g.add_components_bulk(vids, len(rows), **_props(
-            s.Compartment, kind=PROTOPLAST, label=L.Compartment.Symplastic,
+        _write_present(mtg, "cell__", vids, [_record(cells[r]) for r in rows])
+        protoplasts = mtg.add_components_bulk(vids, len(rows), **_props(
+            s.Compartment, compartment_type=PROTOPLAST, label=L.Compartment.Symplastic,
             tissue=[cells[r].type for r in rows], cell_row=rows))
         written["layers"].append(layer)
         written["cells"] += vids
@@ -235,24 +235,24 @@ def write_network(g, segment, organ, written: dict, network=None) -> dict:
     nodes = sorted(graph.nodes)
     apoplast = [n for n in nodes if n < n_walls + n_junctions]
     anchor = s.anchors[s.Compartment]
-    apo_vids = g.add_components_bulk(anchor, len(apoplast), topo_parents=[segment] * len(apoplast), **_props(
+    apo_vids = mtg.add_components_bulk(anchor, len(apoplast), topo_parents=[segment] * len(apoplast), **_props(
         s.Compartment, label=L.Compartment.Apoplastic,
-        kind=[WALL if n < n_walls else JUNCTION for n in apoplast]))
+        compartment_type=[WALL if n < n_walls else JUNCTION for n in apoplast]))
     vid_of_node.update(zip(apoplast, apo_vids))
     node_vids = [vid_of_node[n] for n in nodes]
     rows = [columns.node_columns(graph.nodes[n]) for n in nodes]
-    columns.write(g, {name: [r[name] for r in rows] for name in columns.NODE_COLUMNS}, node_vids)
-    g.set_values("mecha_index", [vid_of_node[n] for n in nodes], [int(n) for n in nodes])
+    columns.write(mtg, {name: [r[name] for r in rows] for name in columns.NODE_COLUMNS}, node_vids)
+    mtg.set_values("mecha_index", [vid_of_node[n] for n in nodes], [int(n) for n in nodes])
     edges = list(graph.edges(data=True))
-    connections = g.add_components_bulk(
+    connections = mtg.add_components_bulk(
         s.anchors[s.Connection], len(edges), topo_parents=[segment] * len(edges),
         **_props(s.Connection, n_id_a=[vid_of_node[u] for u, _, _ in edges],
                  n_id_b=[vid_of_node[v] for _, v, _ in edges],
                  edge_u=[int(u) for u, _, _ in edges], edge_v=[int(v) for _, v, _ in edges],
                  label=[getattr(L.Connection, PATH_LABELS.get(data.get("path"), "Apoplastic")) for _, _, data in edges]))
     rows = [columns.edge_columns(data) for _, _, data in edges]
-    columns.write(g, {name: [r[name] for r in rows] for name in columns.EDGE_COLUMNS}, connections)
-    _write_present(g, "edge__", connections, [{k: data[k] for k in columns.VIA if k in data} for _, _, data in edges])
+    columns.write(mtg, {name: [r[name] for r in rows] for name in columns.EDGE_COLUMNS}, connections)
+    _write_present(mtg, "edge__", connections, [{k: data[k] for k in columns.VIA if k in data} for _, _, data in edges])
     written.update(apoplast=apo_vids, connections=connections, n_walls=n_walls, n_junctions=n_junctions,
                    n_cells=network.n_cells,
                    wall_to_cells={int(w): list(c) for w, c in network._wall_to_cells.items()},

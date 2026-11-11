@@ -12,19 +12,19 @@ from openalea.granap.cell_class import Cell
 from openalea.granap.metafspm import columns
 
 
-def _by_row(g, vids, prefix):
+def _by_row(mtg, vids, prefix):
     """{row: {attribute: value}} of the vertices *vids*, from their properties named prefix + attribute."""
-    props = {name[len(prefix):]: values for name, values in g.properties().items() if name.startswith(prefix)}
-    rows = g.view("cell_row")
+    props = {name[len(prefix):]: values for name, values in mtg.properties().items() if name.startswith(prefix)}
+    rows = mtg.view("cell_row")
     out = {}
     for v in vids:
         out[int(rows[v])] = {name: values[v] for name, values in props.items() if v in values}
     return out
 
 
-def cells_from_mpg(g, written) -> list:
+def cells_from_mpg(mtg, written) -> list:
     """The GRANAP Cells of the section, in their order, each with exactly the attributes it was written with."""
-    attributes = _by_row(g, written["cells"], "cell__")
+    attributes = _by_row(mtg, written["cells"], "cell__")
     cells = []
     for row in range(len(attributes)):
         cell = Cell.__new__(Cell)
@@ -52,17 +52,17 @@ def gdf_from_cells(cells, n_real=None) -> gpd.GeoDataFrame:
     return gdf
 
 
-def network_from_mpg(g, written) -> nx.Graph:
+def network_from_mpg(mtg, written) -> nx.Graph:
     """The exporter's networkx graph: its nodes (MECHA indices, attributes) and edges (attributes), rebuilt from the
     MPG's network columns (columns.py)."""
-    mecha, kinds, tissue = g.view("mecha_index"), g.view("kind"), g.view("tissue")
+    mecha, kinds, tissue = mtg.view("mecha_index"), mtg.view("compartment_type"), mtg.view("tissue")
     graph = nx.Graph()
     compartments = sorted(mecha, key=lambda v: mecha[v])
-    for v, attrs in zip(compartments, columns.node_attributes(g, compartments, [int(kinds[v]) for v in compartments],
+    for v, attrs in zip(compartments, columns.node_attributes(mtg, compartments, [int(kinds[v]) for v in compartments],
                                                              mecha, tissue)):
         graph.add_node(int(mecha[v]), **attrs)
-    u_of, v_of = g.view("edge_u"), g.view("edge_v")
+    u_of, v_of = mtg.view("edge_u"), mtg.view("edge_v")
     connections = written["connections"]
-    for e, attrs in zip(connections, columns.edge_attributes(g, connections)):
+    for e, attrs in zip(connections, columns.edge_attributes(mtg, connections)):
         graph.add_edge(int(u_of[e]), int(v_of[e]), **attrs)
     return graph

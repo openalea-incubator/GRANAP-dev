@@ -85,7 +85,7 @@ legacy's order and with its random stream (one ``np.random.default_rng(seed)`` p
 
 **The MPG layout** (``metafspm.build``). A section under one SubOrgan vertex: a Layer per connected region of one
 tissue type, a Cell per GRANAP cell (every attribute, the polygon included), one protoplast Compartment (label
-Symplastic) per Cell; the walls and wall junctions as Compartments (label Apoplastic, ``kind`` 1 and 2) anchored to
+Symplastic) per Cell; the walls and wall junctions as Compartments (label Apoplastic, ``compartment_type`` 1 and 2) anchored to
 the SubOrgan, since each belongs to several cells; every network edge a Connection (membrane and wall_air:
 Transmembrane; plasmodesmata: Symplastic; wall and air_link: Apoplastic). Each Compartment keeps its MECHA index
 (``mecha_index``), so that the networkx graph rebuilt from the MPG is the exporter's, node for node. A cell keeps a

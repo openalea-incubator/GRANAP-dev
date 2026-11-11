@@ -20,9 +20,9 @@ class Roots(CompositeModel):
 
 
 def test_a_plant_not_yet_planted_has_its_sections_geometry():
-    table = planting([Planting(), Planting(x=0.5)], Roots, planting_times=[0., 7200.], xrange=1., yrange=1.)
+    table = planting([Planting(), Planting(x=0.5)], Roots, planting_times=[0., 7200.], x_range=1., y_range=1.)
     scene = Scene(table, time_step=3600.)
     for _ in range(3):
         scene.run()
-        ds = scene.populations[0].data_structure
-        assert np.isfinite(ds.get("wall_surface")).all() and (np.asarray(ds.get("cell_volume")) >= 0).all()
+        data_structure = scene.populations[0].data_structure
+        assert np.isfinite(data_structure.get("wall_surface")).all() and (np.asarray(data_structure.get("cell_volume")) >= 0).all()

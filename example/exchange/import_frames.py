@@ -29,7 +29,7 @@ def tissues(path: str) -> pd.DataFrame:
     section = encoding3d.read(path).data_structures[0]
     compartments = section.entity_set("Compartment")
     assert compartments.variables["cell_area"].unit == "mm2", compartments.variables["cell_area"].unit
-    protoplasts = compartments.columns["kind"] == PROTOPLAST
+    protoplasts = compartments.columns["compartment_type"] == PROTOPLAST
     table = pd.DataFrame({"tissue": compartments.columns["tissue"][protoplasts],
                           "area": compartments.columns["cell_area"][protoplasts]})
     summary = table.groupby("tissue")["area"].agg(cells="count", area="sum").sort_values("area", ascending=False)
@@ -50,9 +50,9 @@ def main():
     for preset, path in zip(PRESETS, paths):
         summaries[preset] = tissues(path)
         print(summaries[preset].round(4).to_string())
-        identifier, ds = next(iter(import_frame(path).items()))       # {id: DataStructure}, as metafspm wrote them
-        cells = int(np.sum(np.asarray(ds.get("kind")) == PROTOPLAST))
-        print(f"Rebuilt by metafspm: '{identifier}', a {type(ds).__name__} of {ds.n_nodes()} nodes, {cells} protoplasts\n")
+        identifier, data_structure = next(iter(import_frame(path).items()))       # {id: DataStructure}, as metafspm wrote them
+        cells = int(np.sum(np.asarray(data_structure.get("compartment_type")) == PROTOPLAST))
+        print(f"Rebuilt by metafspm: '{identifier}', a {type(data_structure).__name__} of {data_structure.n_nodes()} nodes, {cells} protoplasts\n")
         assert cells == int(summaries[preset]["cells"].sum())
 
     if not show:

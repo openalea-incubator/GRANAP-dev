@@ -88,12 +88,12 @@ def _frame_column(values):
     return list(values)
 
 
-def _section_cells(g, written):
+def _section_cells(mtg, written):
     """The section's cells as the exporter reads its frame: per row (cell order, bridges left out), polygon, type,
     protect_topology and cgroup; and the rows with a valid geometry."""
     n_rows = len(written["cells"]) - len(written.get("bridge_cells", []))
     vids = written["cells"][:n_rows]
-    props = g.properties()
+    props = mtg.properties()
 
     def column(name, default=None):
         values = props.get("cell__" + name, {})
@@ -229,12 +229,12 @@ def build_network(organ, cell_wall_thickness=None) -> dict:
     """
     if cell_wall_thickness is None:
         cell_wall_thickness = organ_wall_thickness(organ.params)
-    g, segment, written = organ.mpg, organ.segment, organ._mpg_written
-    s, L = g.scales, g.labels
-    clear_network(g, written)
-    cells = _section_cells(g, written)
+    mtg, segment, written = organ.mpg, organ.segment, organ._mpg_written
+    s, L = mtg.scales, mtg.labels
+    clear_network(mtg, written)
+    cells = _section_cells(mtg, written)
     valid, types = cells["valid"], cells["types"]
-    cell_vkeys, _, _, junction_set, protected_shape_set = topology_from_mpg(g, segment, written)
+    cell_vkeys, _, _, junction_set, protected_shape_set = topology_from_mpg(mtg, segment, written)
     written.update(apoplast=[], connections=[], n_walls=0, n_junctions=0, n_cells=0, wall_to_cells={})
     if not cell_vkeys:
         return written
@@ -329,11 +329,11 @@ def build_network(organ, cell_wall_thickness=None) -> dict:
     # into the MPG
     anchor = s.anchors[s.Compartment]
     n_apo = n_walls + n_junctions
-    apo_vids = g.add_components_bulk(anchor, n_apo, topo_parents=[segment] * n_apo, **_props(
-        s.Compartment, label=L.Compartment.Apoplastic, kind=[WALL] * n_walls + [JUNCTION] * n_junctions))
+    apo_vids = mtg.add_components_bulk(anchor, n_apo, topo_parents=[segment] * n_apo, **_props(
+        s.Compartment, label=L.Compartment.Apoplastic, compartment_type=[WALL] * n_walls + [JUNCTION] * n_junctions))
     protoplasts = [written["protoplasts"][r] for r in valid_list]
     vid_of_node = np.asarray(list(apo_vids) + protoplasts, dtype=np.int64)
-    properties = g.properties()
+    properties = mtg.properties()
 
     def put(name, vids, values):
         properties.setdefault(name, {}).update(zip(vids, values))
@@ -341,7 +341,7 @@ def build_network(organ, cell_wall_thickness=None) -> dict:
     nan_w, nan_j, nan_c = np.full(n_walls, np.nan), np.full(n_junctions, np.nan), np.full(n_cells, np.nan)
     cgroup = [cells["cgroup"][r] or CGROUP_MAP.get(types[r], 4) for r in valid_list]
     nodes = vid_of_node.tolist()
-    columns.write(g, {                                       # C1: one numeric column per quantity
+    columns.write(mtg, {                                       # C1: one numeric column per quantity
         "section_x": np.concatenate((mid_x, xy[used, 0], cx[valid])),
         "section_y": np.concatenate((mid_y, xy[used, 1], cy[valid])),
         "wall_length": np.concatenate((lengths, np.zeros(n_junctions), np.zeros(n_cells))),     # extensive: 0
@@ -364,7 +364,7 @@ def build_network(organ, cell_wall_thickness=None) -> dict:
         u[at], v[at], paths[at] = blk_u, blk_v, attributes["path"]
         offset += blk_order.size
     labels = {path: getattr(L.Connection, PATH_LABELS[path]) for path in set(paths.tolist())}
-    connections = np.asarray(g.add_components_bulk(
+    connections = np.asarray(mtg.add_components_bulk(
         s.anchors[s.Connection], order.size, topo_parents=[segment] * order.size,
         **_props(s.Connection, n_id_a=vid_of_node[u].tolist(), n_id_b=vid_of_node[v].tolist(), edge_u=u.tolist(),
                  edge_v=v.tolist(), label=[labels[p] for p in paths.tolist()])), dtype=np.int64)
@@ -382,7 +382,7 @@ def build_network(organ, cell_wall_thickness=None) -> dict:
                 put("edge__" + name, vids, values)
             elif name not in ("path", "d_vec"):
                 block[columns._EDGE_COLUMN[name]] = np.asarray(values, dtype=float)
-        columns.write(g, block, vids)
+        columns.write(mtg, block, vids)
     nodes = node_of_row[mem_r].tolist()
     wall_to_cells = {w: nodes[i:i + c] for w, (i, c) in enumerate(zip(starts.tolist(), counts.tolist()))}
     written.update(apoplast=list(apo_vids), connections=connections.tolist(), n_walls=n_walls,

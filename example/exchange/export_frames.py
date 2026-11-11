@@ -21,7 +21,7 @@ import argparse
 import os
 
 from openalea.encoding3d.validate import validate_file
-from openalea.metafspm.scene.recorder import SceneRecorder
+from openalea.metafspm import SceneRecorder
 
 from openalea.granap.simulation import simulate
 
@@ -29,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUTS = os.path.join(HERE, "outputs")
 PRESETS = ("for_root", "for_dicot_root")
 # a log of the section: its segment and compartments, their tissue, kind and area
-LOG = dict(scales=["SubOrgan", "Compartment"], variables=["tissue", "kind", "cell_area"])
+LOG = dict(scales=["SubOrgan", "Compartment"], variables=["tissue", "compartment_type", "cell_area"])
 
 
 def export(presets=PRESETS, outputs: str = OUTPUTS, options: dict = None) -> list:

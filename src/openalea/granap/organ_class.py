@@ -676,8 +676,8 @@ class Organ(AbstractNetwork, ABC):
         if sliver_width > 0:
             gaps = gaps.buffer(-0.5 * sliver_width).buffer(0.5 * sliver_width)
 
-        pieces = [g for g in (gaps.geoms if hasattr(gaps, "geoms") else [gaps])
-                  if g.geom_type == "Polygon" and not g.is_empty]
+        pieces = [mtg for mtg in (gaps.geoms if hasattr(gaps, "geoms") else [gaps])
+                  if mtg.geom_type == "Polygon" and not mtg.is_empty]
         if enclosed_only:
             # representative_point() is guaranteed inside the piece, unlike a centroid
             # on a crescent, so a surface gap curving around a tip is not mistaken for
@@ -685,10 +685,10 @@ class Organ(AbstractNetwork, ABC):
             if "mass" not in unions:
                 unions["mass"] = self._filled_mass(covered)
             mass = unions["mass"]
-            pieces = [g for g in pieces if g.representative_point().within(mass)]
+            pieces = [mtg for mtg in pieces if mtg.representative_point().within(mass)]
         if min_area is not None:
-            pieces = [g for g in pieces if g.area >= min_area]
-        pieces.sort(key=lambda g: g.area, reverse=True)
+            pieces = [mtg for mtg in pieces if mtg.area >= min_area]
+        pieces.sort(key=lambda mtg: mtg.area, reverse=True)
         return pieces
 
     def fuse_gaps(self, sliver_width: float = None, min_area: float = None) -> int:
@@ -744,10 +744,10 @@ class Organ(AbstractNetwork, ABC):
 
         tree = STRtree([c.polygon for c in cells])
         fused = 0
-        for g in gaps:
-            hole = raw.intersection(g.buffer(recover)) if recover > 0 else g
+        for mtg in gaps:
+            hole = raw.intersection(mtg.buffer(recover)) if recover > 0 else mtg
             if hole.is_empty:
-                hole = g
+                hole = mtg
             probe = hole.buffer(eps)
             cand = [cells[i] for i in tree.query(probe) if cells[i].polygon.intersects(probe)]
             if not cand:
@@ -1016,8 +1016,8 @@ class Organ(AbstractNetwork, ABC):
         # pocket's coverage by unioning it in, then drop any A overlap.
         quad = unary_union([quad, pocket]).difference(A)
         if quad.geom_type != "Polygon":
-            parts = [g for g in quad.geoms if g.geom_type == "Polygon" and not g.is_empty]
-            quad = max(parts, key=lambda g: g.area) if parts else pocket
+            parts = [mtg for mtg in quad.geoms if mtg.geom_type == "Polygon" and not mtg.is_empty]
+            quad = max(parts, key=lambda mtg: mtg.area) if parts else pocket
         return quad if not quad.is_empty else pocket
 
     def _apply_intercellular(self, ics: dict) -> None:
@@ -1623,8 +1623,8 @@ class Organ(AbstractNetwork, ABC):
             return self._matrix
         if not self.__dict__.get("_network_built"):
             self._build_anatnetwork(air_link_radius=air_link_radius, **exporter_kwargs)
-        g, written = self.mpg, self._mpg_written
-        u_of, v_of = g.view("edge_u"), g.view("edge_v")
+        mtg, written = self.mpg, self._mpg_written
+        u_of, v_of = mtg.view("edge_u"), mtg.view("edge_v")
         u = np.array([u_of[e] for e in written["connections"]], dtype=np.int64)
         v = np.array([v_of[e] for e in written["connections"]], dtype=np.int64)
         n = self.n_total

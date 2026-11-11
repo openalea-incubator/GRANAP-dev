@@ -2,20 +2,20 @@
 The anatomy library: one template per anatomy class, generated once, instantiated on every
 segment of the class.
 
-    key = class_key(class_inputs, g, segment)                   a class: its class inputs' binned values
-    keys = class_keys(class_inputs, g, segments)                 the classes of many segments, in bulk
+    key = class_key(class_inputs, mtg, segment)                   a class: its class inputs' binned values
+    keys = class_keys(class_inputs, mtg, segments)                 the classes of many segments, in bulk
     library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
-    template = library.template(g, key, plant=overrides)        generated at the first request (per plant overrides),
-                                                                kept in g's registry (g.objects("anatomy_templates"))
-    template = template_by_index(g, index)                      a segment's (its anatomy_template)
-    written = template.instantiate(g, segment)                   the segment's own Layers, Cells, protoplasts,
+    template = library.template(mtg, key, plant=overrides)        generated at the first request (per plant overrides),
+                                                                kept in g's registry (mtg.objects("anatomy_templates"))
+    template = template_by_index(mtg, index)                      a segment's (its anatomy_template)
+    written = template.instantiate(mtg, segment)                   the segment's own Layers, Cells, protoplasts,
                                                                  walls, junctions and Connections, in bulk
 
 A template keeps the section as tables (one row per vertex, its properties); a segment's copy holds its own vertices
 and properties (its state), but not the geometry: its Cells point to the template's polygons and rings
 (template, template_row), stored once per class.
 
-The templates are the MPG's objects (metafspm's ds.objects / g.objects: one registry per DataStructure, no
+The templates are the MPG's objects (metafspm's data_structure.objects / mtg.objects: one registry per DataStructure, no
 module-level one): keyed by their index, a number of their content (template_index: the organ class, its parameters,
 the seed and the class key), so that a template has the same index in every population and process; checkpointed with
 the MPG, each once (a shared part, without its generated organ: saved_template).
@@ -31,7 +31,7 @@ from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL, _props
 from openalea.granap.metafspm.vessels import vessel_ids
 
 GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
-TEMPLATES = "anatomy_templates"                   # the name of the MPG's registry of templates (g.objects)
+TEMPLATES = "anatomy_templates"                   # the name of the MPG's registry of templates (mtg.objects)
 LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
 SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
 
@@ -47,7 +47,7 @@ class ClassInput:
       factor     the variable's value times factor gives the binned quantity (e.g. radius in m -> diameter in mm: 2000)
       target     (GRANAP section, field) set to the binned value in the class's parameters (e.g. ("cortex", "n_layers")),
                  or None: the class is keyed only (the class's own parametrization says what differs)
-      compute    a function (g, segment) -> value computing the variable from the segment's inputs instead of reading
+      compute    a function (mtg, segment) -> value computing the variable from the segment's inputs instead of reading
                  it (e.g. the distance from the root-shoot junction, from the segments' lengths)
     """
     variable: str
@@ -59,26 +59,26 @@ class ClassInput:
     def binned(self, value) -> float:
         return 0. if self.width <= 0 else round(round(float(value) * self.factor / self.width) * self.width, 9)
 
-    def value(self, g, segment) -> float:
+    def value(self, mtg, segment) -> float:
         if self.width <= 0:
             return 0.
         if self.compute is not None:
-            return self.binned(self.compute(g, segment))
-        values = g.view(self.variable)                           # read vertex by vertex: the column
+            return self.binned(self.compute(mtg, segment))
+        values = mtg.view(self.variable)                           # read vertex by vertex: the column
         if segment not in values:
             raise KeyError(f"class input '{self.variable}': no value on segment {segment} (an input the architecture "
                            f"model gives)")
         return self.binned(values[segment])
 
-    def values(self, g, segments) -> list:
-        """value() of each of *segments* (ascending or not), the variable read in one bulk read (g.values_at)."""
+    def values(self, mtg, segments) -> list:
+        """value() of each of *segments* (ascending or not), the variable read in one bulk read (mtg.values_at)."""
         segments = np.asarray(segments, dtype=np.int64)
         if self.width <= 0:
             return [0.] * segments.size
         if self.compute is not None:
-            return [self.binned(self.compute(g, segment)) for segment in segments.tolist()]
+            return [self.binned(self.compute(mtg, segment)) for segment in segments.tolist()]
         unique, inverse = np.unique(segments, return_inverse=True)
-        found, values = g.values_at(self.variable, unique)
+        found, values = mtg.values_at(self.variable, unique)
         if found.size != unique.size:
             missing = int(np.setdiff1d(unique, found)[0])
             raise KeyError(f"class input '{self.variable}': no value on segment {missing} (an input the architecture "
@@ -87,14 +87,14 @@ class ClassInput:
         return [binned[i] for i in inverse.reshape(-1).tolist()]
 
 
-def class_key(class_inputs, g, segment) -> tuple:
+def class_key(class_inputs, mtg, segment) -> tuple:
     """A segment's anatomy class: its class inputs' binned values."""
-    return tuple(c.value(g, segment) for c in class_inputs)
+    return tuple(c.value(mtg, segment) for c in class_inputs)
 
 
-def class_keys(class_inputs, g, segments) -> list:
+def class_keys(class_inputs, mtg, segments) -> list:
     """class_key of each of *segments*, each class input read in one bulk read."""
-    columns = [c.values(g, segments) for c in class_inputs]
+    columns = [c.values(mtg, segments) for c in class_inputs]
     return list(zip(*columns)) if columns else [()] * len(segments)
 
 
@@ -159,13 +159,13 @@ def default_root_parameters(key, base: OrganInputData = None, overrides: dict = 
     return data
 
 
-def _vertex_props(g, vids, skip=SKIP) -> dict:
+def _vertex_props(mtg, vids, skip=SKIP) -> dict:
     """{property: (local rows, values)} of the vertices *vids*, the entries present only."""
     vids = np.asarray(vids, dtype=np.int64)
     order = np.argsort(vids, kind="stable")
     ordered = vids[order]
     out = {}
-    for name, column in g.properties().items():
+    for name, column in mtg.properties().items():
         if name in skip:
             continue
         found, values = column.at(ordered)                     # in bulk, in the order of the column's keys
@@ -199,12 +199,12 @@ class Template:
     def from_organ(cls, organ, key, index) -> "Template":
         """The section of a generated MPG-backed organ (its stored network included), with vessel ids."""
         organ.generate_section()
-        g, w = organ.mpg, organ._mpg_written
+        mtg, w = organ.mpg, organ._mpg_written
         cells, protoplasts, apoplast, connections = w["cells"], w["protoplasts"], w["apoplast"], w["connections"]
         layer_index = {int(v): i for i, v in enumerate(w["layers"])}
         ids = vessel_ids(organ)
-        cell_props = _vertex_props(g, cells)
-        proto_props = _vertex_props(g, protoplasts)
+        cell_props = _vertex_props(mtg, cells)
+        proto_props = _vertex_props(mtg, protoplasts)
         rows = np.arange(len(cells))
         for name in ("vessel_id", "pole_id", "family", "angle", "relative_radius"):
             for props in (cell_props, proto_props):
@@ -216,14 +216,14 @@ class Template:
         ends = np.asarray(connections, dtype=np.int64)
         order = np.argsort(ends, kind="stable")
         a, b = np.empty(ends.size), np.empty(ends.size)
-        a[order], b[order] = g.values_at("n_id_a", ends[order])[1], g.values_at("n_id_b", ends[order])[1]
+        a[order], b[order] = mtg.values_at("n_id_a", ends[order])[1], mtg.values_at("n_id_b", ends[order])[1]
         links = np.array([[local[int(u)], local[int(v)]] for u, v in zip(a.tolist(), b.tolist())], dtype=np.int64)
-        boundary = g.view("boundary")
-        return cls(key=key, index=index, layers=_vertex_props(g, w["layers"]),
-                   cell_layer=np.array([layer_index[int(g.complex(c))] for c in cells], dtype=np.int64),
-                   cells=cell_props, protoplasts=proto_props, apoplast=_vertex_props(g, apoplast),
-                   connections=_vertex_props(g, connections), links=links,
-                   polygons=[g.view("cell__polygon").get(int(c)) for c in cells],
+        boundary = mtg.view("boundary")
+        return cls(key=key, index=index, layers=_vertex_props(mtg, w["layers"]),
+                   cell_layer=np.array([layer_index[int(mtg.complex(c))] for c in cells], dtype=np.int64),
+                   cells=cell_props, protoplasts=proto_props, apoplast=_vertex_props(mtg, apoplast),
+                   connections=_vertex_props(mtg, connections), links=links,
+                   polygons=[mtg.view("cell__polygon").get(int(c)) for c in cells],
                    rings={r: boundary[int(p)] for r, p in enumerate(protoplasts) if int(p) in boundary},
                    organ=organ)
 
@@ -231,7 +231,7 @@ class Template:
         """
         The template as metafspm's SectionTemplate (data_structure.instances), for instanced anatomies: one copy
         instantiated in a scratch MPG, its pores' aperture unset (NaN, as update_anatomies sets a copy's), then
-        *extend*(g, segment, written) (e.g. a root section's soil node, created as on a copy; *name* tells the
+        *extend*(mtg, segment, written) (e.g. a root section's soil node, created as on a copy; *name* tells the
         variants apart), captured, then *transform*(captured) when given (e.g. a condensed section). Made once per
         variant.
         """
@@ -255,17 +255,17 @@ class Template:
                                                            key=("granap", self.index, name))
         return self._sections[name]
 
-    def instance(self, g, segment, extend=None, name: str = "", transform=None) -> dict:
-        """The segment's instance of the section (g.add_instance; *extend*, *name*: section_template's): the vids a
+    def instance(self, mtg, segment, extend=None, name: str = "", transform=None) -> dict:
+        """The segment's instance of the section (mtg.add_instance; *extend*, *name*: section_template's): the vids a
         copy would get, by kind, without creating its vertices."""
-        return self.instance_of(g, segment, self.section_template(extend, name, transform))
+        return self.instance_of(mtg, segment, self.section_template(extend, name, transform))
 
-    def instance_of(self, g, segment, template) -> dict:
+    def instance_of(self, mtg, segment, template) -> dict:
         """The segment's instance of the SectionTemplate *template* (this template's, or one made from it, e.g. a
         reduction's): its vids by kind."""
         from openalea.metafspm.data_structure.instances import ANCHOR
-        vids = np.asarray(g.add_instance(segment, template), dtype=np.int64)
-        s = g.scales
+        vids = np.asarray(mtg.add_instance(segment, template), dtype=np.int64)
+        s = mtg.scales
         compartment = template.scale == s.Compartment
         out = {"layers": vids[template.scale == s.Layer].tolist(), "cells": vids[template.scale == s.Cell].tolist(),
                "protoplasts": vids[compartment & (template.complex >= 0)].tolist(),
@@ -277,31 +277,31 @@ class Template:
         """The full SectionTemplate a condensed variant was made from (its cells, for reconstructing them)."""
         return self._sections[name]
 
-    def instantiate(self, g, segment) -> dict:
+    def instantiate(self, mtg, segment) -> dict:
         """The segment's own copy of the section, created in bulk; returns its vids by kind."""
-        s = g.scales
+        s = mtg.scales
         n_cells = len(self.cell_layer)
         n_layers = len(next(iter(self.layers.values()))[0]) if self.layers else 0
-        layers = g.add_components_bulk(segment, n_layers, **_props(s.Layer))
-        cells = g.add_components_bulk(np.asarray(layers, dtype=np.int64)[self.cell_layer].tolist(), n_cells,
+        layers = mtg.add_components_bulk(segment, n_layers, **_props(s.Layer))
+        cells = mtg.add_components_bulk(np.asarray(layers, dtype=np.int64)[self.cell_layer].tolist(), n_cells,
                                       **_props(s.Cell, template=self.index, template_row=list(range(n_cells))))
-        protoplasts = g.add_components_bulk(cells, n_cells, **_props(
+        protoplasts = mtg.add_components_bulk(cells, n_cells, **_props(
             s.Compartment, template=self.index, template_row=list(range(n_cells))))
-        n_apo = len(self.apoplast["kind"][0]) if "kind" in self.apoplast else 0
-        apoplast = g.add_components_bulk(s.anchors[s.Compartment], n_apo, topo_parents=[segment] * n_apo,
+        n_apo = len(self.apoplast["compartment_type"][0]) if "compartment_type" in self.apoplast else 0
+        apoplast = mtg.add_components_bulk(s.anchors[s.Compartment], n_apo, topo_parents=[segment] * n_apo,
                                          **_props(s.Compartment))
         nodes = np.asarray(list(protoplasts) + list(apoplast), dtype=np.int64)
         n_edges = len(self.links)
-        connections = g.add_components_bulk(
+        connections = mtg.add_components_bulk(
             s.anchors[s.Connection], n_edges, topo_parents=[segment] * n_edges,
             **_props(s.Connection, n_id_a=nodes[self.links[:, 0]].tolist(), n_id_b=nodes[self.links[:, 1]].tolist()))
-        g.set_values("template_node", nodes, np.arange(nodes.size))          # each Compartment's place in the template
-        g.set_values("template", nodes, [self.index] * nodes.size)
+        mtg.set_values("template_node", nodes, np.arange(nodes.size))          # each Compartment's place in the template
+        mtg.set_values("template", nodes, [self.index] * nodes.size)
         for vids, table in ((layers, self.layers), (cells, self.cells), (protoplasts, self.protoplasts),
                             (apoplast, self.apoplast), (connections, self.connections)):
             vids = np.asarray(vids, dtype=np.int64)
             for name, (rows, values) in table.items():
-                g.set_values(name, vids[rows], values)
+                mtg.set_values(name, vids[rows], values)
         return {"layers": layers, "cells": cells, "protoplasts": protoplasts, "apoplast": apoplast,
                 "connections": connections, "template": self.index}
 
@@ -325,12 +325,12 @@ class AnatomyLibrary:
         source = self.class_parameters
         return (source(key) if callable(source) else source.get(key)) or {}
 
-    def template(self, g, key, plant: dict = None, targets: dict = None) -> Template:
+    def template(self, mtg, key, plant: dict = None, targets: dict = None) -> Template:
         """The template of class *key* for a plant with overrides *plant*, the class inputs' *targets* applied: the
-        MPG *g*'s (its registry, g.objects: a template of that content generated once per population), generated at
+        MPG *mtg*'s (its registry, mtg.objects: a template of that content generated once per population), generated at
         its first request."""
         entry = key if not plant else (key, _frozen(plant))
-        templates = template_registry(g)
+        templates = template_registry(mtg)
         index = self._indices.get(entry)
         if index is None:
             parameters = self.parameters(key, overrides=merged(plant, self.overrides(key), targets))
@@ -366,9 +366,9 @@ def saved_template(template) -> Template:
     return known[1]
 
 
-def template_registry(g):
-    """The MPG *g*'s registry of templates ({index: Template}, metafspm's g.objects / ds.objects)."""
-    return g.objects(TEMPLATES, saved=saved_template)
+def template_registry(mtg):
+    """The MPG *mtg*'s registry of templates ({index: Template}, metafspm's mtg.objects / data_structure.objects)."""
+    return mtg.objects(TEMPLATES, saved=saved_template)
 
 
 def template_by_index(holder, index) -> Template:
@@ -376,6 +376,6 @@ def template_by_index(holder, index) -> Template:
     DataStructure)."""
     template = holder.objects(TEMPLATES, saved=saved_template).get(int(index))
     if template is None:
-        raise KeyError(f"no anatomy template of index {int(index)} in this population (its MPG's g.objects"
+        raise KeyError(f"no anatomy template of index {int(index)} in this population (its MPG's mtg.objects"
                        f"('{TEMPLATES}'))")
     return template

@@ -156,9 +156,9 @@ def identical(old, new) -> bool:
 
 def network_lines(organ):
     """The Connections of the stored network, as segments between their Compartments' positions."""
-    g, w = organ.mpg, organ._mpg_written
-    px, py = g.view("section_x"), g.view("section_y")
-    a, b = g.view("n_id_a"), g.view("n_id_b")
+    mtg, w = organ.mpg, organ._mpg_written
+    px, py = mtg.view("section_x"), mtg.view("section_y")
+    a, b = mtg.view("n_id_a"), mtg.view("n_id_b")
     lines = [((px[int(a[e])], py[int(a[e])]), (px[int(b[e])], py[int(b[e])])) for e in w["connections"]
              if int(a[e]) in px and int(b[e]) in px]
     return np.asarray(lines, dtype=float).reshape(-1, 2, 2)
@@ -195,13 +195,13 @@ def compare(name, folder):
     new.generate_cells()
     t_new = time.perf_counter() - start
 
-    g, w = new.mpg, new._mpg_written
-    tissue = g.view("tissue")
+    mtg, w = new.mpg, new._mpg_written
+    tissue = mtg.view("tissue")
     mpg_types = [tissue[v] for v in w["cells"]]
-    mpg_polygons = [g.view("cell__polygon")[v] for v in w["cells"]]
+    mpg_polygons = [mtg.view("cell__polygon")[v] for v in w["cells"]]
     old_types = [c.type for c in old.all_cells.cells]
     old_polygons = [c.polygon for c in old.all_cells.cells]
-    kinds = g.view("kind")
+    kinds = mtg.view("compartment_type")
     n_walls = sum(1 for v in w.get("apoplast", []) if kinds[v] == WALL)
     n_junctions = sum(1 for v in w.get("apoplast", []) if kinds[v] == JUNCTION)
     colours = _colours(set(old_types) | set(mpg_types))

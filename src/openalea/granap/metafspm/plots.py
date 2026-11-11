@@ -1,9 +1,9 @@
 """
 Drawing GRANAP's sections from a DataStructure (its Compartments' tissues and positions, their templates' polygons).
 
-    draw_section(ax, ds, segment)                 one section's cells, coloured by tissue (or by a node variable)
-    draw_sections(ds, titles=None)                every section of the DataStructure, one panel each
-    draw_plant(ax, ds, offsets)                   every section at its place, with the axial junctions
+    draw_section(ax, data_structure, segment)                 one section's cells, coloured by tissue (or by a node variable)
+    draw_sections(data_structure, titles=None)                every section of the DataStructure, one panel each
+    draw_plant(ax, data_structure, offsets)                   every section at its place, with the axial junctions
 """
 import matplotlib
 import matplotlib.pyplot as plt
@@ -21,17 +21,17 @@ def tissue_colour(tissue):
     return TISSUE_COLOURS.setdefault(tissue, _PALETTE[len(TISSUE_COLOURS) % len(_PALETTE)])
 
 
-def draw_section(ax, ds, segment, values=None, title=None, cmap="viridis", norm=None, offset=(0., 0.)):
+def draw_section(ax, data_structure, segment, values=None, title=None, cmap="viridis", norm=None, offset=(0., 0.)):
     """
     The segment's cells (its template's polygons, mm, shifted by *offset*), coloured by tissue, or by *values* (one per
-    DataStructure node, e.g. ds.get("psi")). Returns the PatchCollection.
+    DataStructure node, e.g. data_structure.get("psi")). Returns the PatchCollection.
     """
-    g = ds.mtg
-    template = template_by_index(ds, ds.get("anatomy_template")[ds.index_of([int(segment)], "SubOrgan")[0]])
-    owners = np.asarray(ds.entity_ids("SubOrgan"))[ds.owner("SubOrgan")]
-    nodes = np.flatnonzero((owners == int(segment)) & (np.asarray(ds.get("kind")) == 0))
-    vids = ds.entity_ids("node")[nodes]
-    row, tissue = g.view("template_row"), np.asarray(ds.get("tissue"), dtype=object)
+    mtg = data_structure.mtg
+    template = template_by_index(data_structure, data_structure.get("anatomy_template")[data_structure.index_of([int(segment)], "SubOrgan")[0]])
+    owners = np.asarray(data_structure.entity_ids("SubOrgan"))[data_structure.owner("SubOrgan")]
+    nodes = np.flatnonzero((owners == int(segment)) & (np.asarray(data_structure.get("compartment_type")) == 0))
+    vids = data_structure.entity_ids("node")[nodes]
+    row, tissue = mtg.view("template_row"), np.asarray(data_structure.get("tissue"), dtype=object)
     patches, keep = [], []
     for i, v in zip(nodes, vids):
         polygon = template.polygons[int(row[int(v)])]
@@ -59,17 +59,17 @@ def tissue_legend(fig, ncol=7):
                loc="lower center", ncol=ncol, fontsize=7)
 
 
-def draw_sections(ds, titles=None, columns=4, panel=(3.6, 3.6)):
-    """Every section of *ds* (its SubOrgans with an anatomy), coloured by tissue, with the tissues' legend; *panel*:
+def draw_sections(data_structure, titles=None, columns=4, panel=(3.6, 3.6)):
+    """Every section of *data_structure* (its SubOrgans with an anatomy), coloured by tissue, with the tissues' legend; *panel*:
     each panel's (width, height), inches."""
-    segments = [int(s) for s in np.asarray(ds.entity_ids("SubOrgan"))[np.asarray(ds.get("anatomy_template")) >= 0]]
+    segments = [int(s) for s in np.asarray(data_structure.entity_ids("SubOrgan"))[np.asarray(data_structure.get("anatomy_template")) >= 0]]
     columns = min(columns, len(segments))
     rows = -(-len(segments) // columns)
     width, height = panel
     legend = 1.0                                                         # inches below the panels, for the legend
     fig, axes = plt.subplots(rows, columns, figsize=(width * columns, height * rows + legend), squeeze=False)
     for ax, segment, title in zip(axes.flat, segments, titles or [f"segment {s}" for s in segments]):
-        draw_section(ax, ds, segment, title=title)
+        draw_section(ax, data_structure, segment, title=title)
     for ax in axes.flat[len(segments):]:
         ax.axis("off")
     fig.tight_layout(rect=(0, legend / (height * rows + legend), 1, 1))
@@ -77,19 +77,19 @@ def draw_sections(ds, titles=None, columns=4, panel=(3.6, 3.6)):
     return fig
 
 
-def draw_plant(ax, ds, offsets, junctions=True, linewidth=0.3, alpha=0.5):
+def draw_plant(ax, data_structure, offsets, junctions=True, linewidth=0.3, alpha=0.5):
     """
-    Every section of *ds* at its drawing offset (*offsets*: {segment: (dx, dy)} mm, the segments to draw), coloured
+    Every section of *data_structure* at its drawing offset (*offsets*: {segment: (dx, dy)} mm, the segments to draw), coloured
     by tissue, and the axial junctions between them as lines (xylem black, phloem magenta).
     """
     for segment, offset in offsets.items():
-        draw_section(ax, ds, segment, offset=offset)
+        draw_section(ax, data_structure, segment, offset=offset)
     if junctions:
-        view, owner = ds.to_graph_view(), ds.owner("SubOrgan")
-        segments = np.asarray(ds.entity_ids("SubOrgan"))
+        view, owner = data_structure.to_graph_view(), data_structure.owner("SubOrgan")
+        segments = np.asarray(data_structure.entity_ids("SubOrgan"))
         shift = np.array([offsets.get(int(s), (np.nan, np.nan)) for s in segments], dtype=float)
-        x, y, tissue = ds.get("section_x"), ds.get("section_y"), np.asarray(ds.get("tissue"), dtype=object)
-        e = np.flatnonzero(ds.get("network_path") == 5)
+        x, y, tissue = data_structure.get("section_x"), data_structure.get("section_y"), np.asarray(data_structure.get("tissue"), dtype=object)
+        e = np.flatnonzero(data_structure.get("network_path") == 5)
         a, b = view.tail[e], view.head[e]
         for xylem, colour in ((True, "black"), (False, "magenta")):
             chosen = np.isin(tissue[a], ("metaxylem", "protoxylem", "xylem")) == xylem

@@ -33,16 +33,16 @@ def test_a_lateral_is_joined_to_the_segment_it_branches_on():
                 "root_laterals": [[0, [[0.55e-3, 2e-4, 0.]]]]}
     table = planting([Planting()], None, scenario)
     population = initiated(table, RootAxis, GranapAnatomy)
-    g = population.data_structure.structure
-    ds = population.data_structure
-    GranapAnatomy(data_structure=ds)
-    main, _, lateral = [int(s) for s in ds.entity_ids("SubOrgan")]
-    assert g.linked_parent(lateral, g.scales.SubOrgan) == main
-    assert g.complex_at_scale(lateral, g.scales.Axis) != g.complex_at_scale(main, g.scales.Axis)
-    view, owner = ds.to_graph_view(), ds.owner("SubOrgan")
-    index = {int(s): i for i, s in enumerate(ds.entity_ids("SubOrgan"))}
-    junctions = (ds.get("network_path") == 5) & (owner[view.tail] == index[main]) & (owner[view.head] == index[lateral])
-    assert junctions.sum() > 0 and set(np.unique(ds.get("tissue")[view.head[junctions]])) >= {"metaxylem", "phloem"}
+    mtg = population.data_structure.structure
+    data_structure = population.data_structure
+    GranapAnatomy(data_structure=data_structure)
+    main, _, lateral = [int(s) for s in data_structure.entity_ids("SubOrgan")]
+    assert mtg.linked_parent(lateral, mtg.scales.SubOrgan) == main
+    assert mtg.complex_at_scale(lateral, mtg.scales.Axis) != mtg.complex_at_scale(main, mtg.scales.Axis)
+    view, owner = data_structure.to_graph_view(), data_structure.owner("SubOrgan")
+    index = {int(s): i for i, s in enumerate(data_structure.entity_ids("SubOrgan"))}
+    junctions = (data_structure.get("network_path") == 5) & (owner[view.tail] == index[main]) & (owner[view.head] == index[lateral])
+    assert junctions.sum() > 0 and set(np.unique(data_structure.get("tissue")[view.head[junctions]])) >= {"metaxylem", "phloem"}
 
 
 def test_root_growth_grows_the_listed_axes_at_each_step():
@@ -58,16 +58,16 @@ def test_root_growth_grows_the_listed_axes_at_each_step():
              "root_growth": [[1, 0.2e-3, 3e-4], [0, 0.3e-3, 2e-4], [1, 0.25e-3, 1e-4]]}
     scene = Scene(planting([Planting(), Planting(x=0.1)], _plant_model(),
                            plant_scenarios=[grown, {"root_segments": [[0.3e-3, 2e-4, 0.]]}]))
-    ds = scene.populations[0].data_structure
-    g = ds.structure
+    data_structure = scene.populations[0].data_structure
+    mtg = data_structure.structure
     for _ in range(2):
         scene.run()
-    first, second = (g.components_at_scale(int(plant), scale=g.scales.Axis) for plant in ds.entity_ids("Plant"))
-    main, lateral = ([int(s) for s in g.components_at_scale(axis, scale=g.scales.SubOrgan)] for axis in first)
-    assert len(main) == 4 and len(lateral) == 5 and len(g.components_at_scale(second[0], scale=g.scales.SubOrgan)) == 1
-    radius, distance = (g.property(name) for name in ("radius", "distance_from_tip"))
+    first, second = (mtg.components_at_scale(int(plant), scale=mtg.scales.Axis) for plant in data_structure.entity_ids("Plant"))
+    main, lateral = ([int(s) for s in mtg.components_at_scale(axis, scale=mtg.scales.SubOrgan)] for axis in first)
+    assert len(main) == 4 and len(lateral) == 5 and len(mtg.components_at_scale(second[0], scale=mtg.scales.SubOrgan)) == 1
+    radius, distance = (mtg.property(name) for name in ("radius", "distance_from_tip"))
     np.testing.assert_allclose([radius[s] for s in lateral], [0.2e-3, 0.2e-3, 0.25e-3, 0.2e-3, 0.25e-3])
     np.testing.assert_allclose([distance[s] for s in lateral], [8e-4, 5e-4, 4e-4, 1e-4, 0.], atol=1e-15)
     np.testing.assert_allclose([distance[s] for s in main], [6e-4, 4e-4, 2e-4, 0.], atol=1e-15)
-    assert all(g.parent(new) == old for old, new in zip(lateral, lateral[1:]))
-    assert set(lateral[1:]) <= set(int(s) for s in g.property("anatomy_class"))      # their anatomies
+    assert all(mtg.parent(new) == old for old, new in zip(lateral, lateral[1:]))
+    assert set(lateral[1:]) <= set(int(s) for s in mtg.property("anatomy_class"))      # their anatomies

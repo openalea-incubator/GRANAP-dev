@@ -23,70 +23,70 @@ class Anatomy(GranapAnatomy):
 @pytest.fixture
 def plant():
     population = initiated(planting(), SmallRootSystem, Anatomy)
-    g, plants = population.data_structure.structure, population.plants
-    ds = population.data_structure
-    ds.register("solute", np.arange(ds.n_nodes(), dtype=float), location="node", on_grow="inherit", default=-1.)
-    return g, ds, Anatomy(data_structure=ds)
+    mtg, plants = population.data_structure.structure, population.plants
+    data_structure = population.data_structure
+    data_structure.register("solute", np.arange(data_structure.n_nodes(), dtype=float), location="node", on_grow="inherit", default=-1.)
+    return mtg, data_structure, Anatomy(data_structure=data_structure)
 
 
-def _root_segments(g):
-    return sorted(int(v) for v in g.property("anatomy_class"))
+def _root_segments(mtg):
+    return sorted(int(v) for v in mtg.property("anatomy_class"))
 
 
-def _tips(g):
-    segments = _root_segments(g)
-    return [s for s in segments if not [c for c in g.children(s) if c in segments]]
+def _tips(mtg):
+    segments = _root_segments(mtg)
+    return [s for s in segments if not [c for c in mtg.children(s) if c in segments]]
 
 
-def _index(ds, vids):
-    return ds.index_of(np.asarray(vids, dtype=np.int64))
+def _index(data_structure, vids):
+    return data_structure.index_of(np.asarray(vids, dtype=np.int64))
 
 
 def test_a_new_segment_gets_its_anatomy_and_inherits_from_the_same_cells_upstream(plant):
-    g, ds, anatomy = plant
-    main_tip = max(_tips(g), key=lambda s: g.property("radius")[s])
-    before = g.compartments_by_owner(g.scales.SubOrgan)[main_tip]
-    junctions = set(g.junction_vids())
-    new = g.add_child(main_tip, **PropsConfig(scale=g.scales.SubOrgan, edge_type='<',
-                                              label=g.labels.SubOrgan.RootSegment))
+    mtg, data_structure, anatomy = plant
+    main_tip = max(_tips(mtg), key=lambda s: mtg.property("radius")[s])
+    before = mtg.compartments_by_owner(mtg.scales.SubOrgan)[main_tip]
+    junctions = set(mtg.junction_vids())
+    new = mtg.add_child(main_tip, **PropsConfig(scale=mtg.scales.SubOrgan, edge_type='<',
+                                              label=mtg.labels.SubOrgan.RootSegment))
     for name, value in (("radius", MAIN_RADIUS), ("length", SEGMENT), ("distance_from_tip", 0.)):
-        g.set_values(name, [new], [value])
+        mtg.set_values(name, [new], [value])
     anatomy()
     assert anatomy.last_update == {"emerged": [new], "replaced": []}
-    compartments = g.compartments_by_owner(g.scales.SubOrgan)[new]
+    compartments = mtg.compartments_by_owner(mtg.scales.SubOrgan)[new]
     assert len(compartments) == len(before)                                       # the same class's copy
-    assert ds.rewired == [new]                                                    # only its link
-    node, solute = g.property("template_node"), ds.get("solute")
+    assert data_structure.rewired == [new]                                                    # only its link
+    node, solute = mtg.property("template_node"), data_structure.get("solute")
     upstream = {node[v]: v for v in before}
     for v in compartments[:200]:
-        assert solute[_index(ds, [v])[0]] == solute[_index(ds, [upstream[node[v]]])[0]]   # the same cell upstream
-    assert len(set(g.junction_vids()) - junctions) > 0
+        assert solute[_index(data_structure, [v])[0]] == solute[_index(data_structure, [upstream[node[v]]])[0]]   # the same cell upstream
+    assert len(set(mtg.junction_vids()) - junctions) > 0
 
 
 def test_a_segment_changing_class_is_replaced_and_starts_from_the_defaults(plant):
-    g, ds, anatomy = plant
-    lateral = min(_root_segments(g), key=lambda s: (g.property("radius")[s], s))     # the lateral's first segment
-    old = list(g.compartments_by_owner(g.scales.SubOrgan)[lateral])
-    radius = ds.get("radius").copy()                     # it thickens into the main class, as the architecture
-    radius[ds.entity_ids("SubOrgan") == lateral] = MAIN_RADIUS    # model would write it: through the DataStructure
-    ds.set("radius", radius)
+    mtg, data_structure, anatomy = plant
+    lateral = min(_root_segments(mtg), key=lambda s: (mtg.property("radius")[s], s))     # the lateral's first segment
+    old = list(mtg.compartments_by_owner(mtg.scales.SubOrgan)[lateral])
+    radius = data_structure.get("radius").copy()                     # it thickens into the main class, as the architecture
+    radius[data_structure.entity_ids("SubOrgan") == lateral] = MAIN_RADIUS    # model would write it: through the DataStructure
+    data_structure.set("radius", radius)
     anatomy()
     assert anatomy.last_update == {"emerged": [], "replaced": [lateral]}
-    new = g.compartments_by_owner(g.scales.SubOrgan)[lateral]
-    assert not set(old) & set(new) and not any(g.has_vertex(v) for v in old)       # the old anatomy is gone
-    assert len(new) == len(Anatomy.library.template(g, (1.1, 0., 0.)).cell_layer) + \
-        len(Anatomy.library.template(g, (1.1, 0., 0.)).apoplast["kind"][0])
-    np.testing.assert_array_equal(ds.get("solute")[_index(ds, new)], -1.)        # defaults, nothing carried (Q-G2)
-    assert lateral in ds.rewired
+    new = mtg.compartments_by_owner(mtg.scales.SubOrgan)[lateral]
+    assert not set(old) & set(new) and not any(mtg.has_vertex(v) for v in old)       # the old anatomy is gone
+    assert len(new) == len(Anatomy.library.template(mtg, (1.1, 0., 0.)).cell_layer) + \
+        len(Anatomy.library.template(mtg, (1.1, 0., 0.)).apoplast["compartment_type"][0])
+    np.testing.assert_array_equal(data_structure.get("solute")[_index(data_structure, new)], -1.)        # defaults, nothing carried (Q-G2)
+    assert lateral in data_structure.rewired
 
 
 def test_a_pruned_segment_takes_its_anatomy_with_it(plant):
-    g, ds, anatomy = plant
-    tip = min(_tips(g), key=lambda s: g.property("radius")[s])                    # the lateral's tip
-    gone = list(g.compartments_by_owner(g.scales.SubOrgan)[tip])
-    n_nodes = ds.n_nodes()
-    g.remove_vertex(tip)
-    ds.update_topology()               # as the architecture's own (MPG-style) pruning step would, by the framework
+    mtg, data_structure, anatomy = plant
+    tip = min(_tips(mtg), key=lambda s: mtg.property("radius")[s])                    # the lateral's tip
+    gone = list(mtg.compartments_by_owner(mtg.scales.SubOrgan)[tip])
+    n_nodes = data_structure.n_nodes()
+    mtg.remove_vertex(tip)
+    data_structure.update_topology()               # as the architecture's own (MPG-style) pruning step would, by the framework
     anatomy()
-    assert not any(g.has_vertex(v) for v in gone) and tip not in g.property("anatomy_class")
-    assert ds.n_nodes() == n_nodes - len(gone)
+    assert not any(mtg.has_vertex(v) for v in gone) and tip not in mtg.property("anatomy_class")
+    assert data_structure.n_nodes() == n_nodes - len(gone)

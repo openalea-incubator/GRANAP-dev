@@ -203,7 +203,7 @@ section's MPG writes went from 0.25 to 0.07 s with ``ArrayDict.update`` in bulk 
 
 In use case 1 at 8 plants (day 10 to 11, 110 k nodes, from a checkpoint), metafspm's incremental topology updates
 (its devplan's O-14: the structure-derived arrays patched from what an update removed and added, the instances'
-tables gathered per template) and the pass-through spans read as an array (``ds.edge_endpoints()``) took this
+tables gathered per template) and the pass-through spans read as an array (``data_structure.edge_endpoints()``) took this
 component from 1.15 to 0.88 s per step, the step from 4.51 to 3.95 s, every result identical (measured on 2026-11-07,
 ``c626201``; a record of its time, on other days of the run than the figures below).
 
@@ -213,7 +213,7 @@ day 13 hours 289 to 312. Each phase measured its before and after on the same da
 per cent from day to day, so figures of different phases are not compared with each other.
 
 - **The anatomies in bulk** (``d11c253``, 2026-11-07, metafspm's ``devplan_scene_parallel`` P2.1): the segment classes
-  computed per (plant, kind) with each class input read once, one gather and one write per quantity for the step's
+  computed per (plant, archetype) with each class input read once, one gather and one write per quantity for the step's
   new copies and instances, the whole-scene walks through metafspm's ``MPG.linked_parents`` (metafspm ``4845d7a``), and
   the pass-through lengths kept as offsets and summed by ``openalea.granap.metafspm.kernels.python_sums`` (CPython's
   ``sum()`` bit for bit; the package's ``warm_up`` entry point). Under the profiler at day 11, the anatomies had taken

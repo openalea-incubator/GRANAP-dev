@@ -29,24 +29,24 @@ def _record_stages(organ):
     records = []
 
     def hook(organ, stage):
-        g, written = organ.mpg, organ._mpg_written
+        mtg, written = organ.mpg, organ._mpg_written
         cells = organ.all_cells.cells
         assert len(written["cells"]) == len(cells) == len(written["protoplasts"])
         for row, (cell, vid, protoplast) in enumerate(zip(cells, written["cells"], written["protoplasts"])):
-            assert g.complex(protoplast) == vid and g.property("cell_row")[vid] == row
-            assert g.property(UID)[vid] == getattr(cell, UID)
+            assert mtg.complex(protoplast) == vid and mtg.property("cell_row")[vid] == row
+            assert mtg.property(UID)[vid] == getattr(cell, UID)
             for name, value in attributes(cell).items():
-                assert _same(g.property("cell__" + name)[vid], value), f"{stage}: cell {row}.{name}"
+                assert _same(mtg.property("cell__" + name)[vid], value), f"{stage}: cell {row}.{name}"
         if stage != "grouping":                                # P5.1: the cells are views of the MPG from here on
             assert isinstance(organ.all_cells, MPGCells) and all(isinstance(c, CellView) for c in cells)
         regions = tissue_regions(cells)
-        layer_of = [g.complex(v) for v in written["cells"]]
+        layer_of = [mtg.complex(v) for v in written["cells"]]
         assert len(set(layer_of)) == len(set(regions.tolist())) == len(written["layers"])
         same_region = regions[:, None] == regions[None, :] if len(cells) < 3000 else None
         if same_region is not None:
             assert (same_region == (np.asarray(layer_of)[:, None] == np.asarray(layer_of)[None, :])).all()
         alive = set(written["cells"]) | set(written["protoplasts"]) | set(written["layers"])
-        for name, values in g.properties().items():
+        for name, values in mtg.properties().items():
             if name.startswith("cell__"):
                 assert set(values) <= alive, f"{stage}: properties of removed cells in {name}"
         records.append((stage, dict(zip([getattr(c, UID) for c in cells], written["cells"]))))

@@ -27,10 +27,10 @@ class Seedling(StructuralComponent):
     """A main root of 16 segments (0.55 mm), N_LATERALS laterals of 4 segments alternating 0.35 and 0.25 mm."""
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        main = _axis(g, plant, 16, 0.55e-3)
+    def initiate_plant(cls, mtg, plant, parameters):
+        main = _axis(mtg, plant, 16, 0.55e-3)
         for k in range(N_LATERALS):
-            _axis(g, plant, 4, (0.35e-3 if k % 2 == 0 else 0.25e-3), bearer=main[1 + k])
+            _axis(mtg, plant, 4, (0.35e-3 if k % 2 == 0 else 0.25e-3), bearer=main[1 + k])
 
 
 class Anatomy(GranapAnatomy):
@@ -46,19 +46,19 @@ def main():
     timings["templates (3 classes)"] = time.perf_counter() - start
     start = time.perf_counter()
     population = initiated(planting(), Seedling, Anatomy)
-    g = population.data_structure.structure
+    mtg = population.data_structure.structure
     timings["architecture + instantiation"] = time.perf_counter() - start
     start = time.perf_counter()
     timings["arraydict"] = time.perf_counter() - start
     start = time.perf_counter()
-    ds = population.data_structure
+    data_structure = population.data_structure
     timings["DataStructure + junctions"] = time.perf_counter() - start
     start = time.perf_counter()
-    view = ds.to_graph_view()
+    view = data_structure.to_graph_view()
     timings["graph view"] = time.perf_counter() - start
-    segments = len(g.property("anatomy_class"))
-    print(f"{segments} segments, {g.nb_vertices()} vertices: {ds.n_nodes()} nodes, {ds.n_edges()} edges "
-          f"({len(g.junction_vids())} junctions), incidence {view.incidence.shape}")
+    segments = len(mtg.property("anatomy_class"))
+    print(f"{segments} segments, {mtg.nb_vertices()} vertices: {data_structure.n_nodes()} nodes, {data_structure.n_edges()} edges "
+          f"({len(mtg.junction_vids())} junctions), incidence {view.incidence.shape}")
     for phase, seconds in timings.items():
         print(f"  {phase:30s} {seconds:7.2f} s")
 

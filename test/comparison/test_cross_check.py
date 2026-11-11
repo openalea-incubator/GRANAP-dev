@@ -156,14 +156,14 @@ def _check_network(old, new):
 
 def _check_mpg(new):
     """Every MECHA node is a Compartment and every MECHA edge a Connection of the section."""
-    g = new.mpg
-    kinds = g.property("kind")
+    mtg = new.mpg
+    kinds = mtg.property("compartment_type")
     compartments = [v for v, k in kinds.items()]
     assert sum(kinds[v] == PROTOPLAST for v in compartments) == len(new.all_cells.cells)
     if new.graph.number_of_nodes():
         assert sum(kinds[v] == WALL for v in compartments) == new.n_walls
         assert sum(kinds[v] == JUNCTION for v in compartments) == new.n_junctions
-        assert len(g.property("edge_u")) == new.graph.number_of_edges()
+        assert len(mtg.property("edge_u")) == new.graph.number_of_edges()
 
 
 @pytest.mark.parametrize("name", [pytest.param(n, marks=() if n in QUICK else pytest.mark.slow) for n in ORGANS])

@@ -8,9 +8,7 @@ drawn from the plant graph, coloured by tissue.
 """
 import os
 
-from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.scene.population import Planting, planting
-from openalea.metafspm.scene.scene import Scene
+from openalea.metafspm import CompositeModel, Planting, planting, Scene
 
 from openalea.granap.metafspm.architectures import RootAxis
 from openalea.granap.metafspm.component import GranapAnatomy, junction_rules
@@ -42,12 +40,12 @@ def grown():
 
 def main():
     scene = grown()
-    ds = scene.populations[0].data_structure
+    data_structure = scene.populations[0].data_structure
     new = scene.populations[0].instance.anatomy.last_update["emerged"]
-    print("new segment:", new, f"- {ds.n_nodes()} Compartments, {ds.n_edges()} Connections")
+    print("new segment:", new, f"- {data_structure.n_nodes()} Compartments, {data_structure.n_edges()} Connections")
 
-    segments = [int(s) for s in ds.entity_ids("SubOrgan")]
-    fig = draw_sections(ds, titles=[f"segment {s}" + (" (new)" if s in new else "") for s in segments])
+    segments = [int(s) for s in data_structure.entity_ids("SubOrgan")]
+    fig = draw_sections(data_structure, titles=[f"segment {s}" + (" (new)" if s in new else "") for s in segments])
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
     os.makedirs(folder, exist_ok=True)
     fig.savefig(os.path.join(folder, "monocot_root.png"), dpi=150)

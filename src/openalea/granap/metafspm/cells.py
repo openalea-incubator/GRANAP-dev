@@ -25,9 +25,9 @@ _MISSING = object()
 class CellStore:
     """The section's Cell vertices as attribute stores: one per cell uid, its attributes in cell__<name>."""
 
-    def __init__(self, g, segment, written):
-        self.g, self.segment, self.written = g, segment, written
-        self._props = g.properties()
+    def __init__(self, mtg, segment, written):
+        self.g, self.segment, self.written = mtg, segment, written
+        self._props = mtg.properties()
         self._names = {}                                        # attribute -> its property dict
         self.views = {}                                         # uid -> CellView (one object per cell)
         self.next_uid = written["next_uid"]
@@ -78,7 +78,7 @@ class CellStore:
             layer = self._provisional_layer()
             s, L = self.g.scales, self.g.labels
             vid = self.g.add_components_bulk(layer, 1, **_props(s.Cell))[0]
-            protoplast = self.g.add_components_bulk([vid], 1, **_props(s.Compartment, kind=PROTOPLAST,
+            protoplast = self.g.add_components_bulk([vid], 1, **_props(s.Compartment, compartment_type=PROTOPLAST,
                                                                           label=L.Compartment.Symplastic))[0]
             self.written["cell_of_uid"][uid], self.written["protoplast_of_uid"][uid] = vid, protoplast
             self._props.setdefault(UID, {})[vid] = uid

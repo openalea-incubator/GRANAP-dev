@@ -13,23 +13,23 @@ SEGMENT = 5e-3                      # m
 MAIN_RADIUS, LATERAL_RADIUS = 0.55e-3, 0.3e-3
 
 
-def _axis(g, plant, n, radius, bearer=None):
-    s, L = g.scales, g.labels
-    axis = g.add_component(plant, **PropsConfig(scale=s.Axis, edge_type='/', label=L.Axis.Root))
-    gu = g.add_component(axis, **PropsConfig(scale=s.GrowthUnit, edge_type='/', label=L.GrowthUnit.Root))
-    phytomer = g.add_component(gu, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Root))
-    organ = g.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.RootInternode))
+def _axis(mtg, plant, n, radius, bearer=None):
+    s, L = mtg.scales, mtg.labels
+    axis = mtg.add_component(plant, **PropsConfig(scale=s.Axis, edge_type='/', label=L.Axis.Root))
+    gu = mtg.add_component(axis, **PropsConfig(scale=s.GrowthUnit, edge_type='/', label=L.GrowthUnit.Root))
+    phytomer = mtg.add_component(gu, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Root))
+    organ = mtg.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.RootInternode))
     props = PropsConfig(scale=s.SubOrgan, label=L.SubOrgan.RootSegment, edge_type='+' if bearer else '/')
-    first = (g.add_component_with_topo(organ, bearer, **props) if bearer is not None
-             else g.add_component(organ, **props))
+    first = (mtg.add_component_with_topo(organ, bearer, **props) if bearer is not None
+             else mtg.add_component(organ, **props))
     segments = [first]
     for _ in range(n - 1):
-        segments.append(g.add_child(segments[-1], **PropsConfig(scale=s.SubOrgan, edge_type='<',
+        segments.append(mtg.add_child(segments[-1], **PropsConfig(scale=s.SubOrgan, edge_type='<',
                                                                 label=L.SubOrgan.RootSegment)))
     for rank, v in enumerate(segments):
-        g.set_values("radius", [v], [radius])
-        g.set_values("length", [v], [SEGMENT])
-        g.set_values("distance_from_tip", [v], [(n - 1 - rank) * SEGMENT])
+        mtg.set_values("radius", [v], [radius])
+        mtg.set_values("length", [v], [SEGMENT])
+        mtg.set_values("distance_from_tip", [v], [(n - 1 - rank) * SEGMENT])
     return segments
 
 
@@ -37,9 +37,9 @@ class SmallRootSystem(StructuralComponent):
     """The architecture initiator: a main root and a lateral."""
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        main = _axis(g, plant, 4, MAIN_RADIUS)
-        _axis(g, plant, 2, LATERAL_RADIUS, bearer=main[1])
+    def initiate_plant(cls, mtg, plant, parameters):
+        main = _axis(mtg, plant, 4, MAIN_RADIUS)
+        _axis(mtg, plant, 2, LATERAL_RADIUS, bearer=main[1])
 
 
 def planting():

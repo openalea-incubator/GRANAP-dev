@@ -15,10 +15,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from openalea.metafspm.coupling.composite_wrapper import CompositeModel
-from openalea.metafspm.coupling.translator import Translator
-from openalea.metafspm.scene.population import Planting, planting
-from openalea.metafspm.scene.scene import Scene
+from openalea.metafspm import CompositeModel, Planting, planting, Scene, Translator
 
 from openalea.granap.metafspm.architectures import SegmentArchitecture, segment_chain
 from openalea.granap.metafspm.component import GranapAnatomy, OrganAnatomy, junction_rules
@@ -40,16 +37,16 @@ class SeedlingArchitecture(SegmentArchitecture):
     distance from the tip, SegmentArchitecture's variables)."""
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        L = g.labels.SubOrgan
-        stem = segment_chain(g, g.add_organ(plant, "StemInternode", kind="Shoot"), L.StemElement,
+    def initiate_plant(cls, mtg, plant, parameters):
+        L = mtg.labels.SubOrgan
+        stem = segment_chain(mtg, mtg.add_organ(plant, "StemInternode", complex_label="Shoot"), L.StemElement,
                              _elements(3, STEM_RADIUS))
         for bearer in stem[1:]:
-            segment_chain(g, g.add_organ(plant, "Leaf", kind="Shoot"), L.LeafElement,
+            segment_chain(mtg, mtg.add_organ(plant, "Leaf", complex_label="Shoot"), L.LeafElement,
                           _elements(2, LEAF_RADIUS), bearer=bearer)
-        main = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
+        main = segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), L.RootSegment,
                              _elements(3, ROOT_RADIUS), bearer=stem[0])
-        segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
+        segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), L.RootSegment,
                       _elements(2, LATERAL_RADIUS), bearer=main[1])
 
 
@@ -71,28 +68,28 @@ class Seedling(CompositeModel):
     parts = {"architecture": SeedlingArchitecture, "anatomy": SeedlingAnatomy}
 
 
-def layout(ds, segments):
+def layout(data_structure, segments):
     """Offsets (mm): the stem going up, each leaf to the right of its linked parent, the roots going down, a
     lateral root to the side of its bearer; spaced by the sections' sizes."""
-    g = ds.structure
-    L = g.labels.SubOrgan
-    label = g.view("label")
-    template_of = dict(zip(ds.entity_ids("SubOrgan").tolist(), ds.get("anatomy_template")))
+    mtg = data_structure.structure
+    L = mtg.labels.SubOrgan
+    label = mtg.view("label")
+    template_of = dict(zip(data_structure.entity_ids("SubOrgan").tolist(), data_structure.get("anatomy_template")))
 
     def size(s):
-        bounds = np.array([p.bounds for p in template_by_index(ds, template_of[s]).polygons if p is not None])
+        bounds = np.array([p.bounds for p in template_by_index(data_structure, template_of[s]).polygons if p is not None])
         return max(bounds[:, 2].max() - bounds[:, 0].min(), bounds[:, 3].max() - bounds[:, 1].min())
 
     offsets = {}
     for s in segments:                                             # linked parents come first (smaller vids)
-        parent = g.linked_parent(s, g.scales.SubOrgan)
+        parent = mtg.linked_parent(s, mtg.scales.SubOrgan)
         if parent is None:
             offsets[s] = np.zeros(2)
             continue
         gap = 0.6 * (size(s) + size(parent))
         if label[s] == L.StemElement:
             step = (0., gap)
-        elif label[s] == L.LeafElement or (label[parent] == L.RootSegment and g.view("edge_type").get(s) == "+"):
+        elif label[s] == L.LeafElement or (label[parent] == L.RootSegment and mtg.view("edge_type").get(s) == "+"):
             step = (gap, 0.)                                       # a leaf, or a lateral root: to the side
         else:
             step = (0., -gap)                                      # down the roots
@@ -102,25 +99,25 @@ def layout(ds, segments):
 
 def main():
     scene = Scene(planting([Planting()], Seedling, {"stem_anatomy": {}, "leaf_anatomy": {}}))
-    ds = scene.populations[0].data_structure
-    g = ds.mtg
-    segments = [int(s) for s in ds.entity_ids("SubOrgan")]
-    offsets = layout(ds, segments)
+    data_structure = scene.populations[0].data_structure
+    mtg = data_structure.mtg
+    segments = [int(s) for s in data_structure.entity_ids("SubOrgan")]
+    offsets = layout(data_structure, segments)
 
     fig, ax = plt.subplots(figsize=(15, 10))
-    draw_plant(ax, ds, offsets, linewidth=0.15, alpha=0.25)
-    names = {g.labels.SubOrgan.StemElement: "stem", g.labels.SubOrgan.LeafElement: "leaf",
-             g.labels.SubOrgan.RootSegment: "root"}
+    draw_plant(ax, data_structure, offsets, linewidth=0.15, alpha=0.25)
+    names = {mtg.labels.SubOrgan.StemElement: "stem", mtg.labels.SubOrgan.LeafElement: "leaf",
+             mtg.labels.SubOrgan.RootSegment: "root"}
     for s, (x, y) in offsets.items():
-        ax.annotate(f"{names[g.view('label')[s]]} {s}", (x, y), ha="center", va="center", fontsize=8,
+        ax.annotate(f"{names[mtg.view('label')[s]]} {s}", (x, y), ha="center", va="center", fontsize=8,
                     bbox=dict(facecolor="white", alpha=0.6, lw=0))
     ax.margins(0.04, 0.06)
     ax.set_xticks([])
     ax.set_yticks([])
-    n_templates = len(set(ds.get("anatomy_template").tolist()))
+    n_templates = len(set(data_structure.get("anatomy_template").tolist()))
     ax.set_title(f"Seedling: {len(segments)} sections ({n_templates} anatomy templates: stems, leaves, roots), "
-                 f"{ds.n_nodes()} Compartments, {ds.n_edges()} Connections, "
-                 f"{int((ds.get('network_path') == 5).sum())} axial junctions", fontsize=10)
+                 f"{data_structure.n_nodes()} Compartments, {data_structure.n_edges()} Connections, "
+                 f"{int((data_structure.get('network_path') == 5).sum())} axial junctions", fontsize=10)
     fig.tight_layout(rect=(0, 0.08, 1, 1))
     tissue_legend(fig)
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")

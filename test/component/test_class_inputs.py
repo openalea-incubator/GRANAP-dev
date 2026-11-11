@@ -22,9 +22,9 @@ class TwoRoots(StructuralComponent):
     """Each plant: a root of two segments, the second with a cortex_layers given by the 'architecture'."""
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        segments = _axis(g, plant, 2, 0.55e-3)
-        g.set_values("cortex_layers", segments[:2], [4, 2])
+    def initiate_plant(cls, mtg, plant, parameters):
+        segments = _axis(mtg, plant, 2, 0.55e-3)
+        mtg.set_values("cortex_layers", segments[:2], [4, 2])
 
 
 def _planting(*overrides, key="root_anatomy"):
@@ -34,15 +34,15 @@ def _planting(*overrides, key="root_anatomy"):
 
 class OneLeafElement(StructuralComponent):
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        s, L = g.scales, g.labels
+    def initiate_plant(cls, mtg, plant, parameters):
+        s, L = mtg.scales, mtg.labels
         complex_ = plant
         for scale, label in ((s.Axis, L.Axis.Shoot), (s.GrowthUnit, L.GrowthUnit.Shoot),
                              (s.Phytomer, L.Phytomer.Shoot), (s.Organ, L.Organ.Leaf)):
-            complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
-        v = g.add_component(complex_, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.LeafElement))
+            complex_ = mtg.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
+        v = mtg.add_component(complex_, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.LeafElement))
         for name, value in (("radius", 1e-3), ("length", 2e-4), ("distance_from_tip", 0.)):
-            g.set_values(name, [v], [value])
+            mtg.set_values(name, [v], [value])
 
 
 def test_plants_parametrized_differently_get_their_own_templates_and_alike_share():
@@ -50,11 +50,11 @@ def test_plants_parametrized_differently_get_their_own_templates_and_alike_share
         library = AnatomyLibrary()
     population = initiated(_planting({"cortex": {"n_layers": 3}}, {"cortex": {"n_layers": 3}}, None), TwoRoots,
                            Anatomy)
-    g, plants = population.data_structure.structure, population.plants
-    template = g.property("anatomy_template")
-    per_plant = [{template[s] for s in g.components_at_scale(p, scale=g.scales.SubOrgan)} for p in plants]
+    mtg, plants = population.data_structure.structure, population.plants
+    template = mtg.property("anatomy_template")
+    per_plant = [{template[s] for s in mtg.components_at_scale(p, scale=mtg.scales.SubOrgan)} for p in plants]
     assert per_plant[0] == per_plant[1] != per_plant[2]          # alike share, the default plant has its own
-    assert len(template_registry(g)) == 2                           # the population's templates
+    assert len(template_registry(mtg)) == 2                           # the population's templates
 
 
 def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
@@ -68,12 +68,12 @@ def test_a_class_input_sets_a_granap_field_from_an_architecture_variable():
                                               by="Architecture", scale=ScalesConfig.SubOrgan, kind="descriptor")
 
     population = initiated(_planting(None), TwoRoots, Anatomy)
-    g, plants = population.data_structure.structure, population.plants
-    segments = sorted(int(s) for s in g.property("anatomy_class"))
-    assert [g.view("anatomy_class")[s][-1] for s in segments] == [4., 2.]
-    assert len(template_registry(g)) == 2
+    mtg, plants = population.data_structure.structure, population.plants
+    segments = sorted(int(s) for s in mtg.property("anatomy_class"))
+    assert [mtg.view("anatomy_class")[s][-1] for s in segments] == [4., 2.]
+    assert len(template_registry(mtg)) == 2
     cortex = {t.key[-1]: sum(c.type == "cortex" for c in t.organ.all_cells.cells)
-              for t in template_registry(g).values()}
+              for t in template_registry(mtg).values()}
     assert cortex[4.] > cortex[2.] > 0                            # the field set from the class input
 
 
@@ -84,11 +84,11 @@ def test_a_scenario_gives_a_kind_of_segment_its_preset():
     from openalea.granap.needle_class import NeedleAnatomy
     population = initiated(_planting({"preset": "for_needle", "seed": 42}, None, key="leaf_anatomy"), OneLeafElement,
                            GranapAnatomy)
-    g, plants = population.data_structure.structure, population.plants
-    template = g.property("anatomy_template")
-    with_needle, without = [[template.get(s, -1.) for s in g.components_at_scale(p, scale=g.scales.SubOrgan)]
+    mtg, plants = population.data_structure.structure, population.plants
+    template = mtg.property("anatomy_template")
+    with_needle, without = [[template.get(s, -1.) for s in mtg.components_at_scale(p, scale=mtg.scales.SubOrgan)]
                             for p in plants]
-    assert isinstance(template_by_index(g, with_needle[0]).organ, NeedleAnatomy) and without == [-1.]
+    assert isinstance(template_by_index(mtg, with_needle[0]).organ, NeedleAnatomy) and without == [-1.]
 
 
 def test_a_preset_on_an_explicit_organ_raises():
@@ -105,20 +105,20 @@ class TwoStemOrgans(StructuralComponent):
                                      scale=ScalesConfig.Organ, kind="descriptor")
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        s, L = g.scales, g.labels
+    def initiate_plant(cls, mtg, plant, parameters):
+        s, L = mtg.scales, mtg.labels
         complex_ = plant
         for scale, label in ((s.Axis, L.Axis.Shoot), (s.GrowthUnit, L.GrowthUnit.Shoot)):
-            complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
+            complex_ = mtg.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
         for diameter in (2e-3, 3e-3):
-            phytomer = g.add_component(complex_, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Shoot))
-            organ = g.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.StemInternode))
-            g.set_values("diameter", [organ], [diameter])
+            phytomer = mtg.add_component(complex_, **PropsConfig(scale=s.Phytomer, edge_type='/', label=L.Phytomer.Shoot))
+            organ = mtg.add_component(phytomer, **PropsConfig(scale=s.Organ, edge_type='/', label=L.Organ.StemInternode))
+            mtg.set_values("diameter", [organ], [diameter])
             for _ in range(2):
-                v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/',
+                v = mtg.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/',
                                                          label=L.SubOrgan.StemElement))
                 for name, value in (("length", 1e-2), ("distance_from_tip", 0.)):
-                    g.set_values(name, [v], [value])
+                    mtg.set_values(name, [v], [value])
 
 
 def test_the_stems_are_classed_by_a_linked_stem_radius():
@@ -134,9 +134,9 @@ def test_the_stems_are_classed_by_a_linked_stem_radius():
     translator = Translator().link("Anatomy", "stem_radius", "TwoStemOrgans", {"diameter": 0.5},
                                    source_scale="Organ", scale="SubOrgan", aggregation="broadcast")
     population = initiated(_planting(None), TwoStemOrgans, Anatomy, translator=translator)
-    g = population.data_structure.structure
-    elements = sorted(int(s) for s in g.property("anatomy_class"))
-    assert [g.view("anatomy_class")[s][0] for s in elements] == [2., 2., 3., 3.]   # diameters in mm
+    mtg = population.data_structure.structure
+    elements = sorted(int(s) for s in mtg.property("anatomy_class"))
+    assert [mtg.view("anatomy_class")[s][0] for s in elements] == [2., 2., 3., 3.]   # diameters in mm
     with pytest.raises(KeyError, match="class input 'stem_radius'"):
         initiated(_planting(None), TwoStemOrgans, Anatomy)
 
@@ -153,16 +153,16 @@ class InternodeAndSheath(StructuralComponent):
     elements)."""
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        s, L = g.scales, g.labels
+    def initiate_plant(cls, mtg, plant, parameters):
+        s, L = mtg.scales, mtg.labels
         complex_ = plant
         for scale, label in ((s.Axis, L.Axis.Shoot), (s.GrowthUnit, L.GrowthUnit.Shoot), (s.Phytomer, L.Phytomer.Shoot)):
-            complex_ = g.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
+            complex_ = mtg.add_component(complex_, **PropsConfig(scale=scale, edge_type='/', label=label))
         for organ_label in (L.Organ.StemInternode, L.Organ.Sheath):
-            organ = g.add_component(complex_, **PropsConfig(scale=s.Organ, edge_type='/', label=organ_label))
-            v = g.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.StemElement))
+            organ = mtg.add_component(complex_, **PropsConfig(scale=s.Organ, edge_type='/', label=organ_label))
+            v = mtg.add_component(organ, **PropsConfig(scale=s.SubOrgan, edge_type='/', label=L.SubOrgan.StemElement))
             for name, value in (("stem_radius", 1e-3), ("length", 1e-2), ("distance_from_tip", 0.)):
-                g.set_values(name, [v], [value])
+                mtg.set_values(name, [v], [value])
 
 
 def test_a_sheath_is_a_bent_leaf_of_its_own_kind():
@@ -173,16 +173,16 @@ def test_a_sheath_is_a_bent_leaf_of_its_own_kind():
     planting_ = planting([Planting(x=0.), Planting(x=1.)], None,
                          plant_scenarios=[{"sheath_anatomy": {}}, {"stem_anatomy": {}}])
     population = initiated(planting_, InternodeAndSheath, GranapAnatomy)
-    g, plants = population.data_structure.structure, population.plants
-    template = g.property("anatomy_template")
-    (internode, sheath), (stem, bare) = [sorted(int(v) for v in g.components_at_scale(p, scale=g.scales.SubOrgan))
+    mtg, plants = population.data_structure.structure, population.plants
+    template = mtg.property("anatomy_template")
+    (internode, sheath), (stem, bare) = [sorted(int(v) for v in mtg.components_at_scale(p, scale=mtg.scales.SubOrgan))
                                          for p in plants]
     assert template.get(internode, -1.) == -1. and template.get(bare, -1.) == -1.
-    leaf = template_by_index(g, template[sheath]).organ
+    leaf = template_by_index(mtg, template[sheath]).organ
     assert isinstance(leaf, LeafAnatomy) and leaf.global_params["fold_sag"] == 2.0
-    assert not isinstance(template_by_index(g, template[stem]).organ, LeafAnatomy)
-    organ = int(g.complex_at_scale(sheath, g.scales.Organ))
-    assert organ in g.property("leaf_surface")
+    assert not isinstance(template_by_index(mtg, template[stem]).organ, LeafAnatomy)
+    organ = int(mtg.complex_at_scale(sheath, mtg.scales.Organ))
+    assert organ in mtg.property("leaf_surface")
 
 
 def test_a_plants_anatomy_field_given_dotted():
@@ -193,9 +193,9 @@ def test_a_plants_anatomy_field_given_dotted():
     assert table.at["root_anatomy.cortex.n_layers", "min_value"] == 1
     population = initiated(planting([Planting(x=0.), Planting(x=1.)], None,
                                     plant_scenarios=[{"root_anatomy.cortex.n_layers": 2}, {}]), TwoRoots, GranapAnatomy)
-    g, plants = population.data_structure.structure, population.plants
-    template = g.property("anatomy_template")
+    mtg, plants = population.data_structure.structure, population.plants
+    template = mtg.property("anatomy_template")
     from openalea.granap.metafspm.library import template_by_index
-    cortex = [max(sum(c.type == "cortex" for c in template_by_index(g, template[s]).organ.all_cells.cells)
-                  for s in g.components_at_scale(p, scale=g.scales.SubOrgan)) for p in plants]
+    cortex = [max(sum(c.type == "cortex" for c in template_by_index(mtg, template[s]).organ.all_cells.cells)
+                  for s in mtg.components_at_scale(p, scale=mtg.scales.SubOrgan)) for p in plants]
     assert 0 < cortex[0] < cortex[1]                              # 2 layers, the preset's 5

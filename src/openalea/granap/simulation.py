@@ -93,11 +93,11 @@ class Section:
         """The section's cells, one row each: its tissue, area (mm2), equivalent diameter (µm: the diameter of a
         disc of its area), centre (x, y, mm) and distance from the section's centre (mm). The air spaces (between
         cells, or aerenchyma) are rows of tissue "air space"."""
-        ds = self.data_structure
-        cell = np.asarray(ds.get("kind")) == 0
-        area = np.asarray(ds.get("cell_area"))[cell]
-        x, y = np.asarray(ds.get("section_x"))[cell], np.asarray(ds.get("section_y"))[cell]
-        return pd.DataFrame({"tissue": np.asarray(ds.get("tissue"), dtype=object)[cell], "area": area,
+        data_structure = self.data_structure
+        cell = np.asarray(data_structure.get("compartment_type")) == 0
+        area = np.asarray(data_structure.get("cell_area"))[cell]
+        x, y = np.asarray(data_structure.get("section_x"))[cell], np.asarray(data_structure.get("section_y"))[cell]
+        return pd.DataFrame({"tissue": np.asarray(data_structure.get("tissue"), dtype=object)[cell], "area": area,
                              "diameter": 2e3 * np.sqrt(area / np.pi), "x": x, "y": y, "distance": np.hypot(x, y)})
 
     @property
@@ -115,10 +115,10 @@ class Section:
         """The section as a whole: its radius (mm: its outermost wall junction's distance from the centre), its
         area (mm2: of a disc of that radius), its cells (air spaces excluded), its xylem vessels and their mean
         diameter (µm), and the share of its cell area that is air space."""
-        ds, cells = self.data_structure, self.cells()
-        junction = np.asarray(ds.get("kind")) == 2
-        radius = float(np.hypot(np.asarray(ds.get("section_x"))[junction],
-                                np.asarray(ds.get("section_y"))[junction]).max())
+        data_structure, cells = self.data_structure, self.cells()
+        junction = np.asarray(data_structure.get("compartment_type")) == 2
+        radius = float(np.hypot(np.asarray(data_structure.get("section_x"))[junction],
+                                np.asarray(data_structure.get("section_y"))[junction]).max())
         vessels = cells[cells["tissue"].isin(VESSELS)]
         air = cells["tissue"] == "air space"
         return pd.Series({"radius": radius, "area": np.pi * radius ** 2, "cells": int((~air).sum()),

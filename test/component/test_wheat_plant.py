@@ -25,15 +25,15 @@ WHOLE_SHOOT = {"seed_anatomy": {}, "stem_anatomy": {}, "sheath_anatomy": {}, "le
 NO_SHEATH = {"seed_anatomy": {}, "stem_anatomy": {}, "leaf_anatomy": {}}    # a sheath's elements without anatomy
 
 
-def _following(g, organ, label, lengths, after, edge="<"):
+def _following(mtg, organ, label, lengths, after, edge="<"):
     """SubOrgans of *label* under *organ*, each the successor of the previous, the first after *after* by *edge*."""
     out, previous = [], after
     for rank, length in enumerate(lengths):
-        props = PropsConfig(scale=g.scales.SubOrgan, edge_type=edge if rank == 0 else "<", label=label)
-        previous = g.add_component_with_topo(organ, previous, **props) if rank == 0 else g.add_child(previous, **props)
-        g.set_values("length", [previous], [float(length)])
-        g.set_values("stem_radius", [previous], [STEM_RADIUS])
-        g.set_values("distance_from_tip", [previous], [0.])
+        props = PropsConfig(scale=mtg.scales.SubOrgan, edge_type=edge if rank == 0 else "<", label=label)
+        previous = mtg.add_component_with_topo(organ, previous, **props) if rank == 0 else mtg.add_child(previous, **props)
+        mtg.set_values("length", [previous], [float(length)])
+        mtg.set_values("stem_radius", [previous], [STEM_RADIUS])
+        mtg.set_values("distance_from_tip", [previous], [0.])
         out.append(previous)
     return out
 
@@ -48,35 +48,35 @@ class WheatSeedling(SegmentArchitecture):
     leaf_lengths = (ELEMENT, ELEMENT)              # the blade's LeafElements'
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
-        L = g.labels.SubOrgan
-        seed_organ = g.add_organ(plant, "StemInternode", kind="Shoot")
-        seed = g.add_component(seed_organ, **PropsConfig(scale=g.scales.SubOrgan, edge_type="/", label=L.Seed))
+    def initiate_plant(cls, mtg, plant, parameters):
+        L = mtg.labels.SubOrgan
+        seed_organ = mtg.add_organ(plant, "StemInternode", complex_label="Shoot")
+        seed = mtg.add_component(seed_organ, **PropsConfig(scale=mtg.scales.SubOrgan, edge_type="/", label=L.Seed))
         for name, value in (("length", SEED_LENGTH), ("stem_radius", STEM_RADIUS)):
-            g.set_values(name, [seed], [value])
-        g.set_values("distance_from_tip", [seed], [0.])
-        phytomer = g.complex(seed_organ)
-        organ = lambda label: g.add_component(phytomer, **PropsConfig(scale=g.scales.Organ, edge_type="/",
-                                                                      label=getattr(g.labels.Organ, label)))
-        subcrown = _following(g, organ("StemInternode"), L.StemElement, [ELEMENT, ELEMENT], seed)
+            mtg.set_values(name, [seed], [value])
+        mtg.set_values("distance_from_tip", [seed], [0.])
+        phytomer = mtg.complex(seed_organ)
+        organ = lambda label: mtg.add_component(phytomer, **PropsConfig(scale=mtg.scales.Organ, edge_type="/",
+                                                                      label=getattr(mtg.labels.Organ, label)))
+        subcrown = _following(mtg, organ("StemInternode"), L.StemElement, [ELEMENT, ELEMENT], seed)
         internode = organ("StemInternode")
-        (internode_hidden,) = _following(g, internode, L.HiddenElement, [HIDDEN], subcrown[-1])
-        (crown,) = _following(g, internode, L.StemElement, [ELEMENT], internode_hidden)
+        (internode_hidden,) = _following(mtg, internode, L.HiddenElement, [HIDDEN], subcrown[-1])
+        (crown,) = _following(mtg, internode, L.StemElement, [ELEMENT], internode_hidden)
         sheath = organ("Sheath")
-        (sheath_hidden,) = _following(g, sheath, L.HiddenElement, [HIDDEN], crown, edge="+")
-        (sheath_element,) = _following(g, sheath, L.StemElement, [cls.sheath_length], sheath_hidden)
+        (sheath_hidden,) = _following(mtg, sheath, L.HiddenElement, [HIDDEN], crown, edge="+")
+        (sheath_element,) = _following(mtg, sheath, L.StemElement, [cls.sheath_length], sheath_hidden)
         blade = organ("Blade")
-        (blade_hidden,) = _following(g, blade, L.HiddenElement, [HIDDEN], sheath_element)
-        leaf = _following(g, blade, L.LeafElement, list(cls.leaf_lengths), blade_hidden)
-        seminal = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
+        (blade_hidden,) = _following(mtg, blade, L.HiddenElement, [HIDDEN], sheath_element)
+        leaf = _following(mtg, blade, L.LeafElement, list(cls.leaf_lengths), blade_hidden)
+        seminal = segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), L.RootSegment,
                                 [(ROOT_RADIUS, ELEMENT, ELEMENT), (ROOT_RADIUS, ELEMENT, 0.)], bearer=seed)
-        nodal = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), L.RootSegment,
+        nodal = segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), L.RootSegment,
                               [(ROOT_RADIUS, ELEMENT, 0.)], bearer=crown)
         roles = dict(seed=[seed], subcrown=subcrown, hidden=[internode_hidden, sheath_hidden, blade_hidden],
                      crown=[crown], sheath=[sheath_element], leaf=leaf, seminal=seminal, nodal=nodal)
         for role, vids in roles.items():
             for v in vids:
-                g.set_values("role", [v], [role])
+                mtg.set_values("role", [v], [role])
 
 
 @pytest.fixture(scope="module")
@@ -86,38 +86,38 @@ def plants():
     return population.data_structure
 
 
-def _roles(g, plant):
-    role = g.property("role")
+def _roles(mtg, plant):
+    role = mtg.property("role")
     out = {}
-    for v in g.components_at_scale(plant, scale=g.scales.SubOrgan):
+    for v in mtg.components_at_scale(plant, scale=mtg.scales.SubOrgan):
         out.setdefault(role[int(v)], []).append(int(v))
     return {name: sorted(vids) for name, vids in out.items()}
 
 
-def _family(g, vids):
-    family = g.values_of("family", vids)
+def _family(mtg, vids):
+    family = mtg.values_of("family", vids)
     return np.array([family.get(v, -1) for v in vids])
 
 
-def _expected_junctions(g, sections):
+def _expected_junctions(mtg, sections):
     """{(ancestor section, section, family): the vessel pairs}: each section with an anatomy joined to its nearest
     ancestor with one."""
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     out = {}
     for section in sections:
-        ancestor, _ = anatomy_ancestor(g, section, g.compartments_csr(g.scales.SubOrgan))
+        ancestor, _ = anatomy_ancestor(mtg, section, mtg.compartments_csr(mtg.scales.SubOrgan))
         if ancestor is not None and owners.get(section):
             for family in (0, 1):
-                out[(ancestor, section, family)] = vessel_pairs(g, owners[ancestor], owners[section], family)
+                out[(ancestor, section, family)] = vessel_pairs(mtg, owners[ancestor], owners[section], family)
     return out
 
 
-def _actual_junctions(g, ds, sections):
-    a, b = g.property("n_id_a"), g.property("n_id_b")
-    junctions = [int(e) for e in g.junction_vids()]
+def _actual_junctions(mtg, data_structure, sections):
+    a, b = mtg.property("n_id_a"), mtg.property("n_id_b")
+    junctions = [int(e) for e in mtg.junction_vids()]
     tails, heads = [int(a[e]) for e in junctions], [int(b[e]) for e in junctions]
-    parent_sections, child_sections = ds.sections_of(tails), ds.sections_of(heads)
-    families = _family(g, tails)
+    parent_sections, child_sections = data_structure.sections_of(tails), data_structure.sections_of(heads)
+    families = _family(mtg, tails)
     out = {}
     for tail, head, parent, child, family in zip(tails, heads, parent_sections.tolist(), child_sections.tolist(),
                                                  families.tolist()):
@@ -128,26 +128,26 @@ def _actual_junctions(g, ds, sections):
 
 @pytest.mark.parametrize("plant_index", [0, 1], ids=["whole shoot", "sheath without anatomy"])
 def test_the_seed_gets_the_stems_anatomy_and_the_hidden_elements_none(plants, plant_index):
-    ds = plants
-    g = ds.structure
-    plant = int(ds.entity_ids("Plant")[plant_index])
-    roles = _roles(g, plant)
-    template = g.property("anatomy_template")
+    data_structure = plants
+    mtg = data_structure.structure
+    plant = int(data_structure.entity_ids("Plant")[plant_index])
+    roles = _roles(mtg, plant)
+    template = mtg.property("anatomy_template")
     assert template[roles["seed"][0]] == template[roles["subcrown"][0]] >= 0       # the stem preset, one class
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     assert all(not owners.get(v) and template.get(v, -1.) == -1. for v in roles["hidden"])
     assert bool(owners.get(roles["sheath"][0])) == (plant_index == 0)
 
 
 @pytest.mark.parametrize("plant_index", [0, 1], ids=["whole shoot", "sheath without anatomy"])
 def test_the_conduits_are_joined_from_the_root_tips_to_the_leaf_across_the_hidden_elements(plants, plant_index):
-    ds = plants
-    g = ds.structure
-    plant = int(ds.entity_ids("Plant")[plant_index])
-    roles = _roles(g, plant)
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    data_structure = plants
+    mtg = data_structure.structure
+    plant = int(data_structure.entity_ids("Plant")[plant_index])
+    roles = _roles(mtg, plant)
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
-    expected, actual = _expected_junctions(g, sections), _actual_junctions(g, ds, set(sections))
+    expected, actual = _expected_junctions(mtg, sections), _actual_junctions(mtg, data_structure, set(sections))
     assert actual == {key: pairs for key, pairs in expected.items() if pairs}       # each pair once, nothing else
     # the pass-through junctions: across the internode's hidden element, the sheath's (and its element without
     # anatomy), the blade's
@@ -156,11 +156,11 @@ def test_the_conduits_are_joined_from_the_root_tips_to_the_leaf_across_the_hidde
         if plant_index == 0 else {(roles["crown"][0], roles["leaf"][0])}
     for parent, child in crossings:
         for family in (0, 1):
-            assert len(actual[(parent, child, family)]) >= max(len(_vessels(g, owners[parent], family)),
-                                                              len(_vessels(g, owners[child], family))) > 0
+            assert len(actual[(parent, child, family)]) >= max(len(_vessels(mtg, owners[parent], family)),
+                                                              len(_vessels(mtg, owners[child], family))) > 0
     # every conduit is joined to its neighbours' (upstream and downstream), and the conduits form one network from
     # the root tips to the leaf's tip, by family
-    conduits = {v for s in sections for v in owners[s] if _family(g, [v])[0] in (0, 1)}
+    conduits = {v for s in sections for v in owners[s] if _family(mtg, [v])[0] in (0, 1)}
     joined_up, joined_down = set(), set()
     for (parent, child, family), pairs in actual.items():
         joined_down |= {tail for tail, _ in pairs}
@@ -173,7 +173,7 @@ def test_the_conduits_are_joined_from_the_root_tips_to_the_leaf_across_the_hidde
         if s in downstream:
             assert mine <= joined_down, f"section {s}: a conduit without downstream junction"
     for family in (0, 1):
-        nodes = sorted(v for v in conduits if _family(g, [v])[0] == family)
+        nodes = sorted(v for v in conduits if _family(mtg, [v])[0] == family)
         index = {v: i for i, v in enumerate(nodes)}
         edges = np.array([(index[a], index[b]) for (_, _, f), pairs in actual.items() if f == family
                           for a, b in pairs]).reshape(-1, 2)
@@ -185,19 +185,19 @@ def test_the_conduits_are_joined_from_the_root_tips_to_the_leaf_across_the_hidde
             assert component(tip) & leaf_tip, f"family {family}: the root tip {tip} is not joined to the leaf"
 
 
-def _vessels(g, compartments, family):
-    return [v for v, f in zip(compartments, _family(g, compartments)) if f == family]
+def _vessels(mtg, compartments, family):
+    return [v for v, f in zip(compartments, _family(mtg, compartments)) if f == family]
 
 
 def test_a_pass_through_junction_spans_the_hidden_elements(plants):
-    ds = plants
-    g = ds.structure
-    plant = int(ds.entity_ids("Plant")[1])
-    roles = _roles(g, plant)
-    a, b, length = g.property("n_id_a"), g.property("n_id_b"), g.property("edge_length")
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    data_structure = plants
+    mtg = data_structure.structure
+    plant = int(data_structure.entity_ids("Plant")[1])
+    roles = _roles(mtg, plant)
+    a, b, length = mtg.property("n_id_a"), mtg.property("n_id_b"), mtg.property("edge_length")
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     crown, leaf = set(owners[roles["crown"][0]]), set(owners[roles["leaf"][0]])
-    spanning = [e for e in g.junction_vids() if int(a[e]) in crown and int(b[e]) in leaf]
+    spanning = [e for e in mtg.junction_vids() if int(a[e]) in crown and int(b[e]) in leaf]
     # half the crown element, the sheath's hidden element and element (no anatomy), the blade's hidden element, half
     # the leaf element (mm)
     assert spanning and np.allclose([length[e] for e in spanning],
@@ -209,31 +209,31 @@ def test_a_replaced_ancestor_is_joined_again_across_the_hidden_elements():
     its descendants across the hidden elements; nothing dangles, nothing is doubled; the junctions' length is kept as
     the elements grow."""
     table = planting([Planting()], None, plant_scenarios=[NO_SHEATH])
-    ds = initiated(table, WheatSeedling, GranapAnatomy).data_structure
-    g = ds.structure
-    WheatSeedling(data_structure=ds)                  # first: it holds the segments' lengths, the hidden elements'
-    anatomy = GranapAnatomy(data_structure=ds)
-    plant = int(ds.entity_ids("Plant")[0])
-    roles = _roles(g, plant)
+    data_structure = initiated(table, WheatSeedling, GranapAnatomy).data_structure
+    mtg = data_structure.structure
+    WheatSeedling(data_structure=data_structure)                  # first: it holds the segments' lengths, the hidden elements'
+    anatomy = GranapAnatomy(data_structure=data_structure)
+    plant = int(data_structure.entity_ids("Plant")[0])
+    roles = _roles(mtg, plant)
     top = roles["subcrown"][-1]
-    stem_radius = ds.get("stem_radius").copy()
-    stem_radius[ds.entity_ids("SubOrgan") == top] = 1.5 * STEM_RADIUS            # another class: replaced
-    ds.set("stem_radius", stem_radius)
+    stem_radius = data_structure.get("stem_radius").copy()
+    stem_radius[data_structure.entity_ids("SubOrgan") == top] = 1.5 * STEM_RADIUS            # another class: replaced
+    data_structure.set("stem_radius", stem_radius)
     anatomy()
     assert anatomy.last_update == {"emerged": [], "replaced": [top]}
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
-    expected, actual = _expected_junctions(g, sections), _actual_junctions(g, ds, set(sections))
+    expected, actual = _expected_junctions(mtg, sections), _actual_junctions(mtg, data_structure, set(sections))
     assert actual == {key: pairs for key, pairs in expected.items() if pairs}
     assert all(actual[(top, roles["crown"][0], family)] for family in (0, 1))
-    a, b = g.property("n_id_a"), g.property("n_id_b")
-    assert all(g.has_vertex(int(a[e])) and g.has_vertex(int(b[e])) for e in g.junction_vids())
-    edge_length = ds.get("edge_length")
-    edges = np.asarray(ds.edges(), dtype=np.int64).reshape(-1, 2)
+    a, b = mtg.property("n_id_a"), mtg.property("n_id_b")
+    assert all(mtg.has_vertex(int(a[e])) and mtg.has_vertex(int(b[e])) for e in mtg.junction_vids())
+    edge_length = data_structure.get("edge_length")
+    edges = np.asarray(data_structure.edges(), dtype=np.int64).reshape(-1, 2)
     across = np.isin(edges[:, 0], owners[top]) & np.isin(edges[:, 1], owners[roles["crown"][0]])
     assert across.any() and np.allclose(edge_length[across], (0.5 * (ELEMENT + ELEMENT) + HIDDEN) * 1e3)
     anatomy()                                                                    # a step more: kept
-    assert np.allclose(ds.get("edge_length")[across], (0.5 * (ELEMENT + ELEMENT) + HIDDEN) * 1e3)
+    assert np.allclose(data_structure.get("edge_length")[across], (0.5 * (ELEMENT + ELEMENT) + HIDDEN) * 1e3)
 
 
 class UngrownSheathSeedling(WheatSeedling):
@@ -246,32 +246,32 @@ def test_a_section_without_length_gets_its_anatomy_when_it_grows():
     junctions spanning it, as a hidden element. Once it has a length, it gets its anatomy, joined to its nearest
     ancestor and descendant with one; the junctions across it are gone; the conduits stay one network."""
     table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
-    ds = initiated(table, UngrownSheathSeedling, GranapAnatomy).data_structure
-    g = ds.structure
-    plant = int(ds.entity_ids("Plant")[0])
-    roles = _roles(g, plant)
+    data_structure = initiated(table, UngrownSheathSeedling, GranapAnatomy).data_structure
+    mtg = data_structure.structure
+    plant = int(data_structure.entity_ids("Plant")[0])
+    roles = _roles(mtg, plant)
     sheath, crown, leaf = roles["sheath"][0], roles["crown"][0], roles["leaf"][0]
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
-    assert not owners.get(sheath) and g.property("anatomy_template").get(sheath, -1.) == -1.
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
+    assert not owners.get(sheath) and mtg.property("anatomy_template").get(sheath, -1.) == -1.
     sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
-    actual = _actual_junctions(g, ds, set(sections))
+    actual = _actual_junctions(mtg, data_structure, set(sections))
     assert all(actual[(crown, leaf, family)] for family in (0, 1))                  # across the ungrown sheath
-    UngrownSheathSeedling(data_structure=ds)
-    anatomy = GranapAnatomy(data_structure=ds)
-    lengths = ds.get("length").copy()
-    lengths[ds.entity_ids("SubOrgan") == sheath] = ELEMENT                           # it grows
-    ds.set("length", lengths)
+    UngrownSheathSeedling(data_structure=data_structure)
+    anatomy = GranapAnatomy(data_structure=data_structure)
+    lengths = data_structure.get("length").copy()
+    lengths[data_structure.entity_ids("SubOrgan") == sheath] = ELEMENT                           # it grows
+    data_structure.set("length", lengths)
     anatomy()
     assert anatomy.last_update == {"emerged": [sheath], "replaced": []}
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     sections = sorted(v for vids in roles.values() for v in vids if owners.get(v))
     assert sheath in sections
-    expected, actual = _expected_junctions(g, sections), _actual_junctions(g, ds, set(sections))
+    expected, actual = _expected_junctions(mtg, sections), _actual_junctions(mtg, data_structure, set(sections))
     assert actual == {key: pairs for key, pairs in expected.items() if pairs}       # each pair once, nothing else
     assert all(actual[(crown, sheath, family)] and actual[(sheath, leaf, family)] for family in (0, 1))
     assert not any(key[:2] == (crown, leaf) for key in actual)
-    a, b = g.property("n_id_a"), g.property("n_id_b")
-    assert all(g.has_vertex(int(a[e])) and g.has_vertex(int(b[e])) for e in g.junction_vids())
+    a, b = mtg.property("n_id_a"), mtg.property("n_id_b")
+    assert all(mtg.has_vertex(int(a[e])) and mtg.has_vertex(int(b[e])) for e in mtg.junction_vids())
 
 
 class UngrownBladeBaseSeedling(WheatSeedling):
@@ -283,26 +283,26 @@ def test_the_leaf_surface_is_on_the_basal_element_with_an_anatomy():
     """A leaf organ's surface is owned by its basal element with an anatomy: not by an element without length (it has
     no anatomy, MECHA no height for it); once that element grows, the surface moves to it, nothing dangling."""
     table = planting([Planting()], None, plant_scenarios=[WHOLE_SHOOT])
-    ds = initiated(table, UngrownBladeBaseSeedling, GranapAnatomy).data_structure
-    g = ds.structure
-    plant = int(ds.entity_ids("Plant")[0])
-    first, second = _roles(g, plant)["leaf"]
-    organ = int(g.complex_at_scale(first, g.scales.Organ))
+    data_structure = initiated(table, UngrownBladeBaseSeedling, GranapAnatomy).data_structure
+    mtg = data_structure.structure
+    plant = int(data_structure.entity_ids("Plant")[0])
+    first, second = _roles(mtg, plant)["leaf"]
+    organ = int(mtg.complex_at_scale(first, mtg.scales.Organ))
 
     def surface_owner():
-        surface = g.property("leaf_surface")[organ]
-        owners = g.compartments_by_owner(g.scales.SubOrgan)
+        surface = mtg.property("leaf_surface")[organ]
+        owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
         return [v for v in (first, second) if surface in owners.get(v, [])]
 
-    assert not g.compartments_by_owner(g.scales.SubOrgan).get(first) and surface_owner() == [second]
-    UngrownBladeBaseSeedling(data_structure=ds)
-    anatomy = GranapAnatomy(data_structure=ds)
-    lengths = ds.get("length").copy()
-    lengths[ds.entity_ids("SubOrgan") == first] = ELEMENT                            # it grows
-    ds.set("length", lengths)
+    assert not mtg.compartments_by_owner(mtg.scales.SubOrgan).get(first) and surface_owner() == [second]
+    UngrownBladeBaseSeedling(data_structure=data_structure)
+    anatomy = GranapAnatomy(data_structure=data_structure)
+    lengths = data_structure.get("length").copy()
+    lengths[data_structure.entity_ids("SubOrgan") == first] = ELEMENT                            # it grows
+    data_structure.set("length", lengths)
     anatomy()
     assert anatomy.last_update["emerged"] == [first] and surface_owner() == [first]
-    assert len(g.property("leaf_surface")) == 2                                      # the blade's and the sheath's
-    a, b = g.property("n_id_a"), g.property("n_id_b")
-    stomatal = [c for c, path in g.property("network_path").items() if path == 6 and g.has_vertex(int(c))]
-    assert all(g.has_vertex(int(a[c])) and g.has_vertex(int(b[c])) for c in stomatal)
+    assert len(mtg.property("leaf_surface")) == 2                                      # the blade's and the sheath's
+    a, b = mtg.property("n_id_a"), mtg.property("n_id_b")
+    stomatal = [c for c, path in mtg.property("network_path").items() if path == 6 and mtg.has_vertex(int(c))]
+    assert all(mtg.has_vertex(int(a[c])) and mtg.has_vertex(int(b[c])) for c in stomatal)

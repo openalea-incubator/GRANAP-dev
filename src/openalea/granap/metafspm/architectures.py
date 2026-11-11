@@ -33,15 +33,15 @@ SCALES = ScalesConfig()
 ROOT_SEGMENTS = [[0.55e-3, 2e-4, 0.]]                  # GRANAP's monocot root preset, one 200 µm section
 
 
-def segment_chain(g, organ, label, segments, bearer=None):
+def segment_chain(mtg, organ, label, segments, bearer=None):
     """SubOrgan segments [(radius, length, distance_from_tip)] under *organ* (metafspm's MPG.add_organ), each the
     successor of the previous; the first branched ('+') on the segment *bearer* when given (a lateral), else the
     organ's first (metafspm's MPG.add_element). Their variables (SegmentArchitecture's) are written on them."""
     previous, out = None, []
     for radius, length, distance in segments:
         values = dict(radius=float(radius), length=float(length), distance_from_tip=float(distance))
-        previous = (g.add_element(label, parent=previous, **values) if previous is not None else
-                    g.add_element(label, complex=organ, parent=bearer, **values))
+        previous = (mtg.add_element(label, parent=previous, **values) if previous is not None else
+                    mtg.add_element(label, complex=organ, parent=bearer, **values))
         out.append(previous)
     return out
 
@@ -75,13 +75,13 @@ class RootAxis(SegmentArchitecture):
     scenario_keys = ("root_segments", "root_laterals")
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
+    def initiate_plant(cls, mtg, plant, parameters):
         p = parameters or {}
-        label = g.labels.SubOrgan.RootSegment
-        main = segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), label,
+        label = mtg.labels.SubOrgan.RootSegment
+        main = segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), label,
                              p.get("root_segments", ROOT_SEGMENTS))
         for bearer, segments in p.get("root_laterals", []):
-            segment_chain(g, g.add_organ(plant, "RootInternode", kind="Root"), label, segments,
+            segment_chain(mtg, mtg.add_organ(plant, "RootInternode", complex_label="Root"), label, segments,
                           bearer=main[bearer])
 
     @segmentation
@@ -89,16 +89,16 @@ class RootAxis(SegmentArchitecture):
         """Each axis that its emerged plant's root_growth lists gets a new segment at its tip (its last segment), of the
         radius and length given, at distance 0 from the tip; the axis' other segments get that much farther from it
         (an axis listed twice grows two segments, one after the other). The new segments are one NewNodes batch."""
-        ds = self.data_structure
-        node_ids = np.asarray(ds.entity_ids("node"), dtype=np.int64)
-        axis_of_node = np.asarray(ds.owner("Axis"), dtype=np.int64)
-        plant_of_axis = np.asarray(ds.owner("Plant", of="Axis"), dtype=np.int64)
+        data_structure = self.data_structure
+        node_ids = np.asarray(data_structure.entity_ids("node"), dtype=np.int64)
+        axis_of_node = np.asarray(data_structure.owner("Axis"), dtype=np.int64)
+        plant_of_axis = np.asarray(data_structure.owner("Plant", of="Axis"), dtype=np.int64)
         tip_of_axis = np.full(plant_of_axis.size, -1, dtype=np.int64)       # each axis' last segment (its largest id)
         np.maximum.at(tip_of_axis, axis_of_node[axis_of_node >= 0], node_ids[axis_of_node >= 0])
         emerged = set(self.active_ids("Plant").tolist())
         new_distance = np.array(distance_from_tip, dtype=float)
         parents, radii, lengths, distances, axes_grown = [], [], [], [], []
-        for plant_index, (plant, growth) in enumerate(zip(ds.entity_ids("Plant").tolist(),
+        for plant_index, (plant, growth) in enumerate(zip(data_structure.entity_ids("Plant").tolist(),
                                                           self.parameter_values("root_growth", "Plant"))):
             if plant not in emerged or not growth:
                 continue
@@ -116,7 +116,7 @@ class RootAxis(SegmentArchitecture):
                 axes_grown.append(axis_index)
         return {"distance_from_tip": new_distance,
                 "new_segments": NewNodes(parent=np.asarray(parents, dtype=np.int64), edge="<",
-                                         label=ds.structure.labels.SubOrgan.RootSegment,
+                                         label=data_structure.structure.labels.SubOrgan.RootSegment,
                                          values={"radius": np.asarray(radii), "length": np.asarray(lengths),
                                                  "distance_from_tip": np.asarray(distances)})}
 
@@ -127,10 +127,10 @@ class Needle(SegmentArchitecture):
     scenario_keys = ("leaf_elements", "leaf_element_length", "leaf_radius")
 
     @classmethod
-    def initiate_plant(cls, g, plant, parameters):
+    def initiate_plant(cls, mtg, plant, parameters):
         p = parameters or {}
         n, length, radius = int(p.get("leaf_elements", 1)), p.get("leaf_element_length", 2e-4), p.get("leaf_radius",
                                                                                                         0.6e-3)
-        organ = g.add_organ(plant, "Leaf", kind="Shoot")
-        segment_chain(g, organ, g.labels.SubOrgan.LeafElement,
+        organ = mtg.add_organ(plant, "Leaf", complex_label="Shoot")
+        segment_chain(mtg, organ, mtg.labels.SubOrgan.LeafElement,
                       [(radius, length, (n - 1 - i) * length) for i in range(n)])

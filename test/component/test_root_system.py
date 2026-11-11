@@ -32,41 +32,41 @@ class Anatomy(GranapAnatomy):
 @pytest.fixture(scope="module")
 def plant():
     population = initiated(planting(), SmallRootSystem, Anatomy)
-    g, plants = population.data_structure.structure, population.plants
-    ds = population.data_structure
-    return g, plants[0], ds
+    mtg, plants = population.data_structure.structure, population.plants
+    data_structure = population.data_structure
+    return mtg, plants[0], data_structure
 
 
-def _segments(g):
-    return sorted(int(v) for v in g.property("anatomy_class"))
+def _segments(mtg):
+    return sorted(int(v) for v in mtg.property("anatomy_class"))
 
 
 def test_each_class_has_one_template_and_each_segment_its_own_copy(plant):
-    g, _, ds = plant
-    segments = _segments(g)
-    assert len(segments) == 6 and len(template_registry(g)) == 2
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    mtg, _, data_structure = plant
+    segments = _segments(mtg)
+    assert len(segments) == 6 and len(template_registry(mtg)) == 2
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     by_class = {}
     for segment in segments:
-        by_class.setdefault(g.property("anatomy_class")[segment], []).append(segment)
+        by_class.setdefault(mtg.property("anatomy_class")[segment], []).append(segment)
     for key, members in by_class.items():
-        template = Anatomy.library.template(g, key)
-        expected = len(template.cell_layer) + len(template.apoplast["kind"][0])
+        template = Anatomy.library.template(mtg, key)
+        expected = len(template.cell_layer) + len(template.apoplast["compartment_type"][0])
         assert all(len(owners[s]) == expected for s in members)
     all_compartments = [v for s in segments for v in owners[s]]
-    assert len(all_compartments) == len(set(all_compartments)) == ds.n_nodes()     # disjoint copies
-    template_of = g.property("template")
-    cells = ds.entity_ids("Cell")
-    assert len(cells) == sum(len(Anatomy.library.template(g, g.property("anatomy_class")[s]).cell_layer)
+    assert len(all_compartments) == len(set(all_compartments)) == data_structure.n_nodes()     # disjoint copies
+    template_of = mtg.property("template")
+    cells = data_structure.entity_ids("Cell")
+    assert len(cells) == sum(len(Anatomy.library.template(mtg, mtg.property("anatomy_class")[s]).cell_layer)
                              for s in segments)
-    assert "cell__polygon" not in g.properties() or not set(cells) & set(g.property("cell__polygon"))
-    assert {template_of[int(c)] for c in cells} == {t.index for t in template_registry(g).values()}
+    assert "cell__polygon" not in mtg.properties() or not set(cells) & set(mtg.property("cell__polygon"))
+    assert {template_of[int(c)] for c in cells} == {t.index for t in template_registry(mtg).values()}
 
 
 def test_vessels_are_numbered_within_each_section(plant):
-    g, _, ds = plant
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
-    v_id, fam, tis = g.property("vessel_id"), g.property("family"), g.property("tissue")
+    mtg, _, data_structure = plant
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
+    v_id, fam, tis = mtg.property("vessel_id"), mtg.property("family"), mtg.property("tissue")
     for segment, compartments in owners.items():
         protoplasts = [v for v in compartments if v in v_id]
         conducting = [v for v in protoplasts if tis[v] in CONDUCTING]
@@ -77,15 +77,15 @@ def test_vessels_are_numbered_within_each_section(plant):
 
 
 def test_successive_sections_are_joined_vessel_to_vessel(plant):
-    g, _, ds = plant
-    junctions = g.junction_vids()
-    a, b, label, fam = g.property("n_id_a"), g.property("n_id_b"), g.property("label"), g.property("family")
-    owners = g.compartments_by_owner(g.scales.SubOrgan)
+    mtg, _, data_structure = plant
+    junctions = mtg.junction_vids()
+    a, b, label, fam = mtg.property("n_id_a"), mtg.property("n_id_b"), mtg.property("label"), mtg.property("family")
+    owners = mtg.compartments_by_owner(mtg.scales.SubOrgan)
     section_of = {v: s for s, comps in owners.items() for v in comps}
     links = {}
     for e in junctions:
         assert fam[int(a[e])] == fam[int(b[e])]                                     # xylem to xylem, phloem to phloem
-        expected = g.labels.Connection.Apoplastic if fam[int(a[e])] == 0 else g.labels.Connection.Symplastic
+        expected = mtg.labels.Connection.Apoplastic if fam[int(a[e])] == 0 else mtg.labels.Connection.Symplastic
         assert label[e] == expected
         links.setdefault((section_of[int(a[e])], section_of[int(b[e])]), []).append(e)
     assert len(links) == 5                                                           # 3 along the main root, 1 to
@@ -98,11 +98,11 @@ def test_successive_sections_are_joined_vessel_to_vessel(plant):
 
 
 def test_the_hydraulic_graph_holds_every_compartment_and_connection(plant):
-    g, _, ds = plant
-    view = ds.to_graph_view()
-    n_connections = sum(1 for v, s in g.view("scale").items() if s == g.scales.Connection
-                        and not g.view("isanchor").get(v, False))
-    assert view.incidence.shape == (ds.n_nodes(), ds.n_edges()) and ds.n_edges() == n_connections
+    mtg, _, data_structure = plant
+    view = data_structure.to_graph_view()
+    n_connections = sum(1 for v, s in mtg.view("scale").items() if s == mtg.scales.Connection
+                        and not mtg.view("isanchor").get(v, False))
+    assert view.incidence.shape == (data_structure.n_nodes(), data_structure.n_edges()) and data_structure.n_edges() == n_connections
 
 
 @dataclass
@@ -113,8 +113,8 @@ class Hydraulics(FunctionalComponent):
 
     @graph_system(node_unknowns=["psi"], edge_unknowns=["flux"], solver="newton")
     class _flow:
-        soil = boundary_set(filters={"is_epidermis": ">0"}, kind="robin", value="soil_psi", weight=0.5)
-        collar = boundary_set(filters={"is_collar_xylem": ">0"}, kind="dirichlet", value="collar_psi")
+        soil = boundary_set(where={"is_epidermis": ">0"}, condition="robin", value="soil_psi", weight=0.5)
+        collar = boundary_set(where={"is_collar_xylem": ">0"}, condition="dirichlet", value="collar_psi")
 
         @node_balance(field="psi")
         def _balance(self, flux):
@@ -126,20 +126,20 @@ class Hydraulics(FunctionalComponent):
 
 
 def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
-    g, _, ds = plant
-    ds.simulation_time_step = 3600.
-    tissue = g.property("tissue")
-    nodes = ds.entity_ids("node")
-    first = _segments(g)[0]
-    section = ds.entity_ids("SubOrgan")[ds.owner("SubOrgan")]
+    mtg, _, data_structure = plant
+    data_structure.simulation_time_step = 3600.
+    tissue = mtg.property("tissue")
+    nodes = data_structure.entity_ids("node")
+    first = _segments(mtg)[0]
+    section = data_structure.entity_ids("SubOrgan")[data_structure.owner("SubOrgan")]
     epidermis = np.array([tissue.get(int(v)) == "epidermis" for v in nodes], dtype=float)
     xylem = np.array([tissue.get(int(v)) in ("metaxylem", "protoxylem", "xylem") for v in nodes])
     collar = (xylem & (section == first)).astype(float)
     for name, values in (("is_epidermis", epidermis), ("is_collar_xylem", collar),
                          ("soil_psi", np.full(nodes.size, -0.2)), ("collar_psi", np.full(nodes.size, -1.))):
-        ds.register(name, values, location="node")
-    Hydraulics(data_structure=ds)()
-    B = ds.to_graph_view().incidence
+        data_structure.register(name, values, location="node")
+    Hydraulics(data_structure=data_structure)()
+    B = data_structure.to_graph_view().incidence
     import scipy.sparse as sp
     from scipy.sparse.linalg import spsolve
     A = (B @ B.T + sp.diags(0.5 * epidermis)).tolil()
@@ -148,14 +148,14 @@ def test_a_graph_system_solves_on_the_root_systems_anatomies(plant):
         A.rows[i], A.data[i] = [i], [1.]
         rhs[i] = -1.
     expected = spsolve(A.tocsr(), rhs)
-    np.testing.assert_allclose(ds.get("psi"), expected, rtol=1e-8, atol=1e-10)
-    assert -1. <= ds.get("psi").min() and ds.get("psi").max() <= -0.2
+    np.testing.assert_allclose(data_structure.get("psi"), expected, rtol=1e-8, atol=1e-10)
+    assert -1. <= data_structure.get("psi").min() and data_structure.get("psi").max() <= -0.2
 
 
 def test_a_class_differs_only_by_its_own_parametrization(plant):
-    g, _, ds = plant
-    main = Anatomy.library.template(g, (1.1, 0., 0.))
-    lateral = Anatomy.library.template(g, LATERAL)
+    mtg, _, data_structure = plant
+    main = Anatomy.library.template(mtg, (1.1, 0., 0.))
+    lateral = Anatomy.library.template(mtg, LATERAL)
     assert len(lateral.cell_layer) < len(main.cell_layer)          # two cortex layers instead of five
     unchanged = AnatomyLibrary().template(MPG(), (0.6, 0., 0.))     # without a parametrization: the preset
     assert len(unchanged.cell_layer) == len(main.cell_layer)

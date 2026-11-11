@@ -36,30 +36,30 @@ class Network(FunctionalComponent):
 def section():
     organ = RootAnatomy(OrganInputData.for_root(), seed=0)
     organ.generate_cells()
-    g = organ.mpg
+    mtg = organ.mpg
     organ.export_to_adjencymatrix()
     graph = organ.graph                                       # GRANAP's view, built before the conversion
-    g.convert_properties_to_arraydict()
-    ds = MPGDataStructure(g, from_scale=g.scales.SubOrgan, nodes="Compartment")
-    ds.simulation_time_step = 3600.
-    Network(data_structure=ds)
-    return organ, g, ds, graph
+    mtg.convert_properties_to_arraydict()
+    data_structure = MPGDataStructure(mtg, from_scale=mtg.scales.SubOrgan, nodes="Compartment")
+    data_structure.simulation_time_step = 3600.
+    Network(data_structure=data_structure)
+    return organ, mtg, data_structure, graph
 
 
 def test_the_network_columns_are_read_as_variables_on_every_node_and_edge(section):
-    organ, g, ds, graph = section
+    organ, mtg, data_structure, graph = section
     for name in ("section_x", "wall_length", "cell_area"):
-        assert ds.has(name) and ds.get(name).shape == (ds.n_nodes(),)
+        assert data_structure.has(name) and data_structure.get(name).shape == (data_structure.n_nodes(),)
     for name in ("edge_length", "edge_dx", "network_path"):
-        assert ds.has(name) and ds.get(name).shape == (ds.n_edges(),)
-        assert not np.isnan(ds.get(name)).any()
+        assert data_structure.has(name) and data_structure.get(name).shape == (data_structure.n_edges(),)
+        assert not np.isnan(data_structure.get(name)).any()
 
 
 def test_the_variables_hold_the_exporters_values(section):
-    organ, g, ds, graph = section
-    mecha = g.property("mecha_index")
-    nodes = ds.entity_ids("node")
-    x, wall_length, area = ds.get("section_x"), ds.get("wall_length"), ds.get("cell_area")
+    organ, mtg, data_structure, graph = section
+    mecha = mtg.property("mecha_index")
+    nodes = data_structure.entity_ids("node")
+    x, wall_length, area = data_structure.get("section_x"), data_structure.get("wall_length"), data_structure.get("cell_area")
     for i, v in enumerate(nodes.tolist()):
         attrs = graph.nodes[int(mecha[v])]
         assert x[i] == attrs["position"][0]
@@ -67,9 +67,9 @@ def test_the_variables_hold_the_exporters_values(section):
             assert area[i] == attrs["area"] and wall_length[i] == 0.          # extensive: 0 where absent
         else:
             assert wall_length[i] == attrs["length"] and area[i] == 0.
-    u, w = g.property("edge_u"), g.property("edge_v")
-    edges = ds.entity_ids("edge")
-    length, dx, path = ds.get("edge_length"), ds.get("edge_dx"), ds.get("network_path")
+    u, w = mtg.property("edge_u"), mtg.property("edge_v")
+    edges = data_structure.entity_ids("edge")
+    length, dx, path = data_structure.get("edge_length"), data_structure.get("edge_dx"), data_structure.get("network_path")
     for i, e in enumerate(edges.tolist()):
         attrs = graph.edges[int(u[e]), int(w[e])]
         assert length[i] == attrs["length"] and path[i] == PATH_CODES[attrs["path"]]
