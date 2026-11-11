@@ -148,7 +148,7 @@ def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, o
     """Generate one root section from *preset*'s parameters (an OrganInputData preset of a root: for_root, the
     monocot root, or for_dicot_root) changed by *parameters* ({section: {field: value}}, lengths in mm), with the
     random draws of *seed* (the same seed gives the same section). *outputs*: a folder the section is saved in
-    (run.json, the run's status and versions; scenario.json, what it was built with; Plant/<model>/summaries.csv;
+    (run.json, the run's status and provenance; scenario.json, what it was built with; Plant/<model>/summaries.csv;
     frames.fspm.zip, the section as an encoding3d frame: the frames folder packed at the end, the archive checked,
     then the folder removed), None for none. *recorder*: instead, a metafspm SceneRecorder of your
     own (e.g. frames only, filtered by its frame_options).
