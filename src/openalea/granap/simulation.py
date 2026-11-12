@@ -12,7 +12,8 @@ GRANAP for users: a cross-section generated in a few lines, its tissues as table
     simulate({"cortex": {"n_layers": 3}})                 three cortex layers instead of five
     simulate(preset="for_dicot_root", seed=2)             another preset, other random draws
     simulate(outputs="outputs")                           the section saved in ./outputs: run.json, scenario.json,
-                                                          Plant/<model>/summaries.csv, frames.fspm.zip (encoding3d)
+                                                          summaries/Plant/<model>/summaries.csv, frames.fspm.zip
+                                                          (encoding3d)
 
 GRANAP's parameters are grouped by section of the anatomy (cortex, stele, xylem, ...): a change is written
 {section: {field: value}}. Lengths are in mm, as GRANAP's; the summary gives cell sizes in µm.
@@ -148,7 +149,8 @@ def simulate(parameters: dict = None, preset: str = "for_root", seed: int = 0, o
     """Generate one root section from *preset*'s parameters (an OrganInputData preset of a root: for_root, the
     monocot root, or for_dicot_root) changed by *parameters* ({section: {field: value}}, lengths in mm), with the
     random draws of *seed* (the same seed gives the same section). *outputs*: a folder the section is saved in
-    (run.json, the run's status and provenance; scenario.json, what it was built with; Plant/<model>/summaries.csv;
+    (run.json, the run's status and provenance; scenario.json, what it was built with;
+    summaries/Plant/<model>/summaries.csv;
     frames.fspm.zip, the section as an encoding3d frame: the frames folder packed at the end, the archive checked,
     then the folder removed), None for none. *recorder*: instead, a metafspm SceneRecorder of your
     own (e.g. frames only, filtered by its frame_options).
