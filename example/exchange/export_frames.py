@@ -1,0 +1,64 @@
+"""
+Exporting root cross-sections as encoding3d files: one frame per anatomy, the format the other FSPM platforms (CPlantBox,
+GroIMP, VirtualPlantLab) and ParaView read.
+
+    python export_frames.py [--presets P ...]          frames in ./outputs/<preset>/frames.fspm.zip: frame_000000.glb
+
+Each section is the one openalea.granap.simulation.simulate builds from a preset (for_root: a monocot root,
+for_dicot_root: a dicot one), recorded by metafspm's SceneRecorder (frames only, no summaries) with run.json and
+scenario.json beside them. A frame holds the section's whole MPG: the segment, its layers, cells and compartments,
+the walls and connections between them, with their variables (declared units, kinds), and the cells' polygons as a
+display mesh (GranapAnatomy.display_triangles). The frames folder is packed into frames.fspm.zip at the end (the
+archive checked, then the folder removed), and each frame is checked with encoding3d's validator.
+
+A second, filtered export shows logging: the segment and its compartments only, with their tissue, kind and area
+(and the cells' polygons), in ./outputs/log/<preset>/frames.fspm.zip (outputs only: such frames are not reimported).
+
+Open a preset's frames.fspm.zip in ParaView with encoding3d's reader plugin (encoding3d/paraview/plugin_encoding3d.py),
+colour by Compartment.tissue_code (or cell_area); import_frames.py reads the files back.
+"""
+import argparse
+import os
+
+from openalea.encoding3d.validate import validate_file
+from openalea.metafspm import SceneRecorder
+
+from openalea.granap.simulation import simulate
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUTPUTS = os.path.join(HERE, "outputs")
+PRESETS = ("for_root", "for_dicot_root")
+# a log of the section: its segment and compartments, their tissue, kind and area
+LOG = dict(scales=["SubOrgan", "Compartment"], variables=["tissue", "compartment_type", "cell_area"])
+
+
+def export(presets=PRESETS, outputs: str = OUTPUTS, options: dict = None) -> list:
+    """Build each preset's section and record it as a frame (filtered by *options*, e.g. LOG) in *outputs*/<preset>;
+    the frames' paths (in each preset's frames.fspm.zip)."""
+    paths = []
+    for preset in presets:
+        folder = os.path.join(outputs, preset)
+        simulate(preset=preset, recorder=SceneRecorder(folder, summaries=False, frame_period="step",
+                                                       display_period="step", frame_options=options,
+                                                       pack_at_finish=True))                   # its frame, packed
+        paths.append(os.path.join(folder, "frames.fspm.zip", "frame_000000.glb"))
+    return paths
+
+
+def main():
+    parser = argparse.ArgumentParser(description="GRANAP's sections as encoding3d frames, one per preset")
+    parser.add_argument("--presets", nargs="+", default=list(PRESETS))
+    presets = parser.parse_args().presets
+    for path in export(presets):
+        report = validate_file(path)
+        print(f"{path} ({os.path.getsize(os.path.dirname(path)) / 1e6:.1f} MB packed): encoding3d validator "
+              f"{len(report.errors)} error(s), "
+              f"{len(report.warnings)} warning(s)")
+    for preset, path in zip(presets, export(presets, os.path.join(OUTPUTS, "log"), options=LOG)):
+        report = validate_file(path)
+        print(f"logged {preset} (scales {LOG['scales']}, {len(LOG['variables'])} variables): "
+              f"{os.path.getsize(os.path.dirname(path)) / 1e6:.1f} MB packed, {len(report.errors)} error(s)")
+
+
+if __name__ == "__main__":
+    main()

@@ -38,6 +38,16 @@ CellSet's ``group`` integers are the same integers MECHA calls ``cgroup``
 (``anatomy_writer.CGROUP_MAP`` / MECHA's ``hydraulic_cell.CGROUP_TO_TYPE``), so
 they are carried straight through onto ``Cell.cgroup`` rather than being
 re-derived from the tag string.
+
+GRANAR's (and GRANAP's ``AnatomyWriter``) ``<granardata>`` files use the same
+schema with two differences the reader resolves from the root element:
+
+* their coordinates are already in millimetres, so the default scale is 1
+  for them and 0.001 for a ``<cellsetdata>`` file (micrometres);
+* their ``<cellgroups>`` list several names for one group id (4 is cortex,
+  then ``inter_cellular_space`` and ``aerenchyma``; 3 is endodermis, then
+  ``passage_cell``...).  The first name listed is the tissue the id stands
+  for, the later ones aliases sharing its cgroup, so the first one is kept.
 """
 
 from __future__ import annotations
@@ -82,6 +92,9 @@ _TAG_ALIASES: Dict[str, str] = {
     "intercellular space": "air space",
     "unassigned": "parenchyma",
 }
+
+# Coordinate multiplier giving GRANAP's millimetres, by root element.
+DEFAULT_SCALE: Dict[str, float] = {"cellsetdata": 0.001, "granardata": 1.0}
 
 # Rounding used when matching polyline endpoints during ring assembly.  CellSet
 # writes 4 decimals in micrometres; 9 decimals of the scaled value is well below
@@ -189,6 +202,7 @@ class CellSetSection:
     group_names: Dict[int, str] = field(default_factory=dict)
     scale: float = 1.0
     path: Optional[str] = None
+    source_format: str = "cellsetdata"
 
     @property
     def annular_cells(self) -> List[CellSetCell]:
@@ -220,24 +234,33 @@ def normalize_tag(name: Optional[str], group: int) -> str:
     return CELLSET_TAG_BY_GROUP.get(group, "parenchyma")
 
 
-def read_cellset(path: str, *, scale: float = 0.001) -> CellSetSection:
+def section_format(path: str) -> str:
+    """The file's root element: ``"cellsetdata"`` (CellSet) or ``"granardata"`` (GRANAR, GRANAP)."""
+    for _, element in ET.iterparse(path, events=("start",)):
+        return element.tag
+    return "cellsetdata"
+
+
+def read_cellset(path: str, *, scale: Optional[float] = None) -> CellSetSection:
     """Parse a CellSet ``<cellsetdata>`` file into polygons, tags and cgroups.
 
     Args:
-        path:  Path to the CellSet XML file.  The root element name is not
-               checked -- GRANAP's own ``AnatomyWriter.write_to_xml`` emits the
-               same schema under ``<granardata>``, and MECHA's ``parse_cellset``
-               likewise only uses relative xpaths, so both are readable here.
-        scale: Multiplier applied to every coordinate.  The default 0.001
-               converts CellSet's micrometres to GRANAP's millimetres, which is
-               also what MECHA's ``GeometryData.im_scale`` default of 1000
-               expects to read back.
+        path:  Path to the CellSet XML file, or to a GRANAR / GRANAP
+               ``<granardata>`` file (the same schema, see the module docstring).
+        scale: Multiplier applied to every coordinate.  ``None`` takes it from
+               the root element (:data:`DEFAULT_SCALE`): 0.001 converts
+               CellSet's micrometres to GRANAP's millimetres, which is also
+               what MECHA's ``GeometryData.im_scale`` default of 1000 expects
+               to read back; a ``<granardata>`` file is already in millimetres.
 
     Returns:
         A :class:`CellSetSection`.  Coordinates are exact wall points times
         ``scale`` -- deliberately unsmoothed, see the module docstring.
     """
     root = ET.parse(path).getroot()
+    source_format = root.tag if root.tag in DEFAULT_SCALE else "cellsetdata"
+    if scale is None:
+        scale = DEFAULT_SCALE[source_format]
 
     walls: Dict[int, Ring] = {}
     walls_node = root.find("walls")
@@ -258,7 +281,8 @@ def read_cellset(path: str, *, scale: float = 0.001) -> CellSetSection:
         cellgroups = groups_node.find("cellgroups")
         if cellgroups is not None:
             for group in cellgroups.findall("group"):
-                group_names[int(group.get("id"))] = group.get("name") or ""
+                # first name wins: GRANAR lists aliases after the tissue of the id
+                group_names.setdefault(int(group.get("id")), group.get("name") or "")
 
     cells: List[CellSetCell] = []
     cells_node = root.find("cells")
@@ -284,5 +308,6 @@ def read_cellset(path: str, *, scale: float = 0.001) -> CellSetSection:
             )
 
     return CellSetSection(
-        cells=cells, walls=walls, group_names=group_names, scale=scale, path=path
+        cells=cells, walls=walls, group_names=group_names, scale=scale, path=path,
+        source_format=source_format,
     )

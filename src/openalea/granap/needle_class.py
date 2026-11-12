@@ -1821,7 +1821,7 @@ class NeedleAnatomy(Organ):
         
         seat_air_spaces(
             self.all_cells, mesophyll_cells, air_union, air_faces,
-            protect_topology=True,
+            protect_topology=True, snap=self.section_topology,
         )
 
     def _apply_palisade_wall_slits(self, width: float, every: int) -> None:
@@ -1905,7 +1905,7 @@ class NeedleAnatomy(Organ):
         # of being straightened across it.
         seat_air_spaces(
             self.all_cells, palisade_cells, slit_union, slit_faces,
-            protect_topology=True,
+            protect_topology=True, snap=self.section_topology,
         )
 
     @staticmethod

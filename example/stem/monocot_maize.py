@@ -1,17 +1,20 @@
 """Build a maize-like monocot stem (*Zea mays*) and plot it.
 
 Maize stem anatomy — an *atactostele*: collateral 'face' bundles scattered through
-a large parenchymatous pith, wrapped in a graded rind.  Here the vasculature is
-**three radial bundle bands**
+a large parenchymatous ground tissue, under a thin epidermis + 2-layer hypodermis
+(no cortex — the ground tissue / 'stele' runs right up to the hypodermis).  The
+vasculature is **three bundle bands** (measured sizes, µm):
 
-* **inner** (``placement="spaced"``) — larger bundles, *taller than wide*, spread
-  through the inner pith; each with protoxylem + a tear lacuna;
-* **mid** (``placement="even"``) — the biggest bundles, *wider than tall*, with
-  protoxylem + lacuna, half-step offset on the peripheral ring so one sits *between*
-  each rind bundle;
-* **rind** (``placement="even"``) — small bundles, *wider than tall*, on the same
-  peripheral ring **just under the hypodermis** (a ``radius`` that reaches past the
-  pith into the rind), with **no protoxylem and no lacuna**.
+* **large** (``placement="random"``, 76) — 93 × 72 (h × w), 2 metaxylem Ø20,
+  1 protoxylem Ø12, lacuna Ø27, phloem 42 × 29 (w × h); scattered inside;
+* **medium** (``placement="even"``, 64) — 50 × 66, 2 metaxylem Ø20, 1 protoxylem
+  Ø8, lacuna Ø10, phloem 25 × 15; on a peripheral ring, half-step offset so one
+  sits *between* each small bundle;
+* **small** (``placement="even"``, 64) — 30 × 39, 2 metaxylem Ø14, 1 protoxylem
+  Ø6, **no lacuna**; on the outermost ring just under the hypodermis.
+
+Ground-tissue cell diameter: 7.6 µm under the hypodermis -> 28 µm at 130 µm depth
+-> 55 µm at 360 µm depth (then flat to the centre).
 """
 
 import os
@@ -31,60 +34,61 @@ SEED = 0
 # ---------------------------------------------------------------------------
 # Bundle bands.  BASE is the shared 'face' (monocot, closed collateral) recipe;
 # each band overrides only its size, xylem detail, placement and radial position.
-# Sizes are in mm; the pith radius is ~1.4 mm.
+# Sizes are in mm.  Stem radius 1.725 mm = ground tissue 1.7125 + 2 hypodermis
+# layers (2 x 0.0036) + epidermis (0.0053).
 # ---------------------------------------------------------------------------
+
+STEM_RADIUS = 1.725                                  # 3.45 mm diameter
+PITH_RADIUS = STEM_RADIUS - 0.0053 - 2 * 0.0036    # 1.7125 mm
 
 BASE = dict(
     bundle_type="collateral", has_cambium=False,     # monocot: closed, no cambium
     xylem_layout="face", phloem_outward=True, shape="ellipse",
     n_metaxylem=2,               # the two big "eyes"
     prop_vessel=0.55, prop_sieve=0.5,
-    companion_cell_diameter=0.005, companion_cell_width=0.005,
-    parenchyma_diameter=0.01, parenchyma_width=0.01,
-    sheath="both", sheath_thickness=0.006,           # sclerenchyma fibre caps + ring
-    sclerenchyma_cell_diameter=0.006, sclerenchyma_cell_width=0.006,
+    companion_cell_diameter=0.003, companion_cell_width=0.003,
+    parenchyma_diameter=0.005, parenchyma_width=0.005,
+    sheath="both", sheath_thickness=0.004,           # sclerenchyma fibre caps + ring
+    sclerenchyma_cell_diameter=0.004, sclerenchyma_cell_width=0.004,
 )
 
 BANDS = [
-    # inner — larger bundles, TALLER than wide, spread through the inner pith
-    # (best-candidate 'spaced' placement); protoxylem + tear lacuna.
+    # large — 76 bundles, TALLER than wide (93 x 72 µm), scattered at random
+    # through the inner ground tissue; protoxylem + lacuna.
     {**BASE, **dict(
-        radius_min=0.0, radius_max=1.4, placement="spaced", n_bundles=20,
+        radius_min=0.0, radius_max=PITH_RADIUS - 0.21, placement="random", n_bundles=56,
         n_caps_layers_outward=1, n_caps_layers_inward=1,
-        width=0.13, height=0.20, metaxylem_gap=0.015,
-        metaxylem_diameter=0.045, metaxylem_diameter_sd=0.004, metaxylem_diameter_min=0.03,
-        n_protoxylem=1, protoxylem_diameter=0.03, protoxylem_diameter_min=0.025,
-        protoxylem_width=0.03, protoxylem_height=0.03, protoxylem_relative_distance=0.3,
-        lacuna=True, lacuna_width=0.026, lacuna_height=0.018,
-        phloem_width=0.1, phloem_height=0.06, phloem_relative_distance=0.5,
+        width=0.072, height=0.093, metaxylem_gap=0.008,
+        metaxylem_diameter=0.020, metaxylem_diameter_sd=0.002, metaxylem_diameter_min=0.015,
+        n_protoxylem=1, protoxylem_diameter=0.012, protoxylem_diameter_min=0.010,
+        protoxylem_width=0.012, protoxylem_height=0.012, protoxylem_relative_distance=0.3,
+        lacuna=True, lacuna_width=0.027, lacuna_height=0.027,
+        phloem_width=0.042, phloem_height=0.029, phloem_relative_distance=0.5,
     )},
-    # mid — the biggest bundles, WIDER than tall, sharing the peripheral ring
-    # (single ``radius``) with the rind bundles but half-step offset
-    # (angle = 180 / n_bundles) so one sits *between* each rind bundle, just under
-    # the hypodermis; protoxylem + lacuna.  ``radius`` reaches past the pith into the
-    # rind (a band may be placed in any tissue).
+    # medium — 64 bundles, WIDER than tall (50 x 66 µm), on a peripheral ring
+    # half-step offset (angle = 180 / n_bundles) so one sits *between* each small
+    # bundle; protoxylem + lacuna.
     {**BASE, **dict(
-        radius=1.68, placement="even", angle=180.0 / 20, n_bundles=20,
-        n_caps_layers_outward=3, n_caps_layers_inward=2,
-        width=0.20, height=0.13, metaxylem_gap=0.05,
-        metaxylem_diameter=0.05, metaxylem_diameter_sd=0.004, metaxylem_diameter_min=0.03,
-        n_protoxylem=1, protoxylem_diameter=0.03, protoxylem_diameter_min=0.025,
-        protoxylem_width=0.03, protoxylem_height=0.03, protoxylem_relative_distance=0.3,
-        lacuna=True, lacuna_width=0.026, lacuna_height=0.018,
-        phloem_width=0.1, phloem_height=0.06, phloem_relative_distance=0.5,
+        radius=PITH_RADIUS - 0.075, placement="even", angle=180.0 / 64, n_bundles=64,
+        n_caps_layers_outward=1, n_caps_layers_inward=1,
+        width=0.066, height=0.050, metaxylem_gap=0.008,
+        metaxylem_diameter=0.020, metaxylem_diameter_sd=0.002, metaxylem_diameter_min=0.015,
+        n_protoxylem=1, protoxylem_diameter=0.008, protoxylem_diameter_min=0.006,
+        protoxylem_width=0.008, protoxylem_height=0.008, protoxylem_relative_distance=0.3,
+        lacuna=True, lacuna_width=0.010, lacuna_height=0.010,
+        phloem_width=0.025, phloem_height=0.015, phloem_relative_distance=0.5,
     )},
-    # rind — small bundles, WIDER than tall, on the same peripheral ring **just under
-    # the hypodermis** (embedded in the cortex/rind, not the pith); NO protoxylem and
-    # NO lacuna (just the two metaxylem + a phloem cluster).  Tall enough that the
-    # phloem sits clear of the metaxylem eyes.
+    # small — 64 bundles, WIDER than tall (30 x 39 µm), on the outermost ring just
+    # under the hypodermis; protoxylem but NO lacuna.
     {**BASE, **dict(
-        radius=1.78, placement="even", angle=0.0, n_bundles=20,
-        n_caps_layers_outward=1, n_caps_layers_inward=2,
-        width=0.11, height=0.09,
-        metaxylem_diameter=0.03, metaxylem_diameter_sd=0.002, metaxylem_diameter_min=0.013,
-        metaxylem_gap=0.015, 
-        n_protoxylem=0, lacuna=False,
-        phloem_width=0.032, phloem_height=0.022, phloem_relative_distance=0.3,
+        radius=PITH_RADIUS - 0.024, placement="even", angle=0.0, n_bundles=64,
+        n_caps_layers_outward=1, n_caps_layers_inward=1,
+        width=0.039, height=0.030, metaxylem_gap=0.004,
+        metaxylem_diameter=0.014, metaxylem_diameter_sd=0.001, metaxylem_diameter_min=0.010,
+        n_protoxylem=1, protoxylem_diameter=0.006, protoxylem_diameter_min=0.005,
+        protoxylem_width=0.006, protoxylem_height=0.006, protoxylem_relative_distance=0.3,
+        lacuna=False,
+        phloem_width=0.016, phloem_height=0.009, phloem_relative_distance=0.4,
     )},
 ]
 
@@ -93,41 +97,30 @@ def build_maize() -> OrganInputData:
     """Assemble the maize-stem ``OrganInputData`` (monocot preset + 3 bundle bands)."""
     data = OrganInputData.for_monocot_stem()
 
-    # -- Pith: a soft parenchymatous ground tissue (radius ~1.4 mm), cells growing
-    #    a little bigger toward the centre; solid (no medullary cavity) -------
-    data.set_value("pith", "thickness",            2.8)
-    data.set_value("pith", "cell_diameter",        0.05)
-    data.set_value("pith", "cell_diameter_center", 0.09)
-    data.set_value("pith", "cavity_radius",        0.0)
+    # -- Ground tissue ('stele'): solid, radius PITH_RADIUS.  Cell diameter grows
+    #    from 7.6 µm under the hypodermis to 28 µm at 130 µm depth and 55 µm at
+    #    360 µm depth, flat beyond.  The 5PL shape is fitted to those three points
+    #    (edge ~8.3, 130 µm -> ~27.8, 360 µm -> ~52.9); ``cell_diameter`` is the 5PL
+    #    lower asymptote, set below 7.6 so the edge cell comes out near 7.6.
+    data.set_value("pith", "thickness",                2 * PITH_RADIUS)
+    data.set_value("pith", "cell_diameter",            0.005)
+    data.set_value("pith", "cell_diameter_center",     0.055)
+    data.set_value("pith", "size_gradient_function",   "five_pl")
+    data.set_value("pith", "size_gradient_inflection", 1.0)
+    data.set_value("pith", "size_gradient_steepness",  19.0)
+    data.set_value("pith", "size_gradient_asymmetry",  3.9)
+    data.set_value("pith", "cavity_radius",            0.0)
 
-    # -- Rind: a graded stack of cortex layers (inner -> outer), a hypodermis and
-    #    the epidermis; cells shrink toward the surface --------------------------
-    data.params.append({
-        "name": "inner_cortex",
-        "cell_diameter": 0.06, "cell_width": 0.065, "n_layers": 3, "shift": 0.5, "order": 3.5,
-    })
-    data.set_value("cortex", "cell_diameter", 0.05)
-    data.set_value("cortex", "cell_width",    0.05)
-    data.set_value("cortex", "n_layers",      3)
-    data.params.append({
-        "name": "outer_cortex",
-        "cell_diameter": 0.035, "cell_width": 0.04, "n_layers": 1, "shift": 0.5, "order": 4.5,
-    })
-    data.params.append({
-        "name": "outer_outer_cortex",
-        "cell_diameter": 0.022, "cell_width": 0.025, "n_layers": 1, "shift": 0.5, "order": 4.8,
-    })
+    # -- Rind: no cortex, no sclerenchyma ring — just a 2-layer hypodermis
+    #    (Ø 3.6 µm) and the epidermis (D 5.3 x W 7.8 µm) ------------------------
+    for name in ("cortex", "sclerenchyma", "inter_cellular_spaces", "aerenchyma"):
+        data.remove_param(name)
     data.params.append({
         "name": "hypodermis",
-        "cell_diameter": 0.024, "cell_width": 0.028, "n_layers": 2, "shift": 0.5, "order": 5,
+        "cell_diameter": 0.0036, "cell_width": 0.0036, "n_layers": 2, "shift": 0.5, "order": 5,
     })
-    # A thin sclerenchyma fibre ring under the epidermis (maize's tough rind).
-    data.set_values("sclerenchyma", cell_diameter=0.018, cell_width=0.018, n_layers=2)
-    data.set_values("epidermis", cell_diameter=0.025, cell_width=0.03, order=6)
-    data.set_value("inter_cellular_spaces", "smoothness", 0.05)
-    data.set_value("inter_cellular_spaces", "tissue",
-                         ["inner_cortex", "cortex", "outer_cortex", "outer_outer_cortex"])
-    
+    data.set_values("epidermis", cell_diameter=0.0053, cell_width=0.0078, order=6)
+
     # -- Vasculature: drop the preset's single bundle spec, add the three bands ---
     data.params = [p for p in data.params if getattr(p, "name", None) != "vascular_bundle"]
     for band in BANDS:
@@ -142,10 +135,6 @@ def main(show=True):
     t0 = time.time()
     stem = StemAnatomy(data, seed=SEED)
     stem.generate_cells()
-
-    # Merge the graded cortex tags into a single "cortex" tag for the legend.
-    for extra in ("inner_cortex", "outer_cortex", "outer_outer_cortex"):
-        stem.retag_cells(extra, "cortex")
 
     dt = time.time() - t0
     counts = {}

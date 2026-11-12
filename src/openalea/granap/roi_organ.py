@@ -95,22 +95,13 @@ class RoiOrgan(Organ):
 
         self.all_cells.cells = new_cells
 
-    def generate_cells(self) -> gpd.GeoDataFrame:
+    def _generate_pipeline(self) -> None:
         """
-        Override the default Voronoi/geometric generation of Granap.
-        Returns a GeoDataFrame mapping the loaded ROI cells.
+        Override the default Voronoi/geometric generation of Granap: the cells are the loaded ROIs
+        (Organ.generate_cells writes them into the MPG).
         """
-        if self._cells_gdf is None:
-            if not self.all_cells.cells:
-                self._load_rois()
-                
-            cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
-            for i, c in enumerate(self.all_cells.cells):
-                cell_dicts[i]['geometry'] = c.polygon
-                
-            self._cells_gdf = gpd.GeoDataFrame(cell_dicts) if cell_dicts else gpd.GeoDataFrame()
-        
-        return self._cells_gdf
+        if not self.all_cells.cells:
+            self._load_rois()
         
     def _create_base_shape(self) -> Polygon:
         """Define the basic shape of the root/needle from loaded polygons."""

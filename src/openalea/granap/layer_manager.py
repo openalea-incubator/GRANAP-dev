@@ -118,6 +118,7 @@ class LayerManager:
                     "cell_width": layer.cell_width or 0,
                     "shift": layer.shift,
                     **layer.additional_params,
+                    "axial_height": layer.axial_height,
                 })
         return expanded
     
@@ -128,7 +129,7 @@ class LayerManager:
         Returns:
             List of dictionaries with layer parameters
         """
-        return [{"name": layer.name, "cell_diameter": layer.cell_diameter, "cell_width": layer.cell_width or 0, "shift": layer.shift, "n_layers": layer.n_layers, "order": layer.order} for layer in self._layers]
+        return [{"name": layer.name, "cell_diameter": layer.cell_diameter, "cell_width": layer.cell_width or 0, "shift": layer.shift, "n_layers": layer.n_layers, "order": layer.order, "axial_height": layer.axial_height} for layer in self._layers]
     
     def clear(self) -> None:
         """Remove all layers."""

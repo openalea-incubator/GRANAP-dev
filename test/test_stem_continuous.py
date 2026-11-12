@@ -27,13 +27,23 @@ from openalea.granap.input_data import OrganInputData
 SEED = 0
 
 
+_BUILT: dict = {}
+
+
 def _stem(xylem_layout="packed", n_xylem_files=3):
-    data = OrganInputData.for_dicot_stem_continuous()
-    data.set_value("vascular_cylinder", "xylem_layout", xylem_layout)
-    data.set_value("vascular_cylinder", "n_xylem_files", n_xylem_files)
-    stem = StemAnatomy(data, seed=SEED)
-    stem.generate_cells()
-    return stem
+    """A generated continuous stem, memoised on its two knobs.
+
+    Four tests want the identical ``packed`` cylinder; building it once turns ~48 s of
+    repeated generation into ~12 s.  Every test below only reads the organ."""
+    key = (xylem_layout, n_xylem_files)
+    if key not in _BUILT:
+        data = OrganInputData.for_dicot_stem_continuous()
+        data.set_value("vascular_cylinder", "xylem_layout", xylem_layout)
+        data.set_value("vascular_cylinder", "n_xylem_files", n_xylem_files)
+        stem = StemAnatomy(data, seed=SEED)
+        stem.generate_cells()
+        _BUILT[key] = stem
+    return _BUILT[key]
 
 
 def _n_components(polys):
@@ -56,10 +66,15 @@ def test_factory_returns_continuous_variant():
 # -- continuity --------------------------------------------------------------
 
 def test_packed_is_one_continuous_ring_per_tissue():
-    tp = _stem(xylem_layout="packed").vascular_tissue_polygons
+    stem = _stem(xylem_layout="packed")
     for tissue in ("xylem", "cambium", "phloem"):
-        assert _n_components(tp.get(tissue, [])) == 1, \
+        assert _n_components(stem.vascular_tissue_polygons.get(tissue, [])) == 1, \
             f"{tissue} is not a single continuous annulus"
+    # ...and the organ around it is complete (this used to be its own build).
+    types = {c.type for c in stem.all_cells.cells}
+    for t in ("xylem", "cambium", "sieve element", "companion cell",
+              "parenchyma", "cortex", "epidermis"):
+        assert t in types, f"continuous stem missing {t}"
 
 
 def _xylem_band(stem):
@@ -124,12 +139,3 @@ def test_xylem_is_endarch():
     # (toward the pith, smaller radius).
     assert outer_mean > inner_mean
 
-
-# -- whole-organ smoke -------------------------------------------------------
-
-def test_continuous_stem_generates_all_tissues():
-    stem = _stem(xylem_layout="packed")
-    types = {c.type for c in stem.all_cells.cells}
-    for t in ("xylem", "cambium", "sieve element", "companion cell",
-              "parenchyma", "cortex", "epidermis"):
-        assert t in types, f"continuous stem missing {t}"

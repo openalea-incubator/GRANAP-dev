@@ -1,9 +1,9 @@
-"""Wheat monocot root — a developmental *series* (apex -> collet) with tracked xylem.
+"""Wheat monocot root — a developmental *series* (apex -> collar) with tracked xylem.
 
 Walks up a wheat (Triticum aestivum) root, sampling the anatomy at physical lengths.
-Biologically the metaxylem **fuse** going collet -> apex, so there are many small
-vessels at the collet and few big ones at the apex.  Here: 3 (fused) central metaxylem
-for the lower ~60 mm, then rising toward the collet as it splits into the polyarch ring.
+Biologically the metaxylem **fuse** going collar -> apex, so there are many small
+vessels at the collar and few big ones at the apex.  Here: 3 (fused) central metaxylem
+for the lower ~60 mm, then rising toward the collar as it splits into the polyarch ring.
 Identity is a fusion group: each xylem id keeps its colour, so you can follow a vessel
 (and see which others it fuses with) up the root.
 
@@ -23,8 +23,8 @@ from openalea.granap.input_data import OrganInputData
 from openalea.granap.root_series import RootSeries
 
 SEED = 0
-N_LEVELS = 12                                 # physical samples apex .. collet
-LENGTH_MM = 150.0                             # apex (0) .. collet (LENGTH_MM)
+N_LEVELS = 12                                 # physical samples apex .. collar
+LENGTH_MM = 150.0                             # apex (0) .. collar (LENGTH_MM)
 N_COLS = 4                                    # grid layout: 4 per row -> 3 rows
 
 
@@ -67,15 +67,15 @@ def build_wheat_base() -> OrganInputData:
 N_TERMINATE  = 2        # how many metaxylem terminate (do NOT fuse — they just stop)
 TERMINATE_AT = 90.0     # ...and the length (mm) at which they stop (present above, gone below)
 APEX_META = 3           # metaxylem at the apex (the fusion bottoms out here, not at 1)
-COLLET_FUSED = 4        # fused metaxylem at the collet (+ the terminators added on top)
+COLLAR_FUSED = 4        # fused metaxylem at the collar (+ the terminators added on top)
 
 
 def n_fused(length_mm: float) -> int:
     """Number of FUSED metaxylem along the root: ``APEX_META`` at the apex (the fusion
-    stops there), rising to ``COLLET_FUSED`` toward the collet.  This schedule is *how you
+    stops there), rising to ``COLLAR_FUSED`` toward the collar.  This schedule is *how you
     say* how many metaxylem a given height has — set its apex value to change it."""
     frac = max(0.0, (length_mm - 60.0) / (LENGTH_MM - 60.0))
-    return int(np.clip(round(APEX_META + (COLLET_FUSED - APEX_META) * frac), APEX_META, COLLET_FUSED))
+    return int(np.clip(round(APEX_META + (COLLAR_FUSED - APEX_META) * frac), APEX_META, COLLAR_FUSED))
 
 
 def build_series() -> RootSeries:
@@ -91,6 +91,9 @@ def build_series() -> RootSeries:
         stele_radius=(0.09, 0.18),                   # stele widens along the root (mm)
         area_retention=0.4,                          # fused = "slightly bigger"
         migration_length=40.0,                       # migrate toward class positions over ~40 mm
+        # ...and converge onto each other over the last 40 mm before a fusion, so a
+        # fusing pair is touching when it merges instead of jumping across a gap.
+        fusion_length=40.0,
         param_schedules={"stele.cell_diameter_center": (0.014, 0.020)},  # parenchyma coarsens
         seed=SEED,
     )
@@ -101,7 +104,7 @@ def main(show=True):
     # generic rendering lives in the library now; the example only supplies the
     # wheat-specific cortex retag + a title.
     res.plot(cols=N_COLS, retag=[("inner_cortex", "cortex"), ("outer_cortex", "cortex")],
-             suptitle="Wheat root fusion series (collet → apex) — vessel label = primordial ids it contains",
+             suptitle="Wheat root fusion series (collar → apex) — vessel label = primordial ids it contains",
              show=show)
     return res
 
