@@ -105,6 +105,7 @@ def pack_xylem_vessels(cells, rng, zone: Polygon, sx: dict, cx: float, cy: float
         proportion=sx["prop_vessel_ring"], direction="center",
         diameter_max=sx["vessel_diameter"], diameter_min=sx["vessel_diameter_min"],
         diameter_sd=sx["vessel_diameter_sd"], gradient_function=sx["gradient_function"],
+        distribution=sx.get("vessel_diameter_distribution"),
         gradient_inflection=sx["gradient_inflection"], gradient_steepness=sx["gradient_steepness"],
         gradient_asymmetry=sx["gradient_asymmetry"], enforce_gradient_min=sx["enforce_gradient_min"],
         allow_ellipse=sx["allow_ellipse"], ellipse_max_aspect=sx["ellipse_max_aspect"],
@@ -617,6 +618,7 @@ def fill_phloem_zone(cells, rng, zone, alive: bool, cx: float, cy: float,
             arm_zone, proportion=proportion, direction=None,
             diameter_max=sp["sieve_diameter"], diameter_min=sp["sieve_diameter_min"],
             diameter_sd=sp["sieve_diameter_sd"], gradient_function="normal", rng=rng,
+            distribution=sp.get("sieve_diameter_distribution"),
         )
         sieve_polys, sieve_centers, companion_polys = [], [], []
         combined_budget = sp["prop_sieve"] * arm_zone.area

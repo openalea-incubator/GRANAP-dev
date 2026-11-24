@@ -1,5 +1,6 @@
-"""Tests for monocot arch-mode xylem (metaxylem ring + protoxylem) + pith, and
-star-mode xylem (star-shaped vessel region + phloem in the valleys).
+"""Tests for monocot arch-mode xylem (metaxylem ring + protoxylem) + pith,
+star-mode xylem (star-shaped vessel region + phloem in the valleys), and the
+default-mode metaxylem ring keeping its requested vessel sizes.
 
 Visual scenario gallery lives in ``example/monocot_iris.py`` (arch) and
 ``example/monocot_xylem_gallery.py`` (all modes).
@@ -8,6 +9,7 @@ Visual scenario gallery lives in ``example/monocot_iris.py`` (arch) and
 import os
 import sys
 
+import numpy as np
 from shapely.geometry import Point
 
 sys.path.append(os.path.abspath(".."))
@@ -84,18 +86,6 @@ def test_arch_exact_metaxylem_count():
     assert len(groups) == 15, f"Expected 15 metaxylem, got {len(groups)}"
 
 
-def test_arch_vs_default_both_produce_cells():
-    """Both modes produce a reasonable number of cells."""
-    root_default = RootAnatomy(OrganInputData.for_root())
-    root_default.generate_cells()
-    counts_default = cell_type_counts(root_default)
-
-    counts_arch = cell_type_counts(make_arch_root())
-
-    assert sum(counts_default.values()) > 10, "Default mode produced too few cells"
-    assert sum(counts_arch.values()) > 10, "Arch mode produced too few cells"
-
-
 def test_star_mode_produces_xylem_and_phloem():
     """Star mode packs xylem vessels into the star and phloem into the valleys."""
     root = make_star_root()
@@ -146,3 +136,95 @@ def test_star_phloem_sits_between_arms():
         assert arm_gap > half * 0.5, (
             f"Phloem at theta={theta:.2f} too close to an arm axis (gap={arm_gap:.2f})"
         )
+
+
+# -- default mode: realised metaxylem size -----------------------------------
+# Each vessel is one Voronoi group seeded by a ring just inside its outline, and
+# fit_metaxylem_sheath lays a ring of stele seeds half a stele cell outside it.
+# The vessel's wall falls half-way between the two rings, so the vessel ring is
+# inset by that same gap (tissue_class.seed_ring_inset) — otherwise the realised
+# vessel overshoots by a near-constant amount that inflates small vessels most.
+
+def test_seed_ring_inset_rule():
+    from openalea.granap.tissue_class import seed_ring_inset
+    assert seed_ring_inset(0.02) == 0.15 * 0.02, "no known gap: the generic 15% inset"
+    assert seed_ring_inset(0.02, 0.006) == 0.006, "a known gap is used as the inset"
+    assert seed_ring_inset(0.005, 0.006) == 0.9 * 0.005, "capped at 90% of the radius"
+
+
+def test_place_packed_group_seed_gap_moves_the_ring():
+    from openalea.granap.cell_manager import CellManager
+    from openalea.granap.tissue_class import place_packed_group
+
+    def ring_radius(**kw):
+        cm = CellManager()
+        place_packed_group(cm, [(0.0, 0.0, 0.02)], "metaxylem", **kw)
+        return np.mean([np.hypot(c.x, c.y) for c in cm.cells])
+
+    assert np.isclose(ring_radius(), 0.02 * 0.85, rtol=0.02), "default ring at 0.85 r"
+    assert np.isclose(ring_radius(seed_gap=0.006), 0.014, rtol=0.02), "ring at r - seed_gap"
+
+
+def test_default_metaxylem_keeps_requested_size():
+    """Six vessels of clearly different sizes: each realised metaxylem cell matches
+    its placed vessel to within a few percent, and the residual does not grow as
+    the vessel shrinks (it did: 1.13 for the biggest .. 1.37 for the smallest)."""
+    data = OrganInputData.for_root()
+    data.set_value("stele", "thickness", 0.5)
+    data.set_value("stele", "cell_diameter", 0.012)
+    data.set_value("stele", "cell_diameter_center", 0.02)
+    data.set_value("xylem", "xylem_shape", "default")
+    data.set_value("xylem", "n_vascular_bundles", 6)
+    data.set_value("xylem", "n_protoxylem", 0)
+    data.set_value("xylem", "vessel_diameter", 0.0388)
+    data.set_value("xylem", "vessel_diameter_sd", 0.0128)
+    data.set_value("xylem", "vessel_diameter_distribution",
+                   {"family": "empirical", "values": [0.020, 0.028, 0.035, 0.042, 0.050, 0.058]})
+    root = RootAnatomy(data, seed=SEED)
+    root.generate_cells()
+
+    placed = root.vascular_polygons[:6]          # the vessels (sheath rings follow)
+    final = [c.polygon for c in root.all_cells.cells if c.type == "metaxylem"]
+    assert len(final) == 6
+    ratios = []
+    for p in placed:
+        f = min(final, key=lambda q: q.centroid.distance(p.centroid))
+        ratios.append(np.sqrt(f.area / p.area))  # realised / placed diameter
+    assert 0.97 < min(ratios) and max(ratios) < 1.08, ratios
+    assert max(ratios) - min(ratios) < 0.03, f"size-dependent inflation: {ratios}"
+
+
+# -- two-way pizza slice -------------------------------------------------------
+# pizza_slice used to build each wedge as a triangle (centre, start, end); at
+# n_slices == 2 those points are collinear, the halves had zero area and both
+# metaxylem collapsed onto the centre (then vanished from the mesh).
+
+def test_pizza_slice_two_halves():
+    from openalea.granap.geometry_collection import GeometryProcessor
+    disc = Point(0, 0).buffer(0.3)
+    halves = GeometryProcessor.pizza_slice(disc, 2)
+    assert len(halves) == 2
+    for h in halves:
+        assert np.isclose(h.area, disc.area / 2, rtol=1e-6)
+
+
+def test_default_two_metaxylem():
+    """Default mode with 2 metaxylem: both exist, opposite each other."""
+    data = OrganInputData.for_root()
+    data.set_value("xylem", "xylem_shape", "default")
+    data.set_value("xylem", "n_vascular_bundles", 2)
+    root = RootAnatomy(data, seed=SEED)
+    root.generate_cells()
+    meta = [c.polygon for c in root.all_cells.cells if c.type == "metaxylem"]
+    assert len(meta) == 2, f"Expected 2 metaxylem, got {len(meta)}"
+    a, b = (np.array(p.centroid.coords[0]) for p in meta)
+    assert np.linalg.norm(a - b) > 0.1, "metaxylem should sit apart, not at the centre"
+    assert np.dot(a, b) < 0, "the two metaxylem should be on opposite sides"
+
+
+def test_metaxylem_positions_two():
+    from openalea.granap.root_monocot_class import MonocotRootAnatomy
+    pts = MonocotRootAnatomy.metaxylem_positions(Point(0, 0).buffer(0.3), 2, 0.06)
+    assert len(pts) == 2
+    assert np.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) > 0.1
+

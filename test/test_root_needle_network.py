@@ -14,7 +14,8 @@ from openalea.granap.organ_class import Organ
 
 def test_root_from_xml_has_expected_vasculature():
     """A monocot root loaded from XML has 3 metaxylem cells and no air spaces."""
-    input_data_root = OrganInputData.from_xml("inputs/root_monocot_simpl.xml")
+    here = os.path.dirname(os.path.abspath(__file__))
+    input_data_root = OrganInputData.from_xml(os.path.join(here, "inputs", "root_monocot_simpl.xml"))
     root_sim = Organ.create_from_input(input_data_root)
     root_sim.export_to_adjencymatrix()  # builds graph + ensures cells
 

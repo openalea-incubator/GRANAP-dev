@@ -24,6 +24,8 @@ from openalea.granap.anatomy_writer import NetworkExporter
 
 from needle_configs import build_pinaster
 
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
 SEED = 0
 
 SYMPLASTIC_CONTINUITY_TYPES = {

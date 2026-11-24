@@ -118,13 +118,18 @@ class CellManager:
         self.cells = [c for c, drop in zip(self.cells, remove) if not drop]
     
     def recalculate_cell_properties(self):
-        """Recalculate the properties of all cells in the list."""
-
-        for i, cell in enumerate(self.cells):
+        """Recalculate the angle, radius, area and id_cell of every cell (the geometry in bulk: the same GEOS centroid,
+        distance and area on each polygon)."""
+        cells = self.cells
+        with_polygon = [i for i, cell in enumerate(cells) if cell.polygon is not None]
+        polygons = np.array([cells[i].polygon for i in with_polygon], dtype=object)
+        radii = shapely.distance(shapely.centroid(polygons), Point(0, 0)).tolist() if with_polygon else []
+        areas = shapely.area(polygons).tolist() if with_polygon else []
+        geometry = dict(zip(with_polygon, zip(radii, areas)))
+        for i, cell in enumerate(cells):
             cell.angle = np.arctan2(cell.y, cell.x)
-            if cell.polygon is not None:
-                cell.radius = cell.polygon.centroid.distance(Point(0, 0))
-                cell.area = cell.polygon.area
+            if i in geometry:
+                cell.radius, cell.area = geometry[i]
             else:
                 cell.radius = np.sqrt(cell.x**2 + cell.y**2)
                 cell.area = cell.diameter**2 * np.pi / 4
@@ -181,3 +186,12 @@ class CellManager:
             cell.angle = np.arctan2(cell.y, cell.x)
             if cell.polygon is not None:
                 cell.polygon = translate(cell.polygon, xoff = -x_center, yoff = -y_center)
+
+
+def set_polygons(cells, polygons) -> None:
+    """cell.polygon = polygon for each, written straight into the MPG's column for the cells that are its views."""
+    for cell, polygon in zip(cells, polygons):
+        if getattr(type(cell), "_mpg_view", False):
+            cell._store._prop("polygon")[cell._vid] = polygon
+        else:
+            cell.polygon = polygon

@@ -1,0 +1,258 @@
+"""
+Instanced anatomies (a plant's scenario key instanced_anatomy): each segment's anatomy an instance of its class's
+template (metafspm's data_structure.instances), no vertex of its own, against the same plant with copies: the same
+nodes, edges, junctions, leaf surfaces, variables, growth, class changes and pruning.
+"""
+import numpy as np
+import pytest
+
+from openalea.metafspm.data_structure.configs import PropsConfig
+from openalea.metafspm.scene.population import Planting, planting
+
+from roots import MAIN_RADIUS, SEGMENT, SmallRootSystem, initiated
+from test_growth import Anatomy
+from test_shoot import ShootAnatomy, SmallShoot, TwoElementLeaf
+
+pytestmark = pytest.mark.slow    # minutes long: run before a release or a merge to main (pytest -m slow)
+
+
+def _both(architecture, anatomy, **scenario):
+    out = []
+    for instanced in (False, True):
+        population = initiated(planting([Planting()], None, dict(scenario, instanced_anatomy=instanced)), architecture,
+                               anatomy)
+        out.append(population.data_structure)
+    return out
+
+
+def _endpoints(mtg, edges):
+    a, b = mtg.view("n_id_a"), mtg.view("n_id_b")
+    return [(int(a[e]), int(b[e])) for e in edges]
+
+
+def _same(copied, instanced):
+    mtg, h = copied.structure, instanced.structure
+    assert copied.entity_ids("node").tolist() == instanced.entity_ids("node").tolist()
+    assert copied.entity_ids("edge").tolist() == instanced.entity_ids("edge").tolist()
+    assert copied.edges() == instanced.edges()
+    assert sorted(_endpoints(mtg, mtg.junction_vids())) == sorted(_endpoints(h, h.junction_vids()))
+    for scale in ("SubOrgan", "Cell"):
+        np.testing.assert_array_equal(copied.owner(scale), instanced.owner(scale))
+    left, right = copied._var_stores(), instanced._var_stores()
+    assert {k: sorted(v) for k, v in left.items()} == {k: sorted(v) for k, v in right.items()}
+    for location, store in left.items():
+        for name, values in store.items():
+            if name == "instanced_anatomy":                          # the plants' switch itself
+                continue
+            other = right[location][name]
+            if values.dtype == object:
+                assert values.tolist() == other.tolist(), name
+            else:
+                np.testing.assert_array_equal(values, other, err_msg=name)
+    assert len(h) < len(mtg)
+    assert h.has_instances() and not mtg.has_instances()
+
+
+def test_a_shoot_with_instanced_anatomies_is_its_copy():
+    copied, instanced = _both(SmallShoot, ShootAnatomy)
+    _same(copied, instanced)
+
+
+def test_leaf_surfaces_and_their_stomata_on_instanced_anatomies():
+    copied, instanced = _both(TwoElementLeaf, ShootAnatomy)
+    _same(copied, instanced)
+    mtg, h = copied.structure, instanced.structure
+    stomatal = [[c for c in x._vertices_at_scale(x.scales.Connection) if x.view("network_path").get(int(c)) == 6]
+                for x in (mtg, h)]
+    assert len(stomatal[0]) > 0 and _endpoints(mtg, stomatal[0]) == _endpoints(h, stomatal[1])
+    pores = [v for v, _ in _endpoints(mtg, stomatal[0])]
+    assert mtg.values_of("pore_width", pores) == h.values_of("pore_width", pores)
+
+
+def test_growth_class_changes_and_pruning_on_instanced_anatomies():
+    states = []
+    for data_structure in _both(SmallRootSystem, Anatomy):
+        mtg = data_structure.structure
+        data_structure.register("solute", np.arange(data_structure.n_nodes(), dtype=float), location="node", on_grow="inherit", default=-1.)
+        anatomy = Anatomy(data_structure=data_structure)
+        segments = sorted(int(v) for v in mtg.property("anatomy_class"))
+        tips = [s for s in segments if not [c for c in mtg.children(s) if c in segments]]
+        main_tip = max(tips, key=lambda s: mtg.property("radius")[s])
+        new = mtg.add_child(main_tip, **PropsConfig(scale=mtg.scales.SubOrgan, edge_type='<',
+                                                  label=mtg.labels.SubOrgan.RootSegment))
+        for name, value in (("radius", MAIN_RADIUS), ("length", SEGMENT), ("distance_from_tip", 0.)):
+            mtg.set_values(name, [new], [value])
+        anatomy()                                                    # growth: inherits from the same cells upstream
+        grown = data_structure.get("solute").copy()
+        lateral = min(segments, key=lambda s: (mtg.property("radius")[s], s))
+        radius = data_structure.get("radius").copy()
+        radius[data_structure.entity_ids("SubOrgan") == lateral] = MAIN_RADIUS
+        data_structure.set("radius", radius)
+        anatomy()                                                    # a class change: replaced, defaults
+        changed = data_structure.get("solute").copy()
+        tip = min((s for s in tips if s != lateral), key=lambda s: mtg.view("radius")[s])
+        mtg.remove_vertex(tip)
+        data_structure.update_topology()
+        anatomy()                                                    # pruning
+        states.append((data_structure, grown, changed, data_structure.get("solute").copy()))
+    (copied, *values), (instanced, *other) = states
+    _same(copied, instanced)
+    for left, right in zip(values, other):
+        np.testing.assert_array_equal(left, right)
+
+
+def test_a_root_section_has_one_soil_node_joined_to_its_outer_walls():
+    """soil_node: each root section's one soil boundary, a soil Compartment (kind 4) joined (network_path 7) to the
+    walls with a single membrane and the junctions on them; the same copied and instanced."""
+    copied, instanced = _both(SmallRootSystem, Anatomy, soil_node=True)
+    for data_structure in (copied, instanced):
+        Anatomy(data_structure=data_structure)                                     # its variables, read from the MPG
+    _same(copied, instanced)
+    data_structure = copied
+    kind, path, tissue = data_structure.get("compartment_type"), data_structure.get("network_path"), data_structure.get("tissue")
+    owner, segments = data_structure.owner("SubOrgan"), data_structure.entity_ids("SubOrgan")
+    soil = np.flatnonzero(kind == 4)
+    assert sorted(owner[soil].tolist()) == list(range(segments.size)) and set(tissue[soil]) == {"soil"}
+    view = data_structure.to_graph_view()
+    links = np.flatnonzero(path == 7)
+    assert set(view.tail[links].tolist()) == set(soil.tolist())
+    ends = view.head[links]
+    assert (owner[ends] == owner[view.tail[links]]).all()                  # within its own section
+    membranes = np.flatnonzero(path == 0)
+    counts = np.bincount(np.r_[view.tail[membranes], view.head[membranes]], minlength=data_structure.n_nodes())
+    walls = ends[kind[ends] == 1]
+    assert walls.size > 0 and (counts[walls] == 1).all()                     # outer walls: one membrane each
+    assert ((kind[ends] == 1) | (kind[ends] == 2)).all()
+
+
+def test_a_state_changed_in_the_data_structure_survives_the_next_anatomy_step():
+    """An instanced vertex's value is held by the DataStructure (not written back to the MPG): the anatomy step's
+    read-back keeps it, as a copy's (written back, read back), also when a new segment grows."""
+    results = []
+    for data_structure in _both(SmallRootSystem, Anatomy):
+        mtg = data_structure.structure
+        anatomy = Anatomy(data_structure=data_structure)
+        x = data_structure.get("section_x").copy()
+        x[7] = 123.
+        data_structure.set("section_x", x)
+        anatomy()
+        assert data_structure.get("section_x")[7] == 123.
+        segments = sorted(int(v) for v in mtg.property("anatomy_class"))
+        tip = max(segments)
+        new = mtg.add_child(tip, **PropsConfig(scale=mtg.scales.SubOrgan, edge_type='<',
+                                             label=mtg.labels.SubOrgan.RootSegment))
+        for name, value in (("radius", mtg.property("radius")[tip]), ("length", SEGMENT), ("distance_from_tip", 0.)):
+            mtg.set_values(name, [new], [value])
+        anatomy()
+        results.append(data_structure)
+    copied, instanced = results
+    assert copied.get("section_x")[7] == instanced.get("section_x")[7] == 123.
+    _same(copied, instanced)
+
+
+def test_a_reduced_root_section_holds_its_conduits_and_soil_node():
+    """A plant model's Reduction (solve.reduction) on the root segments: each an instance of its reduced template,
+    its conduits and its soil node only (GranapAnatomy's entity sets conduits, families 0 and 1, and soil_nodes), the
+    conduits joined to the neighbouring sections' by the junctions as in the full anatomy."""
+    from openalea.metafspm.solve.reduction import Reduction
+    from openalea.granap.metafspm.component import GranapAnatomy
+    full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
+                     Anatomy).data_structure
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    for data_structure in (full, reduced):
+        Anatomy(data_structure=data_structure)
+
+    def family(data_structure):
+        values = data_structure.structure.values_of("family", data_structure.entity_ids("node"))
+        return np.array([values.get(int(v), -1.) for v in data_structure.entity_ids("node")])
+
+    kind = reduced.get("compartment_type")
+    assert ((kind == 4) | np.isin(family(reduced), (0., 1.))).all()
+    assert GranapAnatomy.entity_sets["soil_nodes"] == {"compartment_type": 4.}                 # the published sets, by name
+    reduced.define_mask("soil_nodes", entities="GranapAnatomy.soil_nodes")
+    np.testing.assert_array_equal(reduced.mask("soil_nodes"), kind == 4)
+    full_kept = (full.get("compartment_type") == 4) | np.isin(family(full), (0., 1.))
+    assert reduced.n_nodes() == int(full_kept.sum())
+
+    def junctions(data_structure):
+        """Each junction's two ends as (section, template node): the vids differ (a reduced block is smaller)."""
+        view, nodes, owner = data_structure.to_graph_view(), data_structure.entity_ids("node"), data_structure.owner("SubOrgan")
+        node = data_structure.structure.values_of("template_node", nodes)
+        place = [(int(owner[i]), int(node[int(v)])) for i, v in enumerate(nodes.tolist())]
+        edges = np.flatnonzero(np.asarray(data_structure.get("network_path")) == 5)
+        return sorted((place[a], place[b]) for a, b in zip(view.tail[edges].tolist(), view.head[edges].tolist()))
+
+    assert junctions(full) == junctions(reduced) and len(junctions(full)) > 0
+
+
+def test_a_reduced_section_is_drawn_whole_and_its_frame_holds_its_interior():
+    """A reduced section's drawing (display_triangles) is its full anatomy's: its kept protoplasts by node, its
+    interior's by display id (owner -1, owner_ids), the same triangles as the unreduced plant's; metafspm's frame
+    writes the interior as display rows (its Cells, Layers and Compartments, linked to the section), the mesh's
+    triangles on them; from_frame gives the reduced plant back."""
+    from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
+    from openalea.metafspm.solve.reduction import Reduction, is_display_id
+    full = initiated(planting([Planting()], None, {"instanced_anatomy": True, "soil_node": True}), SmallRootSystem,
+                     Anatomy).data_structure
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    drawn_full = Anatomy(data_structure=full).display_triangles()
+    anatomy = Anatomy(data_structure=reduced)
+    drawn = anatomy.display_triangles()
+    assert len(drawn) == len(drawn_full) and (drawn.owner < 0).any()
+    np.testing.assert_allclose(np.sort(drawn.vertices.reshape(-1)), np.sort(drawn_full.vertices.reshape(-1)))
+    assert is_display_id(drawn.owner_ids[drawn.owner < 0]).all()
+    np.testing.assert_array_equal(drawn.owner_ids[drawn.owner >= 0],
+                                  reduced.entity_ids("node")[drawn.owner[drawn.owner >= 0]])
+    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]}, display="full")
+    plant = frame.data_structures[0]
+    compartments = plant.entity_set("Compartment").columns
+    shown = np.asarray(compartments[DISPLAY_ONLY], dtype=bool)
+    assert shown.sum() + reduced.n_nodes() == full.n_nodes()
+    mesh = next(mesh for mesh in plant.meshes if mesh.name == type(anatomy).__name__)
+    corner = mesh.indices[::3]                                          # each triangle's first vertex (shared ones)
+    np.testing.assert_array_equal(compartments["id"][mesh.feature_rows["Compartment"][corner]], drawn.owner_ids)
+    sections = plant.entity_set("SubOrgan").columns["id"][mesh.feature_rows["SubOrgan"][corner]]
+    owner_of_node = reduced.entity_ids("SubOrgan")[reduced.owner("SubOrgan")]
+    expected = np.where(drawn.owner >= 0, owner_of_node[np.maximum(drawn.owner, 0)],
+                        (drawn.owner_ids - 2 ** 52) // 2 ** 24)
+    np.testing.assert_array_equal(sections, expected)
+    assert (mesh.feature_rows["Cell"][corner] >= 0).all()               # every protoplast in its Cell
+    assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()
+
+
+def test_reduced_sections_are_instances_of_their_full_templates():
+    """display="instances" (metafspm's default): each reduced section an instance of its full template
+    (display_instances: its protoplasts once, in the section's plane, and its segment's transform), placed where
+    display_triangles draws it; the template's nodes are the full template's Compartments with their tissue; no
+    interior row in the frame, no reduced section in its display mesh."""
+    from openalea import encoding3d
+    from openalea.metafspm.io.encoding3d import DISPLAY_ONLY, from_frame, to_frame
+    from openalea.metafspm.solve.reduction import Reduction
+    reduction = Reduction(where={"label": "RootSegment"}, ports="GranapAnatomy.conduits",
+                          keep="GranapAnatomy.soil_nodes")
+    reduced = initiated(planting([Planting()], None, {"soil_node": True}), SmallRootSystem, Anatomy,
+                        reduction=reduction).data_structure
+    anatomy = Anatomy(data_structure=reduced)
+    drawn = anatomy.display_triangles()                                # whole, in the scene's coordinates
+    frame = to_frame({"plant": reduced}, components={"plant": [anatomy]})
+    plant = frame.data_structures[0]
+    sections = plant.instance_set(type(anatomy).__name__)
+    groups = reduced.structure.reduction.reduced_groups(reduced)
+    assert sorted(sections.columns["owner"].tolist()) == sorted(owner for owner, _ in groups.values())
+    assert DISPLAY_ONLY not in plant.entity_set("Compartment").columns
+    assert type(anatomy).__name__ not in {mesh.name for mesh in plant.meshes}    # every section reduced here
+    placed = encoding3d.placed_meshes(frame, plant, sections)
+    corners = placed.positions[placed.triangles]
+    assert corners.shape == drawn.vertices.shape
+    np.testing.assert_allclose(np.sort(corners.reshape(-1)), np.sort(drawn.vertices.reshape(-1)), atol=1e-12)
+    template = frame.part(sections.parts[0])
+    nodes = template.entity_set("Compartment").columns
+    assert "tissue" in nodes and len(set(nodes["id"].tolist())) == len(nodes["id"])
+    assert not sections.derived                         # no reduced system bound: the shapes, no derived field
+    assert from_frame(frame)["plant"].n_nodes() == reduced.n_nodes()

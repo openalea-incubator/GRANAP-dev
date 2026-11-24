@@ -82,7 +82,7 @@ def main(show=True):
     maize.set_value("xylem", "n_vascular_bundles",       4)      # polyarch metaxylem ring
     maize.set_value("xylem", "vessel_diameter",          0.056)
     maize.set_value("xylem", "vessel_diameter_sd",       0.006)
-    maize.set_value("xylem", "ratio_proto_meta",         2.5)
+    maize.set_value("xylem", "n_protoxylem",              9)     # protoxylem poles
     maize.set_value("xylem", "protoxylem_diameter",      0.016)
     maize.set_value("xylem", "protoxylem_cluster_width", 0.021)
     maize.set_value("xylem", "protoxylem_cluster_height", 0.021)
@@ -153,7 +153,7 @@ def main(show=True):
     maize_b73.set_value("xylem", "n_vascular_bundles",       6)      # polyarch metaxylem ring
     maize_b73.set_value("xylem", "vessel_diameter",          0.074)
     maize_b73.set_value("xylem", "vessel_diameter_sd",       0.0075)
-    maize_b73.set_value("xylem", "ratio_proto_meta",         1.9)
+    maize_b73.set_value("xylem", "n_protoxylem",             11)     # protoxylem poles
     maize_b73.set_value("xylem", "protoxylem_diameter",      0.016)
     maize_b73.set_value("xylem", "protoxylem_cluster_width", 0.021)
     maize_b73.set_value("xylem", "protoxylem_cluster_height", 0.021)

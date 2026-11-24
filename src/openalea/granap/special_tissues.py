@@ -28,11 +28,12 @@ The cell-relative nature is why these stay below the tissue abstraction — see
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+import shapely
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
 from openalea.granap.cell_class import Cell
-from openalea.granap.cell_manager import CellManager
+from openalea.granap.cell_manager import CellManager, set_polygons
 from openalea.granap.generate_cell import CellGenerator
 from openalea.granap.geometry_collection import GeometryProcessor
 
@@ -78,6 +79,7 @@ def seat_air_spaces(
     *,
     protect_topology: bool = False,
     min_area: float = 1e-6,
+    snap=None,
 ) -> None:
     """Carve intercellular lacunae out of their host cells and insert them.
 
@@ -98,15 +100,15 @@ def seat_air_spaces(
     vertex is kept as part of a crooked wall (see ``CellGenerator._build_topology``);
     used for small mid-wall lacunae (the needle mesophyll rhombi) whose off-wall
     tips would otherwise let a neighbour be straightened across the notch.
+
+    The hosts are carved in bulk (the same GEOS difference on each). *snap*: the topology function the
+    simplification uses (an organ passes its own, Organ.section_topology).
     """
-    for cell in host_cells:
-        if cell.polygon is None:
-            continue
-        carved = cell.polygon.difference(air_union)
-        if not carved.is_empty and carved.area > min_area:
-            cell.polygon = carved
-        else:
-            cell.polygon = None
+    present = [cell for cell in host_cells if cell.polygon is not None]
+    if present:
+        carved = shapely.difference(np.array([cell.polygon for cell in present], dtype=object), air_union)
+        kept = ~shapely.is_empty(carved) & (shapely.area(carved) > min_area)
+        set_polygons(present, [c if k else None for c, k in zip(carved, kept)])
 
     id_cell = len(cell_manager.cells)
     for face in air_faces:
@@ -126,7 +128,7 @@ def seat_air_spaces(
             lacuna.protect_shape = True
         cell_manager.cells.append(lacuna)
 
-    cell_manager.cells = CellGenerator.simplify_cells(cell_manager.cells)
+    cell_manager.cells = CellGenerator.simplify_cells(cell_manager.cells, snap=snap)
 
 
 def place_resin_duct(
