@@ -79,7 +79,9 @@ dependencies = [
     "roifile >=2023.8",      # roi_organ
     "lxml >=5,<7",           # no usage in src/ — kept for compatibility
     "scikit-learn >=1.3,<2", # no usage in src/ — kept for compatibility
-    "openalea.metafspm",     # the MPG every section is generated into (openalea.granap.metafspm); brings numpy,
+    # pinned: the openalea3 channel's stale 0.1.0 (rc) and 0.1.1.dev (dev) predate the release numbering
+    # and would win over the release; bump at each metafspm release
+    "openalea.metafspm ==0.0.1",     # the MPG every section is generated into (openalea.granap.metafspm); brings numpy,
                              # pandas, numba (the component's kernels), pyyaml, openalea.mtg and openalea.encoding3d
 ]
 
