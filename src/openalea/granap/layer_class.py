@@ -1,6 +1,7 @@
 """
 Layer module for plant anatomy representation.
-Provides the Layer class representing individual tissue layers.
+Provides the Layer class representing individual tissue layers,
+and LayerPolygon which carries the computed geometry for one layer ring.
 """
 
 from dataclasses import dataclass, field
@@ -8,6 +9,60 @@ from typing import Optional, Dict, Any, List
 from openalea.granap.cell_class import Cell
 from shapely.geometry import Polygon
 from openalea.granap.input_data import LayerDefaultParams
+
+
+@dataclass
+class LayerPolygon:
+    """
+    Typed representation of a layer polygon produced by _build_layer_polygons.
+
+    Replaces the ad-hoc plain dicts that were previously passed around.
+    Backward-compatible dict-style access (``lp["key"]``, ``lp.get("key")``)
+    is kept so callers that have not yet been migrated continue to work.
+    """
+    name: str
+    polygon: Polygon
+    cell_diameter: float
+    cell_width: float = 0.0
+    id_layer: int = 0
+    shift: float = 0.0
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
+    axial_height: Optional[float] = None
+    # Transfusion-tissue fields (needle-specific)
+    transfusion_type: bool = False
+    tt_diameter: float = 0.0
+    tp_diameter: float = 0.0
+    p_tt: float = 0.0
+    # Voronoi seed points per cell-border ellipse (CellGenerator.cell_border).
+    # None (default) reproduces the historical fixed rule there (15 points
+    # for an anisotropic cell, 10 for an isotropic one) -- see cell_border's
+    # own docstring. Set to round a ring's cells off more (more seeds
+    # tracking the ellipse more closely -> pinched point-contacts instead of
+    # flat shared walls), at the cost of more seeds and slower tessellation;
+    # see example/needle/pinus_nigra.py's endodermis for the motivating case.
+    n_points: Optional[int] = None
+    # Keep every boundary vertex of a fused cell instead of collapsing it to
+    # one vertex per neighbour-group junction (CellGenerator.simplify_cells).
+    # False (default) reproduces historical behaviour for every existing
+    # caller. Needed for n_points (above) to have a visible rounding effect --
+    # see example/needle/pinus_nigra.py's endodermis for the motivating case.
+    protect_shape: bool = False
+
+    # ------------------------------------------------------------------
+    # Backward-compatible dict-style access
+    # ------------------------------------------------------------------
+    def __getitem__(self, key: str):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default=None):
+        return getattr(self, key, default)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
 
 
 @dataclass
@@ -29,6 +84,9 @@ class Layer:
     order: int = 0
     cell_width: Optional[float] = None
     shift: float = 0.0
+    # Out-of-plane (longitudinal) cell extent used by the 3D extrusion
+    # pipeline (see generate_cell_3d). None = unset; 2D is unaffected.
+    axial_height: Optional[float] = None
     additional_params: Dict[str, Any] = field(default_factory=dict)
     cells: List[Cell] = field(default_factory=list)
     polygon: Optional[Polygon] = None
@@ -55,6 +113,8 @@ class Layer:
         }
         if self.cell_width is not None:
             result["cell_width"] = self.cell_width
+        if self.axial_height is not None:
+            result["axial_height"] = self.axial_height
         result.update(self.additional_params)
         return result
     
@@ -69,13 +129,14 @@ class Layer:
         order = data.get("order", _defaults.order_default)
         cell_width = data.get("cell_width", data.get("cell_diameter", _defaults.cell_width_default))
         shift = data.get("shift", _defaults.shift_default)
-        
+        axial_height = data.get("axial_height", _defaults.axial_height_default)
+
         # Everything else goes into additional_params
         additional_params = {
-            k: v for k, v in data.items() 
-            if k not in ["name", "cell_diameter", "n_layers", "order", "cell_width", "shift"]
+            k: v for k, v in data.items()
+            if k not in ["name", "cell_diameter", "n_layers", "order", "cell_width", "shift", "axial_height"]
         }
-        
+
         return cls(
             name=name,
             cell_diameter=cell_diameter,
@@ -83,6 +144,7 @@ class Layer:
             order=order,
             cell_width=cell_width,
             shift=shift,
+            axial_height=axial_height,
             additional_params=additional_params
         )
     

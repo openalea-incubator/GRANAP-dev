@@ -1,11 +1,11 @@
 """
 Normalized shape functions and a rescale wrapper for GRANAP gradients.
 
-Convention: every shape function maps t ∈ [0, ∞) → (0, 1] with f(0) = 1.
+Convention: every shape function maps t in [0, inf) -> (0, 1] with f(0) = 1.
 Use `rescale` to stretch any shape function to a physical range [lo, hi]:
 
     scaled(0) = hi  (centre)
-    scaled(∞) = lo  (edge)
+    scaled(inf) = lo  (edge)
 """
 
 from __future__ import annotations
@@ -14,12 +14,12 @@ from typing import Callable
 
 
 def five_pl(t: float, c: float = 0.5, b: float = 3.0, m: float = 1.0) -> float:
-    """Normalized 5-parameter logistic: f(0) = 1, f(∞) → 0.
+    """Normalized 5-parameter logistic: f(0) = 1, f(inf) -> 0.
 
     Parameters
     ----------
     t : float
-        Normalized position ≥ 0 (e.g. radial distance, 0 = centre).
+        Normalized position >= 0 (e.g. radial distance, 0 = centre).
     c : float
         Inflection point — position of the steepest descent.
     b : float
@@ -38,7 +38,7 @@ def linear(t: float, **_) -> float:
     Parameters
     ----------
     t : float
-        Normalized position ∈ [0, 1].
+        Normalized position in [0, 1].
     """
     return float(max(0.0, 1.0 - t))
 
@@ -62,7 +62,7 @@ def rescale(
     func :
         Normalized shape function with signature ``func(t, **shape_kwargs) -> float``.
     lo :
-        Output value at the outer boundary (where func → 0).
+        Output value at the outer boundary (where func -> 0).
     hi :
         Output value at the centre (where func = 1, t = 0).
     **shape_kwargs :

@@ -3,11 +3,9 @@ Cell generator module for creating cells using Voronoi tessellation.
 """
 
 import numpy as np
-import pandas as pd
 import shapely as sp
-import geopandas as gpd
 from scipy.spatial import Voronoi
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from shapely.geometry import Polygon, Point, MultiPolygon, MultiPoint
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -15,7 +13,37 @@ from scipy.spatial import cKDTree
 
 from openalea.granap.geometry_collection import GeometryProcessor
 from openalea.granap.cell_class import Cell
-from openalea.granap.cell_manager import CellManager
+from openalea.granap.cell_manager import CellManager, set_polygons
+
+
+_EXACT_MEAN = 8                  # numpy's mean is a sequential sum below 8 values
+
+
+def _exterior_rings(polys, cell_ids):
+    """GRANAP's phase-0 input: per kept cell, its exterior ring's coordinates, closing vertex dropped."""
+    kept_ids, shapes = [], []
+    for cid, poly in zip(cell_ids, polys):
+        if poly is None or poly.is_empty:
+            continue
+        if isinstance(poly, MultiPolygon):
+            poly = max(poly.geoms, key=lambda g: g.area)
+        kept_ids.append(cid)
+        shapes.append(poly)
+    if not shapes:
+        return [], []
+    coords, index = sp.get_coordinates(sp.get_exterior_ring(np.asarray(shapes, dtype=object)),
+                                            return_index=True)
+    bounds = np.searchsorted(index, np.arange(len(shapes) + 1))
+    rings, ids = [], []
+    for k, cid in enumerate(kept_ids):
+        ring = coords[bounds[k]:bounds[k + 1]]
+        if len(ring) and ring[0, 0] == ring[-1, 0] and ring[0, 1] == ring[-1, 1]:
+            ring = ring[:-1]
+        if len(ring) < 3:
+            continue
+        rings.append(ring)
+        ids.append(cid)
+    return ids, rings
 
 
 class CellGenerator:
@@ -27,8 +55,8 @@ class CellGenerator:
     """
     
     @staticmethod
-    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float, 
-                      cell_width: float = 0, shift: float = 0) -> np.ndarray:
+    def cells_on_layer(layer_polygon: Polygon, cell_diameter: float,
+                      cell_width: float = 0, shift: float = 0, rng=None) -> np.ndarray:
         """
         Generate cell center positions along a layer polygon.
         
@@ -52,7 +80,8 @@ class CellGenerator:
         # Calculate shift distance: shift of 1.0 = 1 cell width displacement
         # Randomized between 0 and shift * cell_width
         max_shift = shift * cell_width
-        shift_distance = np.random.uniform(0, max_shift) if max_shift > 0 else 0
+        _rng = rng if rng is not None else np.random
+        shift_distance = _rng.uniform(0, max_shift) if max_shift > 0 else 0
         
         cells_coords = GeometryProcessor.resample_coords(
             np.column_stack((x, y)), n_cells, shift_distance=shift_distance
@@ -60,26 +89,40 @@ class CellGenerator:
         return cells_coords
     
     @staticmethod
-    def cell_border(cell_coords: np.ndarray, cell_height: float, 
-                   cell_width: float = 0) -> List[np.ndarray]:
+    def cell_border(cell_coords: np.ndarray, cell_height: float,
+                   cell_width: float = 0, n_points: Optional[int] = None) -> List[np.ndarray]:
         """
         Generate border points for elliptical cells.
-        
+
+        Each cell is drawn as an ellipse of ``n_points`` Voronoi seeds
+        sharing one ``id_group``; seeds of a group fuse into one cell after
+        tessellation, so ``n_points`` controls how closely the fused cell
+        polygon tracks the ellipse -- more points = a rounder cell with
+        pinched point-contacts rather than flat shared walls (see
+        ``LayerPolygon.n_points`` / ``example/needle/pinus_nigra.py``'s
+        endodermis, the case that motivated making this configurable).
+
         Args:
             cell_coords: Array of cell center coordinates
             cell_height: Height of cells
             cell_width: Width of cells (0 = use height)
-        
+            n_points: Seed count per cell border. None (default) reproduces
+                the historical fixed rule: 15 for an anisotropic cell
+                (``cell_height != cell_width``), 10 for an isotropic one --
+                every existing caller that doesn't pass this explicitly
+                keeps exactly that behaviour.
+
         Returns:
             List of arrays, each containing border points for one cell
         """
         if len(cell_coords) == 0:
             return []
-        
+
         major_axis = cell_height
         minor_axis = cell_width if cell_width != 0 else cell_height
 
-        n_points = 15 if cell_height != cell_width else 10
+        if n_points is None:
+            n_points = 15 if cell_height != cell_width else 10
 
         # Vectorised orientation: next/prev neighbours via array roll
         next_coords = np.roll(cell_coords, -1, axis=0)
@@ -100,28 +143,30 @@ class CellGenerator:
         return cells_border
     
     @staticmethod
-    def generate_cells_info(layers_polygons: List[Dict[str, Any]], 
-                           center: Point):
+    def generate_cells_info(layers_polygons: List[Dict[str, Any]],
+                           center: Point, rng=None):
         """
         Generate cell information from layer polygons.
-        
+
         Args:
             layers_polygons: List of layer polygon dictionaries
             center: Center point for angle/radius calculations
-        
+
         Returns:
             pd.DataFrame of cells
         """
         all_cells = CellManager()
         id_cell = 1
         id_group = 1
-        
+
+        _rng = rng if rng is not None else np.random
         for i_layer, layer in enumerate(layers_polygons):
             cells_coords = CellGenerator.cells_on_layer(
                 layer["polygon"],
                 layer["cell_diameter"],
                 layer["cell_width"],
-                layer.get("shift", 0)
+                layer.get("shift", 0),
+                rng=rng,
             )
 
             if layer.get("transfusion_type"):
@@ -141,11 +186,12 @@ class CellGenerator:
                 tp_d = layer["tp_diameter"]
                 p_tt = layer["p_tt"]
                 layer_poly = layer["polygon"]
+                sp.prepare(layer_poly)  # speeds the repeated covers() queries below
 
                 for i, cell_coord in enumerate(cells_coords[1:]):
                     seed_type = (
                         "transfusion tracheid"
-                        if np.random.random() < p_tt
+                        if _rng.random() < p_tt
                         else "transfusion parenchyma"
                     )
                     d = tt_d if seed_type == "transfusion tracheid" else tp_d
@@ -160,8 +206,12 @@ class CellGenerator:
                         (cell_coord[0] - center.x) ** 2
                         + (cell_coord[1] - center.y) ** 2
                     )
-                    for border_point in border_pts[1:]:
-                        if not layer_poly.covers(Point(border_point[0], border_point[1])):
+                    # Vectorised covers(): one C call for the whole ring of border
+                    # points instead of constructing a shapely Point per point.
+                    ring = border_pts[1:]
+                    covered = sp.covers(layer_poly, sp.points(ring[:, 0], ring[:, 1]))
+                    for border_point, is_covered in zip(ring, covered):
+                        if not is_covered:
                             continue
                         new_cell = Cell(
                             type=seed_type,
@@ -185,13 +235,25 @@ class CellGenerator:
                     cells_coords,
                     layer["cell_width"] * 0.7,
                     layer["cell_diameter"] * 0.7,
+                    n_points=layer.get("n_points"),
                 )
             else:
                 layer_cell_borders = CellGenerator.cell_border(
                     cells_coords,
                     layer["cell_diameter"] * 0.7,
                     layer["cell_width"] * 0.7,
+                    n_points=layer.get("n_points"),
                 )
+
+            # The next-inner layer polygon is loop-invariant — fetch and prepare
+            # it once (prepared geometry speeds the per-group contains() queries).
+            next_inner = (
+                layers_polygons[i_layer + 1]["polygon"]
+                if i_layer + 1 < len(layers_polygons)
+                else None
+            )
+            if next_inner is not None:
+                sp.prepare(next_inner)
 
             for i, cell_coord in enumerate(cells_coords[1:]):
                 if layer["name"] == "parenchyma":
@@ -208,13 +270,24 @@ class CellGenerator:
                         radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                         (cell_coord[1] - center.y)**2),
                         area=np.pi * (layer["cell_diameter"] / 2)**2,
+                        protect_shape=layer.get("protect_shape", False),
                     )
                     all_cells.add_cell(new_cell)
                     id_cell += 1
                     id_group += 1
                 else:
                     cell_border_points = layer_cell_borders[i]
-                    for border_point in cell_border_points[1:]:
+                    ring = cell_border_points[1:]
+                    # Discard border points that bleed into the next inner layer —
+                    # they would create seeds inside the wrong tissue zone.  One
+                    # vectorised contains_xy() call replaces a shapely Point per point.
+                    if next_inner is not None and len(ring):
+                        bleeds = sp.contains_xy(next_inner, ring[:, 0], ring[:, 1])
+                    else:
+                        bleeds = np.zeros(len(ring), dtype=bool)
+                    for border_point, bleed in zip(ring, bleeds):
+                        if bleed:
+                            continue
                         new_cell = Cell(
                             type=layer["name"],
                             x=border_point[0],
@@ -228,11 +301,12 @@ class CellGenerator:
                             radius=np.sqrt((cell_coord[0] - center.x)**2 +
                                             (cell_coord[1] - center.y)**2),
                             area=np.pi * (layer["cell_diameter"] / 2)**2,
+                            protect_shape=layer.get("protect_shape", False),
                         )
                         all_cells.add_cell(new_cell)
                         id_cell += 1
                     id_group += 1
-        
+
         all_cells = CellGenerator.resolve_cell_border_overlaps(all_cells)
         return all_cells
 
@@ -255,7 +329,7 @@ class CellGenerator:
             return all_cells
 
         # --- build group metadata ----------------------------------------
-        groups: dict = {}  # id_group → {id_layer, indices, poly}
+        groups: dict = {}  # id_group -> {id_layer, indices, poly}
         for idx, cell in enumerate(all_cells.cells):
             g = cell.id_group
             if g not in groups:
@@ -267,16 +341,23 @@ class CellGenerator:
                 }
             groups[g]["indices"].append(idx)
 
-        # build a convex-hull footprint for each group
-        for meta in groups.values():
-            pts = [
-                (all_cells.cells[i].x, all_cells.cells[i].y)
-                for i in meta["indices"]
-            ]
-            if len(pts) >= 3:
-                meta["poly"] = MultiPoint(pts).convex_hull.buffer(meta["cell_diameter"] * 0.2)
-            elif pts:
-                r = all_cells.cells[meta["indices"][0]].diameter / 2
+        # build a convex-hull footprint for each group (all at once: the same GEOS multipoint, hull and buffer per group)
+        cells_list = all_cells.cells
+        metas = list(groups.values())
+        hulled = [m for m in metas if len(m["indices"]) >= 3]
+        if hulled:
+            index = np.concatenate([np.full(len(m["indices"]), k) for k, m in enumerate(hulled)])
+            coords = np.array([(cells_list[i].x, cells_list[i].y) for m in hulled for i in m["indices"]], dtype=float)
+            footprints = sp.buffer(sp.convex_hull(sp.multipoints(coords, indices=index)),
+                                   np.array([m["cell_diameter"] * 0.2 for m in hulled]), quad_segs=16)   # the method's default
+            for m, footprint in zip(hulled, footprints):
+                m["poly"] = footprint
+        for meta in metas:
+            if len(meta["indices"]) >= 3:
+                continue
+            pts = [(cells_list[i].x, cells_list[i].y) for i in meta["indices"]]
+            if pts:
+                r = cells_list[meta["indices"][0]].diameter / 2
                 meta["poly"] = Point(pts[0]).buffer(r)
             else:
                 meta["poly"] = None
@@ -299,21 +380,26 @@ class CellGenerator:
         tree = STRtree(polys)
 
         ids_to_remove: set = set()
+        cells = all_cells.cells
         for i, high in enumerate(valid_groups):
             high_poly = polys[i]
+            sp.prepare(high_poly)  # repeated contains() queries below
             # query returns indices whose bounding boxes overlap high_poly
             for j in tree.query(high_poly):
                 if j <= i:          # only lower-priority groups
                     continue
-                low = valid_groups[j]
                 if not high_poly.intersects(polys[j]):
                     continue
-                for idx in low["indices"]:
-                    if idx in ids_to_remove:
-                        continue
-                    cell = all_cells.cells[idx]
-                    if high_poly.contains(Point(cell.x, cell.y)):
-                        ids_to_remove.add(idx)
+                idxs = [idx for idx in valid_groups[j]["indices"]
+                        if idx not in ids_to_remove]
+                if not idxs:
+                    continue
+                # One vectorised contains_xy() for the whole low group instead of
+                # constructing a shapely Point per candidate cell.
+                xs = np.fromiter((cells[idx].x for idx in idxs), float, len(idxs))
+                ys = np.fromiter((cells[idx].y for idx in idxs), float, len(idxs))
+                inside = sp.contains_xy(high_poly, xs, ys)
+                ids_to_remove.update(idx for idx, ins in zip(idxs, inside) if ins)
 
         if ids_to_remove:
             all_cells.cells = [
@@ -324,13 +410,38 @@ class CellGenerator:
         return all_cells
 
     @staticmethod
-    def voronoi_diagram(all_cells: CellManager) -> Voronoi:
-        # get all x and y coordinates
-        for cell in all_cells.cells:
-            cell.jitter()
-        cells_df = pd.DataFrame([cell.cell_to_dict() for cell in all_cells.cells])
-        vor = Voronoi(cells_df[["x", "y"]])
-        return vor
+    def voronoi_diagram(all_cells: CellManager, rng=None) -> Voronoi:
+        """Jitter every seed slightly, then tessellate.
+
+        The jitter is one positional block indexed by list order, so a seed's
+        offset depends on how many seeds precede it and inserting or removing one
+        seed perturbs every later cell.  Deriving it from each seed's own position
+        instead was tried and reverted: it changed no golden census (so it fixed
+        nothing measurable) while re-rolling the jitter realisation, which
+        ``CellSetOrgan``'s graft could not survive at the time -- it held only at
+        ``seed=0`` and produced 22-49 interior border walls at seeds 1-5 even on
+        unmodified code.  That graft fragility has since been fixed (see
+        ``test_no_interior_border_walls_at_any_seed``), so the blocker is gone;
+        revisiting this now costs a deliberate golden refreeze rather than a
+        correctness regression.
+        """
+        cells = all_cells.cells
+        n = len(cells)
+        if n == 0:
+            return Voronoi(np.empty((0, 2)))
+        _rng = rng if rng is not None else np.random
+        shift = 0.0001
+        xs    = np.fromiter((c.x for c in cells),        float, n)
+        ys    = np.fromiter((c.y for c in cells),        float, n)
+        diams = np.fromiter((c.diameter for c in cells), float, n)
+        draws = _rng.uniform(-shift, shift, size=(n, 2))
+        xs = xs + draws[:, 0] * diams
+        ys = ys + draws[:, 1] * diams
+        angles = np.arctan2(ys, xs)
+        radii  = np.sqrt(xs ** 2 + ys ** 2)
+        for c, x, y, a, r in zip(cells, xs, ys, angles, radii):
+            c.x, c.y, c.angle, c.radius = x, y, a, r
+        return Voronoi(np.column_stack((xs, ys)))
     
     @staticmethod
     def process_voronoi_groups(all_cells: CellManager, 
@@ -355,154 +466,118 @@ class CellGenerator:
                 cell.polygon = None
             else:
                 vertices = vor.vertices[region_vertices_indices]
-                poly = sp.Polygon(vertices)
-                if not poly.is_valid:
-                    poly = poly.buffer(0)
-                cell.polygon = poly
+                # Voronoi regions are convex by construction, hence always valid,
+                # so the per-polygon is_valid check + buffer(0) repair (~one call
+                # per seed) was a no-op in the normal case — dropped (perf
+                # proposal F1). The -1 / empty-region guard above already handles
+                # unbounded / degenerate regions.
+                cell.polygon = sp.Polygon(vertices)
             
             if cell.type != "outside" and cell.polygon is not None:
                 updated_cells.add_cell(cell)
                 
-        # Group handling is trickier with objects. 
-        # The original code used GeoPandas dissolve to union polygons by group.
-       
-        # return a list of 'biological' cells (one per group).
-        
-        cell_dicts = [c.cell_to_dict() for c in updated_cells.cells]
-        for i, c in enumerate(updated_cells.cells):
-            cell_dicts[i]['geometry'] = c.polygon
-            
-        gdf = gpd.GeoDataFrame(cell_dicts)
-        
-        # Dissolve by id_group
-        grouped_gdf = gdf.dissolve(by="id_group", as_index=False)
-        grouped_gdf["area"] = grouped_gdf.geometry.area
-        
-        # Now create new Cell objects from the grouped results
+        # Union the per-seed Voronoi polygons into one 'biological' cell per
+        # id_group. This replaces a GeoPandas ``dissolve(by="id_group")`` — at
+        # ~500k seeds the GeoDataFrame build + pandas groupby + iterrows was
+        # ~13s of pure overhead (see doc/performance_proposals.md (1)). Plain
+        # Python grouping + shapely ``unary_union`` (what dissolve calls
+        # internally) is byte-identical: dissolve's default aggregation is
+        # 'first' per group, so the representative cell is the first-seen one;
+        # groups are emitted in sorted id_group order to match dissolve.
+        groups: Dict[Any, List] = {}
+        rep: Dict[Any, Cell] = {}
+        for c in updated_cells.cells:
+            groups.setdefault(c.id_group, []).append(c.polygon)
+            rep.setdefault(c.id_group, c)  # first-seen == dissolve's 'first'
+
         final_cells = CellManager()
-        for _, row in grouped_gdf.iterrows():
-            # Find a representative original cell to get non-geometric attributes
-            # (or use the aggregated ones, but dissolve aggregates strategy might be needed for some?)
-            # simple 'first' strategy is default for dissolve.
-            
-            new_cell = Cell(
-                type=row['type'],
-                x=row['x'], # Centroid might be better?
-                y=row['y'],
-                diameter=row['cell_diameter'],
-                id_cell=row['id_cell'],
-                id_layer=row['id_layer'],
-                id_group=row['id_group'],
-                angle=row['angle'],
-                radius=row['radius'],
-                area=row['area'],
-                polygon=row['geometry']
-            )
-            final_cells.add_cell(new_cell)
-            
+        for gid in sorted(groups):
+            poly = unary_union(groups[gid])
+            r = rep[gid]
+            final_cells.add_cell(Cell(
+                type=r.type,
+                x=r.x,
+                y=r.y,
+                diameter=r.diameter,
+                id_cell=r.id_cell,
+                id_layer=r.id_layer,
+                id_group=gid,
+                track_id=r.track_id,      # carry the tracked-vessel id through grouping
+                angle=r.angle,
+                radius=r.radius,
+                area=poly.area,
+                polygon=poly,
+                protect_topology=getattr(r, "protect_topology", False),
+                protect_shape=getattr(r, "protect_shape", False),
+            ))
+
         return final_cells
     
     @staticmethod
-    def _build_topology(
-        polys: List,
-        cell_ids: List[Any],
-    ) -> Tuple[Dict[Any, List[tuple]], Dict[tuple, set], Dict[tuple, set], set]:
+    def _build_topology(polys: List, cell_ids: List[Any], protect_ids: Optional[set] = None):
         """
-        Build the shared vertex/edge topology for a collection of polygons.
+        Build the shared vertex/edge topology for a collection of polygons: vertex snapping (phase 0), the vertex and
+        edge maps (phase 1), the junctions (phase 2). Returns (cell_vkeys, vertex_to_cells, edge_to_cells, junction_set,
+        protected_shape_set):
 
-        Runs KD-tree vertex snapping (Phase 0), then constructs
-        ``cell_vkeys``, ``vertex_to_cells``, ``edge_to_cells`` (Phase 1),
-        and finally identifies junction vertices (Phase 2).
+          * cell_vkeys            {cell_id: [snapped (x, y) tuples]}
+          * vertex_to_cells       {(x, y): set(cell_ids)}
+          * edge_to_cells         {edge_key: set(cell_ids)}
+          * junction_set          set of (x, y) junction vertices
+          * protected_shape_set   set of (x, y) vertices of the protect_ids cells (kept by the simplification)
 
-        This helper is called by both :meth:`simplify_cells` and
-        ``Organ._build_anatnetwork`` so the logic lives in one place.
-
-        Args:
-            polys:     Sequence of Shapely geometries (``None`` entries are
-                       skipped).  Index position must correspond to
-                       ``cell_ids``.
-            cell_ids:  Opaque identifier for each polygon (list/GeoDataFrame
-                       index, integer position, …).
-
-        Returns:
-            ``(cell_vkeys, vertex_to_cells, edge_to_cells, junction_set)``
-
-            * ``cell_vkeys``       – ``{cell_id: [snapped (x,y) tuples]}``
-            * ``vertex_to_cells``  – ``{(x,y): set(cell_ids)}``
-            * ``edge_to_cells``    – ``{edge_key: set(cell_ids)}``
-            * ``junction_set``     – set of ``(x,y)`` junction vertices
+        The rings are read in bulk; each snapping cluster's mean is summed in order below 8 values, as numpy's mean does
+        (an explicit loop: Python's sum() of floats is compensated since 3.12); phase 2 reads each vertex's places in its
+        rings from a map built in phase 1.
         """
         n_dec = 6
 
-        # ------------------------------------------------------------------
         # Phase 0 — collect raw vertices and snap nearby ones together
-        # ------------------------------------------------------------------
-        raw_cell_data: Dict[Any, list] = {}
-        all_raw_verts: list = []
-        vert_global_idx: Dict[Any, List[int]] = {}
-
-        for cid, poly in zip(cell_ids, polys):
-            if poly is None or poly.is_empty:
-                continue
-            if isinstance(poly, MultiPolygon):
-                poly = max(poly.geoms, key=lambda g: g.area)
-            coords = list(poly.exterior.coords)
-            if coords[0] == coords[-1]:
-                coords = coords[:-1]
-            if len(coords) < 3:
-                continue
-            indices = []
-            for x, y in coords:
-                indices.append(len(all_raw_verts))
-                all_raw_verts.append((x, y))
-            raw_cell_data[cid] = coords
-            vert_global_idx[cid] = indices
-
-        if not all_raw_verts:
-            return {}, {}, {}, set()
-
-        coords_arr = np.array(all_raw_verts)
+        ids, rings = _exterior_rings(polys, cell_ids)
+        if not rings:
+            return {}, {}, {}, set(), set()
+        sizes = np.array([len(r) for r in rings], dtype=np.int64)
+        coords_arr = np.concatenate(rings)
+        starts = np.cumsum(sizes) - sizes
         kd_tree = cKDTree(coords_arr)
 
-        # Snap tolerance: 1 % of 5th-percentile edge length
-        edge_lengths = []
-        for coords in raw_cell_data.values():
-            n = len(coords)
-            for k in range(n):
-                el = np.hypot(
-                    coords[(k + 1) % n][0] - coords[k][0],
-                    coords[(k + 1) % n][1] - coords[k][1],
-                )
-                if el > 0:
-                    edge_lengths.append(el)
-        snap_tol = (
-            np.percentile(edge_lengths, 5) * 0.01
-            if edge_lengths
-            else 1e-4
-        )
+        # Snap tolerance: 1 % of 5th-percentile edge length (the edges in GRANAP's order)
+        following = np.arange(coords_arr.shape[0]) + 1
+        following[starts + sizes - 1] = starts
+        diffs = coords_arr - coords_arr[following]
+        all_edges = np.hypot(diffs[:, 0], diffs[:, 1])
+        all_edges = all_edges[all_edges > 0]
+        snap_tol = np.percentile(all_edges, 5) * 0.01 if all_edges.size else 1e-4
 
-        # Cluster nearby vertices → canonical snapped coordinate
-        canonical: List = [None] * len(all_raw_verts)
-        visited_snap = [False] * len(all_raw_verts)
-        for i in range(len(all_raw_verts)):
+        neighbors = kd_tree.query_ball_point(coords_arr, snap_tol, workers=-1)
+        xs, ys = coords_arr[:, 0].tolist(), coords_arr[:, 1].tolist()
+        n_raw = len(xs)
+        canonical: List = [None] * n_raw
+        visited_snap = [False] * n_raw
+        for i in range(n_raw):
             if visited_snap[i]:
                 continue
-            cluster = kd_tree.query_ball_point(coords_arr[i], snap_tol)
-            cx = float(np.mean(coords_arr[cluster, 0]))
-            cy = float(np.mean(coords_arr[cluster, 1]))
+            cluster = neighbors[i]
+            n = len(cluster)
+            if n < _EXACT_MEAN:                      # not sum(): Python's is compensated for floats (3.12+)
+                cx = cy = 0.
+                for c in cluster:
+                    cx += xs[c]
+                    cy += ys[c]
+                cx, cy = cx / n, cy / n
+            else:
+                cx, cy = float(np.mean(coords_arr[cluster, 0])), float(np.mean(coords_arr[cluster, 1]))
             snapped = (round(cx, n_dec), round(cy, n_dec))
             for ci in cluster:
                 visited_snap[ci] = True
                 canonical[ci] = snapped
 
-        # ------------------------------------------------------------------
         # Phase 1 — build cell_vkeys, vertex_to_cells, edge_to_cells
-        # ------------------------------------------------------------------
         vertex_to_cells: Dict[tuple, set] = {}
         cell_vkeys: Dict[Any, List[tuple]] = {}
-
-        for cid, gidxs in vert_global_idx.items():
-            vkeys_raw = [canonical[gi] for gi in gidxs]
+        places: Dict[tuple, list] = {}                     # vertex -> [(cell, position in its ring)]
+        for cid, start, size in zip(ids, starts.tolist(), sizes.tolist()):
+            vkeys_raw = canonical[start:start + size]
             vkeys: List[tuple] = [vkeys_raw[0]]
             for vk in vkeys_raw[1:]:
                 if vk != vkeys[-1]:
@@ -512,75 +587,147 @@ class CellGenerator:
             if len(vkeys) < 3:
                 continue
             cell_vkeys[cid] = vkeys
-            for vk in vkeys:
+            for i, vk in enumerate(vkeys):
                 vertex_to_cells.setdefault(vk, set()).add(cid)
+                places.setdefault(vk, []).append((cid, i))
+
+        def edge_key(a, b):
+            return (b, a) if b < a else (a, b)              # tuple(sorted((a, b)))
 
         edge_to_cells: Dict[tuple, set] = {}
         for cid, vkeys in cell_vkeys.items():
             n = len(vkeys)
             for i in range(n):
-                ek = tuple(sorted((vkeys[i], vkeys[(i + 1) % n])))
-                edge_to_cells.setdefault(ek, set()).add(cid)
+                edge_to_cells.setdefault(edge_key(vkeys[i], vkeys[(i + 1) % n]), set()).add(cid)
 
-        # ------------------------------------------------------------------
         # Phase 2 — identify junction vertices
-        # ------------------------------------------------------------------
         junction_set: set = set()
-
-        for vk in vertex_to_cells:
-            if len(vertex_to_cells[vk]) >= 3:
+        for vk, owners in vertex_to_cells.items():
+            if len(owners) >= 3:
                 junction_set.add(vk)
                 continue
             incident_pairs: set = set()
-            for cid in vertex_to_cells[vk]:
+            for cid, i in places[vk]:
                 vks = cell_vkeys[cid]
                 n = len(vks)
-                for i in range(n):
-                    if vks[i] != vk:
-                        continue
-                    ek_prev = tuple(sorted((vks[(i - 1) % n], vk)))
-                    ek_next = tuple(sorted((vk, vks[(i + 1) % n])))
-                    if ek_prev in edge_to_cells:
-                        incident_pairs.add(frozenset(edge_to_cells[ek_prev]))
-                    if ek_next in edge_to_cells:
-                        incident_pairs.add(frozenset(edge_to_cells[ek_next]))
+                ek_prev = edge_key(vks[(i - 1) % n], vk)
+                ek_next = edge_key(vk, vks[(i + 1) % n])
+                if ek_prev in edge_to_cells:
+                    incident_pairs.add(frozenset(edge_to_cells[ek_prev]))
+                if ek_next in edge_to_cells:
+                    incident_pairs.add(frozenset(edge_to_cells[ek_next]))
             if len(incident_pairs) > 1:
                 junction_set.add(vk)
 
-        return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set
+        # keep track of the vertices that are protected
+        protected_shape_set: set = set()
+        if protect_ids:
+            for cid in protect_ids:
+                for vk in cell_vkeys.get(cid, ()):  # skip ids dropped in Phase 1
+                    protected_shape_set.add(vk)
+
+        return cell_vkeys, vertex_to_cells, edge_to_cells, junction_set, protected_shape_set
 
     @staticmethod
-    def simplify_cells(grouped_cells: List[Cell]) -> List[Cell]:
+    def remove_nested_cells(grouped_cells: List[Cell], min_overlap: float = 0.1) -> List[Cell]:
+        """Drop cells that sit (almost) entirely inside another cell, keeping the
+        bigger one.
+
+        Voronoi grouping can leave one group's cell overlapping and buried inside a
+        larger neighbour — e.g. a companion seeded right against a sieve, whose few
+        border points give it a Voronoi footprint the bigger cell's union swallows.
+        It then renders as one cell drawn inside another.
+
+        A cell ``i`` is treated as nested when a larger cell ``j`` contains ``i``'s
+        interior point *and* covers at least ``min_overlap`` of ``i``'s area — so
+        ordinary edge-sharing neighbours (whose overlap is ~0) are never touched.
+        The nested cell is removed and merged into the smallest such enclosing cell
+        (a no-op when it is already fully covered), keeping the larger cell intact.
         """
-        Simplify cell boundaries by retaining only junction vertices.
+        valid = [c for c in grouped_cells
+                 if c.polygon is not None and not c.polygon.is_empty]
+        if len(valid) < 2:
+            return grouped_cells
 
-        Delegates topology computation to :meth:`_build_topology` (Phases
-        0–2: KD-tree snapping, vertex/edge maps, junction detection), then
-        rebuilds each polygon keeping only its junction vertices (Phase 3).
+        polys = [c.polygon for c in valid]
+        areas = [p.area for p in polys]
+        tree  = STRtree(polys)
 
-        Args:
-            grouped_cells: List of Cell objects with polygon geometries.
+        # An interior point of a Voronoi-partitioned cell only falls inside another
+        # cell when the two genuinely overlap (nesting), so querying by that point
+        # keeps the (rare) candidate set tiny; the area check then confirms it.
+        parent = [None] * len(valid)
+        for i, poly in enumerate(polys):
+            pt = poly.representative_point()
+            best, best_area = None, None
+            for pos in tree.query(pt):
+                j = int(pos)
+                if j == i or areas[j] <= areas[i]:
+                    continue
+                if polys[j].contains(pt) and \
+                        poly.intersection(polys[j]).area >= min_overlap * areas[i]:
+                    if best is None or areas[j] < best_area:
+                        best, best_area = j, areas[j]
+            parent[i] = best
 
-        Returns:
-            The same list with simplified polygon geometries in place.
+        if not any(p is not None for p in parent):
+            return grouped_cells
+
+        def _ancestor(i):
+            while parent[i] is not None:
+                i = parent[i]
+            return i
+
+        merge_into: Dict[int, list] = {}
+        removed = set()
+        for i in range(len(valid)):
+            if parent[i] is not None:
+                removed.add(i)
+                merge_into.setdefault(_ancestor(i), []).append(polys[i])
+
+        result = [c for c in grouped_cells if c.polygon is None or c.polygon.is_empty]
+        for i, c in enumerate(valid):
+            if i in removed:
+                continue
+            if i in merge_into:
+                c.polygon = unary_union([c.polygon, *merge_into[i]])
+                c.area = c.polygon.area
+            result.append(c)
+        return result
+
+    @staticmethod
+    def simplify_cells(grouped_cells, snap=None):
+        """
+        Simplify cell boundaries by retaining only junction (and protected) vertices; the same list, in place. Each
+        polygon is rebuilt keeping its junction (and protected) vertices, all polygons at once (the same GEOS rings and
+        polygons, validated in bulk). *snap*: the topology function (default CellGenerator._build_topology; an organ
+        passes its own, Organ.section_topology, which reads the topology it stored and caches what it computed).
         """
         polys = [c.polygon for c in grouped_cells]
         cell_ids = list(range(len(grouped_cells)))
 
-        cell_vkeys, _, _, junction_set = CellGenerator._build_topology(
-            polys, cell_ids
+        # Cells flagged ``protect_shape`` (the needle mesophyll air-space rhombi) keep
+        # every boundary vertex here; ``protect_topology`` alone (e.g. the substomatal
+        # chamber) only matters later for air-network wiring, not shape simplification.
+        protect_ids = {
+            idx for idx, cell in enumerate(grouped_cells)
+            if getattr(cell, "protect_shape", False)
+        }
+
+        cell_vkeys, _, _, junction_set, protected_shape_set = (snap or CellGenerator._build_topology)(
+            polys, cell_ids, protect_ids=protect_ids or None
         )
 
         if not cell_vkeys:
             return grouped_cells
 
-        # Phase 3 — rebuild each polygon keeping only junction vertices
-        for idx, cell in enumerate(grouped_cells):
+        # Phase 3 — rebuild each polygon keeping only junction and protected vertices (all rings at once)
+        rows, coords, ring_of = [], [], []
+        for idx in range(len(grouped_cells)):
             if idx not in cell_vkeys:
                 continue
-
             vkeys = cell_vkeys[idx]
-            simplified = [vk for vk in vkeys if vk in junction_set]
+            simplified = [vk for vk in vkeys if (vk in junction_set or vk in protected_shape_set)]
 
             if len(simplified) < 3:
                 simplified = vkeys
@@ -588,12 +735,16 @@ class CellGenerator:
             ring_coords = list(simplified)
             if ring_coords[0] != ring_coords[-1]:
                 ring_coords.append(ring_coords[0])
+            coords.extend(ring_coords)
+            ring_of.extend([len(rows)] * len(ring_coords))
+            rows.append(idx)
 
-            new_poly = Polygon(ring_coords)
-            if not new_poly.is_valid:
-                new_poly = new_poly.buffer(0)
-            cell.polygon = new_poly
-
+        rings = sp.linearrings(np.asarray(coords, dtype=float), indices=np.asarray(ring_of, dtype=np.int64))
+        new_polys = sp.polygons(rings)
+        invalid = np.flatnonzero(~sp.is_valid(new_polys))
+        for i in invalid:
+            new_polys[i] = new_polys[i].buffer(0)
+        set_polygons([grouped_cells[idx] for idx in rows], new_polys)
         return grouped_cells
 
     @staticmethod
@@ -610,11 +761,14 @@ class CellGenerator:
         width = stomata_setting["width"]
         depth = stomata_setting["depth"]
         sub_chamber = stomata_setting["sub_chamber"]
+        sunken = bool(stomata_setting.get("sunken", False))
 
         # get unique id_group of the cells
         id_groups = [cell.id_group for cell in cells]
         id_groups = np.unique(id_groups)
         cell = cells[0] # template cell
+        guard_cell_diameter = stomata_setting.get("guard_cell_diameter") or cell.width
+        guard_cell_aspect = stomata_setting.get("guard_cell_aspect", 0.5)
 
         triplet = CellManager()
         triplet.cells = cells
@@ -658,14 +812,14 @@ class CellGenerator:
             return local_to_global_poly(pts)
     
         # Create guard cells
-        gc_rx = cell.width / 2
-        gc_ry = cell.width / 2
+        gc_rx = guard_cell_diameter / 2
+        gc_ry = guard_cell_diameter / 2
         gc1_x = -width / 2
         gc2_x = width / 2
         gc_y = depth
-    
-        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry/2)
-        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry/2)
+
+        guard_cell_1_ellipse = create_local_ellipse(gc1_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
+        guard_cell_2_ellipse = create_local_ellipse(gc2_x, gc_y, gc_rx, gc_ry * guard_cell_aspect)
     
         rect_w = cell.width * 0.6
         rect_h = depth
@@ -673,39 +827,54 @@ class CellGenerator:
     
         guard_cell_1_rect = create_local_rectangle(gc1_x - 0.2 * cell.width, rect_y, rect_w, rect_h)
         guard_cell_2_rect = create_local_rectangle(gc2_x + 0.2 * cell.width, rect_y, rect_w, rect_h)
-    
-        guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
-        guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
-    
-        guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
-        guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
-    
+
+        caps: list = []
+        if sunken:
+            # Sunken stomata: guard cells sit deeper in a pit, capped by
+            # epidermal cells (the rectangles) arching over them -- so the
+            # guard cell itself is the ellipse only, and the rectangles are
+            # returned separately as epidermis caps.
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_ellipse, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_ellipse, 0, 0.5)
+            caps = [guard_cell_1_rect, guard_cell_2_rect]
+        else:
+            guard_cell_1_poly = unary_union([guard_cell_1_ellipse, guard_cell_1_rect])
+            guard_cell_2_poly = unary_union([guard_cell_2_ellipse, guard_cell_2_rect])
+
+            guard_cell_1_poly = GeometryProcessor.buffer_polygon(guard_cell_1_poly, 0, 0.5)
+            guard_cell_2_poly = GeometryProcessor.buffer_polygon(guard_cell_2_poly, 0, 0.5)
+
         # Create sub-stomatal chamber
         chamber_rx = width
         chamber_ry = sub_chamber
         chamber_y = gc_y
         sub_stomatal_chamber = create_local_ellipse(0, chamber_y, chamber_rx * 0.75, chamber_ry)
-    
+
         # Create pore
         pore_w = width
         if pore_w < 0:
             pore_w = 0.005  # fallback
         pore_h = chamber_y
         pore_poly = create_local_rectangle(0, pore_h / 2, pore_w, pore_h)
-    
-        # Combine geometries
-        spacing_poly = pore_poly.difference(unary_union([guard_cell_1_poly, guard_cell_2_poly]))
-        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, guard_cell_1_poly, guard_cell_2_poly]))
-    
+
+        # Combine geometries. Difference against the guard cells *and* the caps
+        # (when sunken) so that, once the rectangles leave the guard-cell
+        # union, the pore/chamber don't balloon upward into the space the
+        # rectangles vacated -- the pore must stay the narrow antechamber
+        # between the two caps.
+        occupied = unary_union([guard_cell_1_poly, guard_cell_2_poly, *caps])
+        spacing_poly = pore_poly.difference(occupied)
+        sub_stomatal_chamber = sub_stomatal_chamber.difference(unary_union([spacing_poly, occupied]))
+
         if hasattr(sub_stomatal_chamber, 'geoms'):
             sub_stomatal_chamber = sub_stomatal_chamber.geoms[0]
-    
-        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly])
-    
+
+        carve_poly = unary_union([guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, *caps])
+
         if debug:
             print(carve_poly.area)
 
-        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly
+        return carve_poly, guard_cell_1_poly, guard_cell_2_poly, sub_stomatal_chamber, spacing_poly, caps
 
     
     

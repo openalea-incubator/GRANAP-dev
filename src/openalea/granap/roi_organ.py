@@ -10,6 +10,7 @@ import roifile
 from openalea.granap.organ_class import Organ
 from openalea.granap.cell_class import Cell
 from openalea.granap.geometry_collection import GeometryProcessor
+from openalea.granap.layer_class import LayerPolygon
 
 class RoiOrgan(Organ):
     """
@@ -94,22 +95,13 @@ class RoiOrgan(Organ):
 
         self.all_cells.cells = new_cells
 
-    def generate_cells(self) -> gpd.GeoDataFrame:
+    def _generate_pipeline(self) -> None:
         """
-        Override the default Voronoi/geometric generation of Granap.
-        Returns a GeoDataFrame mapping the loaded ROI cells.
+        Override the default Voronoi/geometric generation of Granap: the cells are the loaded ROIs
+        (Organ.generate_cells writes them into the MPG).
         """
-        if self._cells_gdf is None:
-            if not self.all_cells.cells:
-                self._load_rois()
-                
-            cell_dicts = [c.cell_to_dict() for c in self.all_cells.cells]
-            for i, c in enumerate(self.all_cells.cells):
-                cell_dicts[i]['geometry'] = c.polygon
-                
-            self._cells_gdf = gpd.GeoDataFrame(cell_dicts) if cell_dicts else gpd.GeoDataFrame()
-        
-        return self._cells_gdf
+        if not self.all_cells.cells:
+            self._load_rois()
         
     def _create_base_shape(self) -> Polygon:
         """Define the basic shape of the root/needle from loaded polygons."""
@@ -127,7 +119,7 @@ class RoiOrgan(Organ):
 
     # ---------- Stubs for purely abstract methods in Organ ----------
     
-    def _which_layer_for_vascular(self, layers_polygons: List[Dict[str, Any]]):
+    def _which_layer_for_vascular(self, layers_polygons: List[LayerPolygon]):
         pass
 
     def _create_vascular_tissue(self, polygon: Polygon):
@@ -140,8 +132,8 @@ class RoiOrgan(Organ):
         pass
 
     def _create_central_layers(self, current_polygon: Polygon,
-                               params: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                               params: List[Dict[str, Any]]) -> List[LayerPolygon]:
         return []
 
-    def reshape_layers(self, layers_polygons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def reshape_layers(self, layers_polygons: List[LayerPolygon]) -> List[LayerPolygon]:
         return layers_polygons

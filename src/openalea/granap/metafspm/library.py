@@ -1,0 +1,381 @@
+"""
+The anatomy library: one template per anatomy class, generated once, instantiated on every
+segment of the class.
+
+    key = class_key(class_inputs, mtg, segment)                   a class: its class inputs' binned values
+    keys = class_keys(class_inputs, mtg, segments)                 the classes of many segments, in bulk
+    library = AnatomyLibrary(class_parameters={key: {"cortex": {"n_layers": 3}}})   # a class's own parameters
+    template = library.template(mtg, key, plant=overrides)        generated at the first request (per plant overrides),
+                                                                kept in g's registry (mtg.objects("anatomy_templates"))
+    template = template_by_index(mtg, index)                      a segment's (its anatomy_template)
+    written = template.instantiate(mtg, segment)                   the segment's own Layers, Cells, protoplasts,
+                                                                 walls, junctions and Connections, in bulk
+
+A template keeps the section as tables (one row per vertex, its properties); a segment's copy holds its own vertices
+and properties (its state), but not the geometry: its Cells point to the template's polygons and rings
+(template, template_row), stored once per class.
+
+The templates are the MPG's objects (metafspm's data_structure.objects / mtg.objects: one registry per DataStructure, no
+module-level one): keyed by their index, a number of their content (template_index: the organ class, its parameters,
+the seed and the class key), so that a template has the same index in every population and process; checkpointed with
+the MPG, each once (a shared part, without its generated organ: saved_template).
+"""
+import copy
+import dataclasses
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from openalea.granap.input_data import OPTIONAL_SECTIONS, OrganInputData
+from openalea.granap.metafspm.build import JUNCTION, PROTOPLAST, WALL, _props
+from openalea.granap.metafspm.vessels import vessel_ids
+
+GEOMETRY = ("cell__polygon", "boundary")          # kept once, in the template
+TEMPLATES = "anatomy_templates"                   # the name of the MPG's registry of templates (mtg.objects)
+LINKS = ("n_id_a", "n_id_b")                       # rewritten per instance
+SKIP = GEOMETRY + LINKS + ("cell_uid", "scale", "edge_type", "isanchor")
+
+
+@dataclass(frozen=True)
+class ClassInput:
+    """
+    One dimension of an anatomy class: a SubOrgan input variable (declared by the anatomy component, given by the
+    architecture model), binned. A segment's class is the tuple of its class inputs' binned values.
+
+      variable   the SubOrgan property (e.g. "radius")
+      width      the bin width, in the unit of value * factor (0: one bin, the variable is not read)
+      factor     the variable's value times factor gives the binned quantity (e.g. radius in m -> diameter in mm: 2000)
+      target     (GRANAP section, field) set to the binned value in the class's parameters (e.g. ("cortex", "n_layers")),
+                 or None: the class is keyed only (the class's own parametrization says what differs)
+      compute    a function (mtg, segment) -> value computing the variable from the segment's inputs instead of reading
+                 it (e.g. the distance from the root-shoot junction, from the segments' lengths)
+    """
+    variable: str
+    width: float = 0.
+    factor: float = 1.
+    target: tuple = None
+    compute: object = None
+
+    def binned(self, value) -> float:
+        return 0. if self.width <= 0 else round(round(float(value) * self.factor / self.width) * self.width, 9)
+
+    def value(self, mtg, segment) -> float:
+        if self.width <= 0:
+            return 0.
+        if self.compute is not None:
+            return self.binned(self.compute(mtg, segment))
+        values = mtg.view(self.variable)                           # read vertex by vertex: the column
+        if segment not in values:
+            raise KeyError(f"class input '{self.variable}': no value on segment {segment} (an input the architecture "
+                           f"model gives)")
+        return self.binned(values[segment])
+
+    def values(self, mtg, segments) -> list:
+        """value() of each of *segments* (ascending or not), the variable read in one bulk read (mtg.values_at)."""
+        segments = np.asarray(segments, dtype=np.int64)
+        if self.width <= 0:
+            return [0.] * segments.size
+        if self.compute is not None:
+            return [self.binned(self.compute(mtg, segment)) for segment in segments.tolist()]
+        unique, inverse = np.unique(segments, return_inverse=True)
+        found, values = mtg.values_at(self.variable, unique)
+        if found.size != unique.size:
+            missing = int(np.setdiff1d(unique, found)[0])
+            raise KeyError(f"class input '{self.variable}': no value on segment {missing} (an input the architecture "
+                           f"model gives)")
+        binned = [self.binned(value) for value in values.tolist()]
+        return [binned[i] for i in inverse.reshape(-1).tolist()]
+
+
+def class_key(class_inputs, mtg, segment) -> tuple:
+    """A segment's anatomy class: its class inputs' binned values."""
+    return tuple(c.value(mtg, segment) for c in class_inputs)
+
+
+def class_keys(class_inputs, mtg, segments) -> list:
+    """class_key of each of *segments*, each class input read in one bulk read."""
+    columns = [c.values(mtg, segments) for c in class_inputs]
+    return list(zip(*columns)) if columns else [()] * len(segments)
+
+
+def class_targets(class_inputs, key) -> dict:
+    """The class inputs' parameter overrides of the class *key* ({section: {field: binned value}})."""
+    out = {}
+    for c, value in zip(class_inputs, key):
+        if c.target is not None and c.width > 0:
+            section, field_name = c.target
+            out.setdefault(section, {})[field_name] = value
+    return out
+
+
+def merged(*overrides) -> dict:
+    """{section: {field: value}} overrides applied in order (the later win)."""
+    out = {}
+    for layer in overrides:
+        for section, values in (layer or {}).items():
+            out.setdefault(section, {}).update(values)
+    return out
+
+
+def _hashable(value):
+    """*value* as a hashable key: dicts as sorted (key, value) tuples, lists and sets as tuples, recursively (a
+    field's value may be a dict, e.g. a size distribution)."""
+    if isinstance(value, dict):
+        return tuple(sorted((k, _hashable(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_hashable(v) for v in (sorted(value) if isinstance(value, set) else value))
+    return value
+
+
+def _frozen(overrides) -> tuple:
+    return tuple(sorted((section, _hashable(values)) for section, values in (overrides or {}).items()))
+
+
+def preset_parameters(preset: str):
+    """A parameters(key, overrides=...) function on an OrganInputData preset (e.g. "for_monocot_stem"): the preset
+    unchanged, then the class's overrides (as default_root_parameters for roots)."""
+    def parameters(key, base: OrganInputData = None, overrides: dict = None) -> OrganInputData:
+        return default_root_parameters(key, base=getattr(OrganInputData, preset)() if base is None else base,
+                                       overrides=overrides)
+    parameters.__name__ = f"{preset}_parameters"
+    return parameters
+
+
+def default_root_parameters(key, base: OrganInputData = None, overrides: dict = None) -> OrganInputData:
+    """
+    A root's parameters for the class *key*: *base* (default OrganInputData.for_root()) unchanged, then *overrides*
+    ({param: {field: value}}, e.g. {"stele": {"thickness": 0.2}, "cortex": {"n_layers": 3}}) set on it. No rule
+    derives parameters from the class (F-P3a, your answer b): a class whose anatomy differs (a thinner lateral, a
+    maturing segment) says so in its own parametrization (AnatomyLibrary's class_parameters). A section the preset
+    lacks but GRANAP's optional ones (input_data.OPTIONAL_SECTIONS: cell_wall_thickness) is added with its defaults
+    first.
+    """
+    data = OrganInputData.for_root() if base is None else copy.deepcopy(base)
+    for name, values in (overrides or {}).items():
+        if data.get(name) is None and name in OPTIONAL_SECTIONS:
+            data.params.append(OPTIONAL_SECTIONS[name]())
+        for field_name, value in values.items():
+            data.set_value(name, field_name, value)
+    return data
+
+
+def _vertex_props(mtg, vids, skip=SKIP) -> dict:
+    """{property: (local rows, values)} of the vertices *vids*, the entries present only."""
+    vids = np.asarray(vids, dtype=np.int64)
+    order = np.argsort(vids, kind="stable")
+    ordered = vids[order]
+    out = {}
+    for name, column in mtg.properties().items():
+        if name in skip:
+            continue
+        found, values = column.at(ordered)                     # in bulk, in the order of the column's keys
+        if found.any():
+            out[name] = (order[found], values.tolist())
+    return out
+
+
+@dataclass
+class Template:
+    """A generated section as tables, ready to be instantiated on segments."""
+    key: tuple
+    index: int
+    layers: dict                       # properties of the Layers
+    cell_layer: np.ndarray             # the Layer (local index) of each Cell, in cell order
+    cells: dict                        # properties of the Cells
+    protoplasts: dict
+    apoplast: dict
+    connections: dict
+    links: np.ndarray                  # (n_connections, 2) local node indices: protoplasts first, then apoplast
+    polygons: list                     # the cells' polygons, shared by every instance
+    rings: dict                        # {cell row: snapped ring}, shared
+    organ: object = field(repr=False, default=None)
+    _sections: dict = field(repr=False, default_factory=dict, compare=False)
+
+    def __getstate__(self) -> dict:
+        """Its fields: the caches made from them (its triangles, its checkpoint copy) are rebuilt."""
+        return {name: value for name, value in self.__dict__.items() if not name.startswith("_cache_")}
+
+    @classmethod
+    def from_organ(cls, organ, key, index) -> "Template":
+        """The section of a generated MPG-backed organ (its stored network included), with vessel ids."""
+        organ.generate_section()
+        mtg, w = organ.mpg, organ._mpg_written
+        cells, protoplasts, apoplast, connections = w["cells"], w["protoplasts"], w["apoplast"], w["connections"]
+        layer_index = {int(v): i for i, v in enumerate(w["layers"])}
+        ids = vessel_ids(organ)
+        cell_props = _vertex_props(mtg, cells)
+        proto_props = _vertex_props(mtg, protoplasts)
+        rows = np.arange(len(cells))
+        for name in ("vessel_id", "pole_id", "family", "angle", "relative_radius"):
+            for props in (cell_props, proto_props):
+                props[name] = (rows, ids[name].tolist())
+        tracked = [(r, c.track_id) for r, c in enumerate(organ.all_cells.cells) if c.track_id is not None]
+        if tracked:                                              # the series' tracked vessels, for the junctions
+            proto_props["track_id"] = (np.array([r for r, _ in tracked], dtype=np.int64), [t for _, t in tracked])
+        local = {int(v): i for i, v in enumerate(list(protoplasts) + list(apoplast))}
+        ends = np.asarray(connections, dtype=np.int64)
+        order = np.argsort(ends, kind="stable")
+        a, b = np.empty(ends.size), np.empty(ends.size)
+        a[order], b[order] = mtg.values_at("n_id_a", ends[order])[1], mtg.values_at("n_id_b", ends[order])[1]
+        links = np.array([[local[int(u)], local[int(v)]] for u, v in zip(a.tolist(), b.tolist())], dtype=np.int64)
+        boundary = mtg.view("boundary")
+        return cls(key=key, index=index, layers=_vertex_props(mtg, w["layers"]),
+                   cell_layer=np.array([layer_index[int(mtg.complex(c))] for c in cells], dtype=np.int64),
+                   cells=cell_props, protoplasts=proto_props, apoplast=_vertex_props(mtg, apoplast),
+                   connections=_vertex_props(mtg, connections), links=links,
+                   polygons=[mtg.view("cell__polygon").get(int(c)) for c in cells],
+                   rings={r: boundary[int(p)] for r, p in enumerate(protoplasts) if int(p) in boundary},
+                   organ=organ)
+
+    def section_template(self, extend=None, name: str = "", transform=None):
+        """
+        The template as metafspm's SectionTemplate (data_structure.instances), for instanced anatomies: one copy
+        instantiated in a scratch MPG, its pores' aperture unset (NaN, as update_anatomies sets a copy's), then
+        *extend*(mtg, segment, written) (e.g. a root section's soil node, created as on a copy; *name* tells the
+        variants apart), captured, then *transform*(captured) when given (e.g. a condensed section). Made once per
+        variant.
+        """
+        if name not in self._sections and transform is not None:
+            base = name.rsplit("+", 1)[0]
+            self._sections[name] = transform(self.section_template(extend, base), ("granap", self.index, name))
+        if name not in self._sections:
+            from openalea.metafspm.data_structure.instances import SectionTemplate
+            from openalea.metafspm.data_structure.mpg import MPG
+            scratch = MPG()
+            segment = scratch.add_root_at_scale(scratch.scales.SubOrgan)
+            first = scratch.last_vid + 1
+            written = self.instantiate(scratch, segment)
+            nodes = list(written["protoplasts"]) + list(written["apoplast"])
+            scratch.set_values("pore_width", nodes, [np.nan] * len(nodes))
+            scratch.set_values("pore_depth", nodes, [np.nan] * len(nodes))
+            if extend is not None:
+                extend(scratch, segment, written)
+            scratch.convert_properties_to_arraydict()
+            self._sections[name] = SectionTemplate.capture(scratch, segment, range(first, scratch.last_vid + 1),
+                                                           key=("granap", self.index, name))
+        return self._sections[name]
+
+    def instance(self, mtg, segment, extend=None, name: str = "", transform=None) -> dict:
+        """The segment's instance of the section (mtg.add_instance; *extend*, *name*: section_template's): the vids a
+        copy would get, by kind, without creating its vertices."""
+        return self.instance_of(mtg, segment, self.section_template(extend, name, transform))
+
+    def instance_of(self, mtg, segment, template) -> dict:
+        """The segment's instance of the SectionTemplate *template* (this template's, or one made from it, e.g. a
+        reduction's): its vids by kind."""
+        from openalea.metafspm.data_structure.instances import ANCHOR
+        vids = np.asarray(mtg.add_instance(segment, template), dtype=np.int64)
+        s = mtg.scales
+        compartment = template.scale == s.Compartment
+        out = {"layers": vids[template.scale == s.Layer].tolist(), "cells": vids[template.scale == s.Cell].tolist(),
+               "protoplasts": vids[compartment & (template.complex >= 0)].tolist(),
+               "apoplast": vids[compartment & (template.complex == ANCHOR)].tolist(),
+               "connections": vids[template.scale == s.Connection].tolist(), "template": self.index}
+        return out
+
+    def full_section(self, name: str = "soil"):
+        """The full SectionTemplate a condensed variant was made from (its cells, for reconstructing them)."""
+        return self._sections[name]
+
+    def instantiate(self, mtg, segment) -> dict:
+        """The segment's own copy of the section, created in bulk; returns its vids by kind."""
+        s = mtg.scales
+        n_cells = len(self.cell_layer)
+        n_layers = len(next(iter(self.layers.values()))[0]) if self.layers else 0
+        layers = mtg.add_components_bulk(segment, n_layers, **_props(s.Layer))
+        cells = mtg.add_components_bulk(np.asarray(layers, dtype=np.int64)[self.cell_layer].tolist(), n_cells,
+                                      **_props(s.Cell, template=self.index, template_row=list(range(n_cells))))
+        protoplasts = mtg.add_components_bulk(cells, n_cells, **_props(
+            s.Compartment, template=self.index, template_row=list(range(n_cells))))
+        n_apo = len(self.apoplast["compartment_type"][0]) if "compartment_type" in self.apoplast else 0
+        apoplast = mtg.add_components_bulk(s.anchors[s.Compartment], n_apo, topo_parents=[segment] * n_apo,
+                                         **_props(s.Compartment))
+        nodes = np.asarray(list(protoplasts) + list(apoplast), dtype=np.int64)
+        n_edges = len(self.links)
+        connections = mtg.add_components_bulk(
+            s.anchors[s.Connection], n_edges, topo_parents=[segment] * n_edges,
+            **_props(s.Connection, n_id_a=nodes[self.links[:, 0]].tolist(), n_id_b=nodes[self.links[:, 1]].tolist()))
+        mtg.set_values("template_node", nodes, np.arange(nodes.size))          # each Compartment's place in the template
+        mtg.set_values("template", nodes, [self.index] * nodes.size)
+        for vids, table in ((layers, self.layers), (cells, self.cells), (protoplasts, self.protoplasts),
+                            (apoplast, self.apoplast), (connections, self.connections)):
+            vids = np.asarray(vids, dtype=np.int64)
+            for name, (rows, values) in table.items():
+                mtg.set_values(name, vids[rows], values)
+        return {"layers": layers, "cells": cells, "protoplasts": protoplasts, "apoplast": apoplast,
+                "connections": connections, "template": self.index}
+
+
+class AnatomyLibrary:
+    """
+    Templates by class, generated at their first request. A class's parameters: *parameters(key, overrides=...)*
+    (default: the root preset), with, in order, the plant's overrides (its scenario's root_anatomy, stem_anatomy or leaf_anatomy), the class's
+    own parametrization from *class_parameters* ({key: overrides} or a callable key -> overrides), and the class
+    inputs' targets; overrides are {section: {field: value}}. Templates are keyed by (class, plant's overrides): plants
+    parametrized alike share them.
+    """
+
+    def __init__(self, parameters=default_root_parameters, class_parameters=None, seed: int = 0, organ_class=None):
+        from openalea.granap.root_class import RootAnatomy
+        self.parameters, self.class_parameters, self.seed = parameters, class_parameters or {}, seed
+        self.organ_class = organ_class or RootAnatomy
+        self._indices = {}               # {entry: its template's index}: what an entry's parameters give (a memo)
+
+    def overrides(self, key) -> dict:
+        source = self.class_parameters
+        return (source(key) if callable(source) else source.get(key)) or {}
+
+    def template(self, mtg, key, plant: dict = None, targets: dict = None) -> Template:
+        """The template of class *key* for a plant with overrides *plant*, the class inputs' *targets* applied: the
+        MPG *mtg*'s (its registry, mtg.objects: a template of that content generated once per population), generated at
+        its first request."""
+        entry = key if not plant else (key, _frozen(plant))
+        templates = template_registry(mtg)
+        index = self._indices.get(entry)
+        if index is None:
+            parameters = self.parameters(key, overrides=merged(plant, self.overrides(key), targets))
+            index = self._indices[entry] = template_index(self.organ_class, parameters, self.seed, key)
+        else:
+            parameters = None
+        template = templates.get(index)
+        if template is None:
+            if parameters is None:
+                parameters = self.parameters(key, overrides=merged(plant, self.overrides(key), targets))
+            organ = self.organ_class(parameters, seed=self.seed)
+            template = Template.from_organ(organ, key, index)
+            templates.add(index, template)
+        return template
+
+
+def template_index(organ_class, parameters, seed, key) -> int:
+    """The index of a template: a number of its content (the organ class, its parameters, the seed, the class key),
+    the same in every population and process, below 2**52 (a segment's anatomy_template holds it exactly)."""
+    from openalea.metafspm.solve.memo import content_key
+    content = parameters.model_dump() if hasattr(parameters, "model_dump") else parameters
+    digest = content_key(f"{organ_class.__module__}.{organ_class.__qualname__}", content, int(seed), key)
+    return int(digest[:13], 16)
+
+
+def saved_template(template) -> Template:
+    """The copy of *template* a checkpoint saves: without its generated organ (for inspection only), its sections'
+    templates as known now; the same copy while its sections are the same (a shared part is not pickled again)."""
+    known = template.__dict__.get("_cache_saved")
+    if known is None or known[0] != len(template._sections):
+        copy = dataclasses.replace(template, organ=None, _sections=dict(template._sections))
+        known = template.__dict__["_cache_saved"] = (len(template._sections), copy)
+    return known[1]
+
+
+def template_registry(mtg):
+    """The MPG *mtg*'s registry of templates ({index: Template}, metafspm's mtg.objects / data_structure.objects)."""
+    return mtg.objects(TEMPLATES, saved=saved_template)
+
+
+def template_by_index(holder, index) -> Template:
+    """The template of index *index* (a segment's anatomy_template), of *holder*'s registry (an MPG or its
+    DataStructure)."""
+    template = holder.objects(TEMPLATES, saved=saved_template).get(int(index))
+    if template is None:
+        raise KeyError(f"no anatomy template of index {int(index)} in this population (its MPG's mtg.objects"
+                       f"('{TEMPLATES}'))")
+    return template

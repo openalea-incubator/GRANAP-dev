@@ -55,7 +55,9 @@ test:
 
   commands:
     - cd test
-    - pytest -v
+    # test/comparison/ checks GRANAP against its legacy source (openalea.granap.legacy): a development check, run
+    # locally by a plain `pytest`, not in CI
+    - pytest -v --ignore=comparison
 
 about:
   home: {{ home }}
