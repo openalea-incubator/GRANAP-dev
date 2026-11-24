@@ -27,7 +27,7 @@ dependencies:
   - pandoc                # the docs' notebooks (nbsphinx)
   # the MPG every section is generated into (src/openalea/granap/metafspm); brings numpy, pandas, numba, pyyaml,
   # openalea.mtg and openalea.encoding3d
-  - openalea.metafspm ==0.0.1
+  - openalea.metafspm >=0.0.1,<0.1
   - pytest
   - pip:
     # cv2.fitEllipse in geometry_collection. From pip rather than conda: every conda opencv 4.13 build needs
