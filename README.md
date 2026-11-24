@@ -11,27 +11,37 @@ the functional importance of monocotyledon root anatomy. *Plant Physiology* 182,
 
 ## Installation
 
-GRANAP's environment brings [metafspm](https://github.com/openalea/metafspm) (`openalea.metafspm`, from
-`openalea3`) and, through it, encoding3d. GRANAP itself (and MECHA, which uses GRANAP's anatomies) is installed from
-its clone (`pip install -e`).
-Until metafspm's `release2026` and encoding3d are published on `openalea3`, the environment's `openalea.metafspm`
-is an older version: install the two from their clones over it, as below (`--no-deps`: the environment already has
-their dependencies). Once they are published, the clones and those two lines are no longer needed.
+Prerequisites: [miniforge](https://conda-forge.org/download/) and [git](https://git-scm.com/downloads) (git for the
+developer installation only).
 
+### User installation
+
+In your environment:
 ```bash
-mkdir fspm && cd fspm                       # any folder: the repositories side by side
-git clone -b release2026 https://github.com/openalea/metafspm.git metafspm
-git clone -b other_platforms_bindings https://github.com/openalea/encoding3d.git encoding3d
-git clone -b to_metafspm https://github.com/openalea-incubator/GRANAP-dev.git GRANAP
+mamba install -c conda-forge -c openalea3 openalea.granap
+```
+or add `openalea.granap` to your environment's requirements. It brings
+[metafspm](https://github.com/openalea/metafspm) (`openalea.metafspm`) and, through it,
+[encoding3d](https://github.com/openalea/encoding3d).
 
-mamba env create -f GRANAP/conda/environment.yaml        # GRANAP's dependencies, openalea.metafspm included
-mamba activate granap
-pip install -e encoding3d --no-deps                      # until encoding3d is published
-pip install -e metafspm --no-deps                        # until metafspm's release2026 is published
-pip install -e GRANAP
+Then compile the numba kernels once (GRANAP's, metafspm's and the other installed ports'; a first run otherwise spends
+time compiling them):
+```bash
+python -m openalea.metafspm warm_up
 ```
 
-To work with MECHA too, clone it alongside and use its environment instead, which covers the three
+### Developer installation
+
+```bash
+git clone -b to_metafspm https://github.com/openalea-incubator/GRANAP-dev.git GRANAP
+cd GRANAP
+mamba env create -f conda/environment.yaml        # GRANAP's dependencies, openalea.metafspm included
+mamba activate granap
+pip install -e .
+python -m openalea.metafspm warm_up
+```
+
+To work with MECHA too, clone it alongside and use its environment instead, which covers GRANAP
 (`git clone -b to_metafspm https://github.com/openalea-incubator/MECHA-dev.git MECHA-dev`, then MECHA-dev's README).
 
 ## Getting started
@@ -54,11 +64,11 @@ the device (`"cpu"`, or `"cuda"` with CuPy, experimental: it should work on suit
 the graph systems' sparse solver (`linear_solver="superlu"` by default: one backend for every system, or a mapping
 giving each its own, by its qualified name `"Component._system"`, else a property it declares such as `"symmetric"`,
 else `"default"`; CHOLMOD, PARDISO and MUMPS optional, checked when the Scene is built). The default
-`Compute()` suits a laptop; metafspm's user guide (`docs/user.md`, *The run configuration*) and *Running on a GPU*
-(`docs/gpu.md`) give the details. Several plants on several cores: `Compute(processes=2)` (or `"auto"`) runs each population of the scene
+`Compute()` suits a laptop; metafspm's user guide (`doc/user.md`, *The run configuration*) and *Running on a GPU*
+(`doc/gpu.md`) give the details. Several plants on several cores: `Compute(processes=2)` (or `"auto"`) runs each population of the scene
 (`planting(..., population=[...])`, one name per plant) in its own process, with the bits of one process; it
 pays for several heavy plants (steps of a second or more), the default `processes=1` otherwise (metafspm's
-`docs/user.md`, *Populations in processes*). The component's numba kernels (`openalea.granap.metafspm.kernels`) compile at
+`doc/user.md`, *Populations in processes*). The component's numba kernels (`openalea.granap.metafspm.kernels`) compile at
 their first call: `python -m openalea.metafspm warm_up` compiles them once, with metafspm's and the other ports'.
 
 ### User tutorials
@@ -84,7 +94,7 @@ Run them locally with `jupyter lab example/tutorials/`.
 
 This version generates every cross-section into metafspm's multiscale plant graph (MPG): its cells, walls, junctions
 and hydraulic network are the MPG's vertices (`openalea.granap.metafspm`; the documentation in `doc/`: its components, equations, the legacy compared, performance). metafspm is
-therefore required, on its `release2026` branch, until it is merged.
+therefore required (`openalea.metafspm`, installed with GRANAP).
 The axial junctions between successive sections come from `junction_rules(mtg)`, metafspm wiring rules
 (`{"pairs": ..., "properties": junction_geometry(...)}`) each evaluated once over every pair of sections being
 wired (`vessel_junctions`: the pairs of two templates computed once, then given each pair's vids in one lookup);
